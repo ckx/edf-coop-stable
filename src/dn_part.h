@@ -1,5 +1,5 @@
 // The direct-link part of EDF6Coop: direct UDP links between the room's players, reliable game traffic and
-// held disconnects, all through EDF.dll's EOS imports. The plugin entry (multislot/src/plugin.cpp) starts it
+// held disconnects, all through EDF.dll's EOS imports. The plugin entry (game/plugin.cpp) starts it
 // once the game is known to be there, before the room part, so the room part's import wrappers sit in front
 // of these.
 #pragma once

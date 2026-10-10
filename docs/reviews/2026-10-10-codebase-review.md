@@ -10,6 +10,35 @@ Review date: 2026-10-10.
 
 `[C]` means the path is established from source. `[A]` means a material assumption remains (Wine behaviour, game behaviour, EOS behaviour); the assumption is named. Neither marker claims a reproduction.
 
+## Resolution (same day)
+
+Work that followed this review, by commit. The owner chose to keep only the networking fixes: rooms of four, the
+reliable upgrade, the disconnect hold, the direct link as a star around the host, the netcode gate with player sync
+and hit authority, the weapon guard, the peer-timeout fix and the crash log. Everything else was removed (48dbc93).
+Line references below are to the reviewed revision and no longer match.
+
+| Finding | Status |
+|---|---|
+| 1, 2 | Fixed (6efffa8). A link carries game data only while its peer answers within 1.5 s plus its round trip; what it had not delivered goes over EOS, and a host returns relay data it cannot deliver. A joiner's link comes up only on the host's first authentic datagram. GameNet `directoutage` covers it end to end. Crypto primitives and the link key derivation have known-answer tests. |
+| 3, 4, 5, 6, 7, 8, 11, 12, 13, 14 | Gone with the feature: traffic classes, compression, ExtraEnemies, Extend, rooms above four, member slots, All Forces, the updater. |
+| 9, 18, 19, 20 | Fixed (6efffa8): held closes are absorbed while held, reconnects back off to 30 s while the direct link is alive, a retired transport hands its inbox to the game and its undelivered data to EOS, AutoJoin keeps a working link when the host adds an address. |
+| 10 | Fixed (67f283b): a host advertises the addresses the routing table sends from when the adapter list does not name a physical adapter. |
+| 15 | Fixed (b490bc7). |
+| 16 | Fixed (48dbc93, 67f283b): Proton install steps in every readme, `dist/install.sh`. |
+| 17, 38, 40, 45 | Fixed (bb86d7f). |
+| 21 | Open [A]. Data the direct link hands to EOS is sent from the game's own send call; reconnect requests and lobby calls still run on the EOS tick. |
+| 22, 41, 42, 43, 46, 58, 66 | Open [A]. |
+| 23-27, 29, 30, 32-37, 39, 44, 47-52, 54, 55, 57, 59-62, 68, 70, 73 | Gone with the feature. |
+| 24, 28, 31 | Fixed (6efffa8): every direct-link datagram is tracked, completed fragments are forgotten oldest first, fragments go unordered. |
+| 53 | Fixed (2d69c87): the crash log leaves faults inside `Guarded` alone. |
+| 56 | Fixed (6efffa8): an unknown `Mode`, `Relay` or `HoldDisconnects` value is warned about. |
+| 63, 64, 65, 69, 71 | Fixed (67f283b and the layout commit): pinning and socket buffer limits are logged, a UPnP router that does not say its WAN address is warned about, `package.ps1` runs under pwsh on Linux, the firewall rule is added before the old one goes. |
+| 67, 72 | Fixed (48dbc93, 67f283b): the old menu and HUD files are deleted when ours, uninstall keeps the loader's license, the installer comment says what it does. |
+
+The layout follows a smaller version of the proposal below: `CMakeLists.txt` at the root, `src/` the transport,
+`game/` the game part, `tests/`, `tests/game/`, `tests/gamenet/`, `tools/`, `third_party/`, `dist/`, build output in
+`out/`. `src/eos_hooks.cpp` is about 1,300 lines and was not split.
+
 ## Summary
 
 The core fix is sound. `hookSendPacket` upgrades unreliable non-state datagrams to `ReliableUnordered` (`src/eos_hooks.cpp:2449-2465`), queues are enlarged without shrinking an unlimited queue, and held peers get `bAllowDelayedDelivery`. The reliable layer, fragment parsing, wire decoding and handshake crypto all hold up under review.

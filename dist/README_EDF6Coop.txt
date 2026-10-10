@@ -23,7 +23,7 @@ libraries; or "bash install.sh <game folder>"), then in Steam set the game's lau
     WINEDLLOVERRIDES="winmm=n,b" %command%
 Without it Wine loads its own winmm.dll and EDFModLoader never runs.
 If EDFModLoader (winmm.dll) is missing, the bundled one is installed: official v1.0.10 with a fix for a
-multithread bug (LOADER_FIX_JA.md). An existing winmm.dll is never overwritten, except one that is
+multithread bug (LOADER_FIX.md). An existing winmm.dll is never overwritten, except one that is
 byte for byte the official v1.0.10 file: it is replaced and kept as winmm.dll.bak-official.
 Coming from EDF6DirectNet / EDF6MultiSlot: their DLLs in Mods\Plugins are renamed to .disabled. Their
 settings files stay but are not read. The menu layout and HUD files that 2.5.0 and earlier wrote under Mods
@@ -56,4 +56,4 @@ below about 2 MB. Please attach it to bug reports.
 [Included]
 - EDF6Coop: Mods\Plugins\EDF6Coop.dll (MIT, LICENSE.txt; the game part, first written by momotori01 as
   EDF6MultiSlot, is public domain).
-- EDFModLoader by BlueAmulet (MIT, EDFModLoader_LICENSE.txt): winmm.dll, with the fix in LOADER_FIX_JA.md.
+- EDFModLoader by BlueAmulet (MIT, EDFModLoader_LICENSE.txt): winmm.dll, with the fix in LOADER_FIX.md.

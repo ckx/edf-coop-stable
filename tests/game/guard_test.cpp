@@ -1,5 +1,5 @@
 // Guarded (src/guard.h): faults inside the body come back as false on every toolchain, and nothing else is caught.
-#include "../src/guard.h"
+#include "../../game/guard.h"
 
 #include <windows.h>
 

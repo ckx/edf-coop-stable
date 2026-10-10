@@ -23,7 +23,7 @@
 #include <string>
 #include <vector>
 
-#include "../../../src/eos_min.h"
+#include "../../src/eos_min.h"
 
 #define EXPORT extern "C" __declspec(dllexport)
 

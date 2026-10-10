@@ -1,8 +1,0 @@
-build/
-build-*/
-dist/
-dist-*/
-release/
-# Official EDFModLoader, fetched and hash-checked by tools/fetch_modloader.py.
-third_party/EDFModLoader/winmm.dll
-__pycache__/

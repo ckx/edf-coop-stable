@@ -1,7 +1,7 @@
 ﻿param([switch]$Uninstall, [string]$GameDir = '')
 # EDF6Coop installer: finds the EARTH DEFENSE FORCE 6 folder via Steam and copies the plugin in.
-# EDF6Coop replaces EDF6DirectNet and EDF6MultiSlot: their DLLs are renamed to .disabled (never deleted), and
-# their settings files stay where they are.
+# EDF6Coop replaces EDF6DirectNet and EDF6MultiSlot: their DLLs are renamed to .disabled (a .disabled copy of an
+# earlier install is replaced), and their settings files stay where they are.
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $gameFolder = 'EARTH DEFENSE FORCE 6'

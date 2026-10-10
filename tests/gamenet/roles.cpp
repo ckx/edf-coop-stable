@@ -10,8 +10,8 @@
 #include "game.h"
 #include "machine.h"
 #include "net_shared.h"
-#include "../../../src/eos_min.h"
-#include "../../src/netplayer.h"
+#include "../../src/eos_min.h"
+#include "../../game/netplayer.h"
 
 namespace gamenet {
 namespace {

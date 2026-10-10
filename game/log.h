@@ -2,7 +2,7 @@
 #include <cstddef>
 #include <cstdint>
 
-#include "../../src/utf8.h"
+#include "../src/utf8.h"
 
 namespace multislot {
 

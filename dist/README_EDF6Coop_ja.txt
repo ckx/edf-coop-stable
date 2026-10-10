@@ -23,7 +23,7 @@ Linux（Steam Proton）：ZIP を全部展開してそこで "bash install.sh" �
     WINEDLLOVERRIDES="winmm=n,b" %command%
 にします。これがないと Wine が自前の winmm.dll を読み込み、EDFModLoader が動きません。
 EDFModLoader（winmm.dll）がなければ同梱のものを入れます：公式 v1.0.10 にマルチスレッドの不具合修正を
-加えたものです（LOADER_FIX_JA.md）。既存の winmm.dll は上書きしません。ただし公式 v1.0.10 とバイト単位で
+加えたものです（LOADER_FIX.md）。既存の winmm.dll は上書きしません。ただし公式 v1.0.10 とバイト単位で
 同じものだけは修正版に置き換え、元のファイルを winmm.dll.bak-official に保存します。
 EDF6DirectNet / EDF6MultiSlot からの更新：Mods\Plugins にあるそれらの DLL は .disabled に改名されます。古い設定
 ファイルは残りますが読み込まれません。2.5.0 までが Mods に書いたメニューレイアウトと HUD のファイル
@@ -55,4 +55,4 @@ EDF6Coop.ini の [DirectNet] Enabled=0：プラグインは自分で外れ、ゲ
 ■ 同梱物
 - EDF6Coop：Mods\Plugins\EDF6Coop.dll（MIT、LICENSE.txt。ゲーム部分は momotori01 さんが EDF6MultiSlot として
   書いたもので、パブリックドメインです）。
-- BlueAmulet さんの EDFModLoader（MIT、EDFModLoader_LICENSE.txt）：winmm.dll。LOADER_FIX_JA.md の修正入り。
+- BlueAmulet さんの EDFModLoader（MIT、EDFModLoader_LICENSE.txt）：winmm.dll。LOADER_FIX.md の修正入り。

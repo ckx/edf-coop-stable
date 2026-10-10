@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 
-#include "../src/netfeature.h"
+#include "../../game/netfeature.h"
 
 using namespace multislot;
 

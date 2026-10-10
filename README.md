@@ -35,7 +35,7 @@ Everything is on by default, except the direct link, which the host enables.
 
 1. Download `EDF6Coop-<version>.zip` from [Releases](https://github.com/hajisensai/edf-coop-stable/releases/latest) and **extract the whole archive** to any folder.
 2. Double-click **`INSTALL.bat`**. It finds EDF6 in your Steam library and installs.
-   - If EDFModLoader is not present, the bundled loader is installed: [BlueAmulet/EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) v1.0.10 (MIT) **with a fix for a multithread bug in the official build** (its call forwarders shared one target variable, so calls from several threads at once could jump to the wrong function; see [multislot/packaging/LOADER_FIX_JA.md](multislot/packaging/LOADER_FIX_JA.md)). An existing `winmm.dll` is never overwritten, with one exception: if it is byte for byte the official v1.0.10 file, it is replaced by the fixed build and the original is kept as `winmm.dll.bak-official`.
+   - If EDFModLoader is not present, the bundled loader is installed: [BlueAmulet/EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) v1.0.10 (MIT) **with a fix for a multithread bug in the official build** (its call forwarders shared one target variable, so calls from several threads at once could jump to the wrong function; see [dist/LOADER_FIX.md](dist/LOADER_FIX.md)). An existing `winmm.dll` is never overwritten, with one exception: if it is byte for byte the official v1.0.10 file, it is replaced by the fixed build and the original is kept as `winmm.dll.bak-official`.
    - If the game cannot be found, you are asked for the game folder (in your Steam library, right-click EDF6, Manage, Browse local files).
 3. Start the game from Steam as usual. The first start creates `Mods\Plugins\EDF6Coop.ini` (settings) and `EDF6Coop.log` (log).
 
@@ -175,13 +175,13 @@ Requires Windows x64, Visual Studio 2022 with *Desktop development with C++* (it
 
 ```powershell
 $env:EDF6_GAME_DIR = 'C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6'
-powershell -ExecutionPolicy Bypass -File build.ps1 -Test    # -> multislot\dist\EDF6Coop.dll
+powershell -ExecutionPolicy Bypass -File build.ps1 -Test    # -> out\EDF6Coop.dll
 powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coop-<version>.zip (+ .sha256)
 ```
 
 - `-Test` runs the tests: unit tests, loopback direct-link tests, and the tests against the game's code, which run rooms of several processes on the real `EDF.dll` with a fake EOS. Without the game those are reported as skipped; `-RequireGame` refuses to configure without it.
 - The game folder is only read.
-- `build.ps1` fetches the official EDFModLoader v1.0.10 `winmm.dll` (checked by SHA-256) and builds the race-fixed loader the package ships (`multislot/tools/fix_winmm_proxy.py`).
+- `build.ps1` fetches the official EDFModLoader v1.0.10 `winmm.dll` (checked by SHA-256) and builds the race-fixed loader the package ships (`tools/fix_winmm_proxy.py`).
 - `package.ps1` refuses a DLL of another version or one older than its sources.
 
 ### Linux
@@ -191,7 +191,7 @@ powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coo
 ```sh
 sudo dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
 export EDF6_GAME_DIR="$HOME/.local/share/Steam/steamapps/common/EARTH DEFENSE FORCE 6"
-./build.sh -t    # -> multislot/dist/EDF6Coop.dll; -r refuses to configure without EDF.dll
+./build.sh -t    # -> out/EDF6Coop.dll; -r refuses to configure without EDF.dll
 ```
 
 The Python tools run from a virtual environment `build.sh` makes in `.venv`. Release packages are built with `build.ps1` and `package.ps1` on Windows.
@@ -200,7 +200,7 @@ The Python tools run from a virtual environment `build.sh` makes in `.venv`. Rel
 
 Release packages are built on a machine with the game, so every test against the game's code runs. GitHub Actions runs the other tests (`.github/workflows/ci.yml`).
 
-1. Bump the version: `project(EDF6Coop VERSION x.y.z)` in `multislot/CMakeLists.txt` and the first line of the three bundled readmes `dist/README_EDF6Coop*.txt`.
+1. Bump the version: `project(EDF6Coop VERSION x.y.z)` in `CMakeLists.txt` and the first line of the three bundled readmes `dist/README_EDF6Coop*.txt`.
 2. Write the release notes `release-notes/<version>.md` (the body of the Release page and `RELEASE_NOTES_EDF6Coop.md` in the package).
 3. Commit to `main`, tag it and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 4. On the machine with the game, at that commit: `powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`. It runs `build.ps1 -Test -RequireGame` and `package.ps1`, then creates a **draft** Release with `EDF6Coop-<version>.zip` and its `.sha256` (without `-Upload` it only stages them in `release\upload-<version>\`).
@@ -210,8 +210,8 @@ Release packages are built on a machine with the game, so every test against the
 
 | Path | Contents |
 |---|---|
-| `multislot/src/plugin.cpp` | EDFModLoader entry point: reads `EDF6Coop.ini`, starts the transport part, patches `EDF.dll` |
-| `multislot/src/` | The game part: patches (weapon guard, peer timeout), netcode version gate, player sync, hit authority, crash log, log |
+| `game/plugin.cpp` | EDFModLoader entry point: reads `EDF6Coop.ini`, starts the transport part, patches `EDF.dll` |
+| `game/` | The game part: patches (weapon guard, peer timeout), netcode version gate, player sync, hit authority, crash log, log |
 | `src/config.*` | Settings and their comments (Chinese / Japanese / English after the Windows display language) |
 | `src/eos_min.h` | The EOS SDK structs in use (from the official 1.15.5 headers; the game uses 1.16.1) |
 | `src/eos_hooks.cpp`, `src/iat.*` | Patches the `EDF.dll` import table to take over EOS P2P and lobby calls |
@@ -219,10 +219,10 @@ Release packages are built on a machine with the game, so every test against the
 | `src/lobby_marker.*` | Lobby member attributes: who has the plugin, the host address |
 | `src/direct_net.*`, `src/reliable.*`, `src/wire.*`, `src/auth.*`, `src/fragment.*` | Direct link transport, fragments |
 | `src/netif.*`, `src/upnp.*` | Physical adapter detection, UPnP |
-| `multislot/CMakeLists.txt` | The build and the one version number (`project(EDF6Coop VERSION x.y.z)`) |
-| `multislot/packaging/` | Loader fix note shipped in the package |
-| `dist/` | Install scripts and bundled readmes (English / Chinese / Japanese) |
-| `tests/`, `multislot/tests/` | Tests |
+| `CMakeLists.txt` | The build and the one version number (`project(EDF6Coop VERSION x.y.z)`) |
+| `dist/` | Install scripts, bundled readmes (English / Chinese / Japanese) and the loader fix note |
+| `tests/` | Tests: the transport part; `tests/game/` the game part; `tests/gamenet/` rooms of several processes on the real `EDF.dll` |
+| `tools/`, `third_party/` | The loader fix tool and its inputs, the MSVC environment script; EDFModLoader's plugin header and license |
 
 ## Known limitations
 
@@ -236,7 +236,7 @@ Release packages are built on a machine with the game, so every test against the
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The bundled EDFModLoader is MIT; its license is in the package as `EDFModLoader_LICENSE.txt`. The game part (`multislot/`, first written by momotori01) is public domain ([Unlicense](multislot/LICENSE)).
+MIT, see [LICENSE](LICENSE). The bundled EDFModLoader is MIT; its license is in the package as `EDFModLoader_LICENSE.txt`. The game part (`game/`, first written by momotori01) is public domain ([Unlicense](game/LICENSE)).
 
 ## Acknowledgements
 

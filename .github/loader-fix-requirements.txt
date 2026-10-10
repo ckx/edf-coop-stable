@@ -1,4 +1,4 @@
-# What multislot/tools/fix_winmm_proxy.py needs (the CI workflow; local builds install the same), pinned by hash
+# What tools/fix_winmm_proxy.py needs (the CI workflow; local builds install the same), pinned by hash
 # (pip --require-hashes). The same versions as the build requirements in README.md.
 pefile==2024.8.26 \
     --hash=sha256:76f8b485dcd3b1bb8166f1128d395fa3d87af26360c2358fb75b80019b957c6f \

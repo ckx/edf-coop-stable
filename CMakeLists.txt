@@ -1,14 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-# EDF6Coop.dll: the game part (src/ here) and the transport part (../src) as one plugin.
+# EDF6Coop.dll: the transport part (src/) and the game part (game/) as one plugin.
 project(EDF6Coop VERSION 2.5.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Every file sees <windows.h> the same way.
 add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
 # The version EDFModLoader is told (PluginInfo) and the plugin's exported marker carry.
-add_compile_definitions(MULTISLOT_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} MULTISLOT_VERSION_MINOR=${PROJECT_VERSION_MINOR}
-                        MULTISLOT_VERSION_PATCH=${PROJECT_VERSION_PATCH})
-set(MULTISLOT_DIST "${CMAKE_SOURCE_DIR}/dist")
+add_compile_definitions(EDF6COOP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} EDF6COOP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
+                        EDF6COOP_VERSION_PATCH=${PROJECT_VERSION_PATCH})
+# Where the plugin and the race-fixed loader land (package.ps1 takes them from there).
+set(OUT_DIR "${CMAKE_SOURCE_DIR}/out")
 # PluginAPI.h from EDFModLoader (BlueAmulet, MIT).
 set(MODLOADER_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader")
 
@@ -30,7 +31,7 @@ endif()
 add_compile_options(${WARNINGS})
 
 # The transport part: EOS hooks, held disconnects, the direct link.
-set(TRANSPORT_DIR "${CMAKE_SOURCE_DIR}/../src")
+set(TRANSPORT_DIR "${CMAKE_SOURCE_DIR}/src")
 set(TRANSPORT_CORE log auth wire reliable direct_net netif config iat hold upnp fragment)
 list(TRANSFORM TRANSPORT_CORE PREPEND "${TRANSPORT_DIR}/")
 list(TRANSFORM TRANSPORT_CORE APPEND ".cpp")
@@ -43,30 +44,32 @@ add_library(TransportPart STATIC "${TRANSPORT_DIR}/lobby_marker.cpp" "${TRANSPOR
 target_link_libraries(TransportPart PUBLIC TransportCore)
 
 # The game part: patches to EDF.dll, the netcode version gate, player sync, hit authority, the log.
-add_library(GameCore STATIC src/log.cpp src/code.cpp src/midhook.cpp src/patches.cpp src/identity.cpp src/crashlog.cpp
-    src/coop.cpp src/peertimeout.cpp src/weaponguard.cpp src/lobbytexts.cpp src/netfeature.cpp src/hitauth.cpp
-    src/hitauthgame.cpp src/netplayer.cpp src/netplayer_game.cpp)
+set(GAME_CORE log code midhook patches identity crashlog coop peertimeout weaponguard lobbytexts netfeature hitauth
+    hitauthgame netplayer netplayer_game)
+list(TRANSFORM GAME_CORE PREPEND "game/")
+list(TRANSFORM GAME_CORE APPEND ".cpp")
+add_library(GameCore STATIC ${GAME_CORE})
 # "src/config.h" and the like name the transport part's headers (both parts have a log.h).
-target_include_directories(GameCore PUBLIC "${CMAKE_SOURCE_DIR}/..")
+target_include_directories(GameCore PUBLIC "${CMAKE_SOURCE_DIR}")
 target_link_libraries(GameCore PUBLIC TransportPart)
 
-add_library(EDF6Coop SHARED src/plugin.cpp)
+add_library(EDF6Coop SHARED game/plugin.cpp)
 target_include_directories(EDF6Coop PRIVATE ${MODLOADER_INCLUDE})
 target_link_libraries(EDF6Coop PRIVATE GameCore)
 if(MSVC)
     target_link_options(EDF6Coop PRIVATE /DYNAMICBASE /NXCOMPAT /INCREMENTAL:NO /PDBALTPATH:EDF6Coop.pdb)
 endif()
-set_target_properties(EDF6Coop PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MULTISLOT_DIST}")
+set_target_properties(EDF6Coop PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${OUT_DIR}")
 
 # The race-fixed EDFModLoader winmm.dll the package ships (tools/fix_winmm_proxy.py).
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-add_custom_command(OUTPUT "${MULTISLOT_DIST}/winmm.dll" "${CMAKE_BINARY_DIR}/loader-fix.json"
+add_custom_command(OUTPUT "${OUT_DIR}/winmm.dll" "${OUT_DIR}/loader-fix.json"
     COMMAND "${Python3_EXECUTABLE}" -B "${CMAKE_SOURCE_DIR}/tools/fix_winmm_proxy.py"
-        "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader/winmm.dll" "${MULTISLOT_DIST}/winmm.dll"
-        --manifest "${CMAKE_BINARY_DIR}/loader-fix.json"
+        "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader/winmm.dll" "${OUT_DIR}/winmm.dll"
+        --manifest "${OUT_DIR}/loader-fix.json"
     DEPENDS tools/fix_winmm_proxy.py tools/pe.py third_party/EDFModLoader/winmm.dll
     VERBATIM)
-add_custom_target(LoaderProxyFix ALL DEPENDS "${MULTISLOT_DIST}/winmm.dll" "${CMAKE_BINARY_DIR}/loader-fix.json")
+add_custom_target(LoaderProxyFix ALL DEPENDS "${OUT_DIR}/winmm.dll" "${OUT_DIR}/loader-fix.json")
 
 # --- Tests ---
 enable_testing()
@@ -92,37 +95,37 @@ function(unit_test name target source libraries)
     add_test(NAME ${name} COMMAND ${target} ${ARGN})
 endfunction()
 
-unit_test(DirectNet DirectNetTests ../tests/test_main.cpp TransportCore)
-unit_test(Fragments FragmentTests ../tests/fragment_test.cpp TransportCore)
-unit_test(GuardedFaults GuardTests tests/guard_test.cpp "")
-unit_test(MidFunctionHooks MidHookTests tests/midhook_test.cpp GameCore)
-unit_test(LogFileCap LogTests tests/log_test.cpp GameCore "${CMAKE_BINARY_DIR}/logtest")
-unit_test(CrashDump CrashDumpTests tests/crashdump_test.cpp GameCore "${CMAKE_BINARY_DIR}/crashdumptest")
+unit_test(DirectNet DirectNetTests tests/test_main.cpp TransportCore)
+unit_test(Fragments FragmentTests tests/fragment_test.cpp TransportCore)
+unit_test(GuardedFaults GuardTests tests/game/guard_test.cpp "")
+unit_test(MidFunctionHooks MidHookTests tests/game/midhook_test.cpp GameCore)
+unit_test(LogFileCap LogTests tests/game/log_test.cpp GameCore "${CMAKE_BINARY_DIR}/logtest")
+unit_test(CrashDump CrashDumpTests tests/game/crashdump_test.cpp GameCore "${CMAKE_BINARY_DIR}/crashdumptest")
 add_test(NAME CrashDumpInPlugin COMMAND CrashDumpTests "${CMAKE_BINARY_DIR}/crashdumptest" plugin)
-unit_test(PeerTimeoutKeepsRoom PeerTimeoutTests tests/peertimeout_test.cpp GameCore "${CMAKE_BINARY_DIR}/peer-timeout-test.log")
-unit_test(WeaponGuard WeaponGuardTests tests/weaponguard_test.cpp GameCore)
-unit_test(NetcodeVersionGate NetFeatureTests tests/netfeature_test.cpp GameCore)
-unit_test(NetPlayerSync NetPlayerTests tests/netplayer_test.cpp GameCore)
-unit_test(HitAuthority HitAuthTests tests/hitauth_test.cpp GameCore)
+unit_test(PeerTimeoutKeepsRoom PeerTimeoutTests tests/game/peertimeout_test.cpp GameCore "${CMAKE_BINARY_DIR}/peer-timeout-test.log")
+unit_test(WeaponGuard WeaponGuardTests tests/game/weaponguard_test.cpp GameCore)
+unit_test(NetcodeVersionGate NetFeatureTests tests/game/netfeature_test.cpp GameCore)
+unit_test(NetPlayerSync NetPlayerTests tests/game/netplayer_test.cpp GameCore)
+unit_test(HitAuthority HitAuthTests tests/game/hitauth_test.cpp GameCore)
 game_test(HitAuthorityGameCode HitAuthTests "${EDF_DLL}")
 
-unit_test(LoaderProxyRace LoaderProxyTests tests/loader_proxy_test.cpp ""
-    "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader/winmm.dll" "${MULTISLOT_DIST}/winmm.dll")
+unit_test(LoaderProxyRace LoaderProxyTests tests/game/loader_proxy_test.cpp ""
+    "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader/winmm.dll" "${OUT_DIR}/winmm.dll")
 add_dependencies(LoaderProxyTests LoaderProxyFix)
 
 # A plugin that refuses (Enabled=0, or no supported EDF.dll) is unloaded by EDFModLoader at once: nothing of it
 # may keep running. Needs no game: without EDF.dll in the process the plugin refuses as it does in an unsupported one.
-unit_test(PluginRefusalUnloads RefusalTests tests/refusal_test.cpp "" "$<TARGET_FILE:EDF6Coop>"
+unit_test(PluginRefusalUnloads RefusalTests tests/game/refusal_test.cpp "" "$<TARGET_FILE:EDF6Coop>"
     "${CMAKE_BINARY_DIR}/refusaltest")
 target_include_directories(RefusalTests PRIVATE ${MODLOADER_INCLUDE})
 add_dependencies(RefusalTests EDF6Coop)
 
-add_executable(MultiSlotLoadTest tests/load_test.cpp)
-target_include_directories(MultiSlotLoadTest PRIVATE ${MODLOADER_INCLUDE})
-target_link_libraries(MultiSlotLoadTest PRIVATE GameCore)
-add_dependencies(MultiSlotLoadTest EDF6Coop)
+add_executable(PluginLoadTests tests/game/load_test.cpp)
+target_include_directories(PluginLoadTests PRIVATE ${MODLOADER_INCLUDE})
+target_link_libraries(PluginLoadTests PRIVATE GameCore)
+add_dependencies(PluginLoadTests EDF6Coop)
 foreach(mode on off fresh keeproomoff replaced)
-    game_test(PluginLoad_${mode} MultiSlotLoadTest "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>" "${CMAKE_BINARY_DIR}/loadtest" ${mode})
+    game_test(PluginLoad_${mode} PluginLoadTests "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>" "${CMAKE_BINARY_DIR}/loadtest" ${mode})
 endforeach()
 
 # Rooms played by several processes, each running the real EDF.dll and the real EDF6Coop.dll with a fake EOS
@@ -132,7 +135,7 @@ set(GAMENET_DIR "${CMAKE_BINARY_DIR}/gamenet")
 add_library(GameNetEos SHARED tests/gamenet/fake_eos_net.cpp)
 set_target_properties(GameNetEos PROPERTIES OUTPUT_NAME EOSSDK-Win64-Shipping RUNTIME_OUTPUT_DIRECTORY "${GAMENET_DIR}"
     ARCHIVE_OUTPUT_DIRECTORY "${GAMENET_DIR}")
-add_executable(GameMachine tests/gamenet/machine.cpp tests/gamenet/roles.cpp tests/gamenet/game.cpp src/netplayer.cpp)
+add_executable(GameMachine tests/gamenet/machine.cpp tests/gamenet/roles.cpp tests/gamenet/game.cpp game/netplayer.cpp)
 set_target_properties(GameMachine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${GAMENET_DIR}")
 target_include_directories(GameMachine PRIVATE ${MODLOADER_INCLUDE})
 add_dependencies(GameMachine GameNetEos)
@@ -146,7 +149,7 @@ endforeach()
 
 # Test programs with wmain: MinGW-w64 links them against its wide-character startup.
 if(NOT MSVC)
-    foreach(target LoaderProxyTests PeerTimeoutTests LogTests RefusalTests MultiSlotLoadTest GameMachine GameNetTests
+    foreach(target LoaderProxyTests PeerTimeoutTests LogTests RefusalTests PluginLoadTests GameMachine GameNetTests
                    DirectNetTests)
         target_link_options(${target} PRIVATE -municode)
     endforeach()

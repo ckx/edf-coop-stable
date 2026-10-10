@@ -12,10 +12,10 @@
 #include <string>
 #include <vector>
 
-#include "../src/hitauth.h"
-#include "../src/hitauthgame.h"
-#include "../src/netfeature.h"
-#include "../src/patches.h"
+#include "../../game/hitauth.h"
+#include "../../game/hitauthgame.h"
+#include "../../game/netfeature.h"
+#include "../../game/patches.h"
 
 using namespace multislot;
 

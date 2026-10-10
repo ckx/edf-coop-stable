@@ -10,9 +10,9 @@
 #include <stdexcept>
 #include <vector>
 
-#include "../src/code.h"
-#include "../src/midhook.h"
-#include "../src/patches.h"
+#include "../../game/code.h"
+#include "../../game/midhook.h"
+#include "../../game/patches.h"
 
 using namespace multislot;
 

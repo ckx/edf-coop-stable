@@ -12,7 +12,7 @@ without it, as the other tests against the game's code do. Each scenario takes 2
 
 ```powershell
 $env:EDF6_GAME_DIR = 'D:\steam\steamapps\common\EARTH DEFENSE FORCE 6'
-powershell -ExecutionPolicy Bypass -File ..\..\..\build.ps1 -Test     # all tests, GameNet_* among them
+powershell -ExecutionPolicy Bypass -File ..\..\build.ps1 -Test        # all tests, GameNet_* among them
 ctest --test-dir ..\..\build -R GameNet --output-on-failure           # only these
 ```
 

@@ -14,10 +14,10 @@
 #include <cstring>
 #include <string>
 
-#include "../src/crashlog.h"
-#include "../src/guard.h"
+#include "../../game/crashlog.h"
+#include "../../game/guard.h"
 #include "late_fault.h"
-#include "../src/log.h"
+#include "../../game/log.h"
 
 using namespace multislot;
 

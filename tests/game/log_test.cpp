@@ -16,7 +16,7 @@
 #include <thread>
 #include <vector>
 
-#include "../src/log.h"
+#include "../../game/log.h"
 
 using namespace multislot;
 

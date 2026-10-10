@@ -20,7 +20,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 
-#include "../src/log.h"
+#include "../../game/log.h"
 
 namespace {
 
@@ -77,8 +77,8 @@ void LoadAndRefuse(const std::wstring& dll, const char* mode) {
     if (!load) return;
     PluginInfo info{};
     Check(!load(&info), mode);
-    Check(info.version.major == MULTISLOT_VERSION_MAJOR && info.version.minor == MULTISLOT_VERSION_MINOR &&
-              info.version.patch == MULTISLOT_VERSION_PATCH && info.version.build == 0,
+    Check(info.version.major == EDF6COOP_VERSION_MAJOR && info.version.minor == EDF6COOP_VERSION_MINOR &&
+              info.version.patch == EDF6COOP_VERSION_PATCH && info.version.build == 0,
           "PluginInfo carries CMakeLists.txt's project version");
     Check(ThreadsStartedIn(plugin) == 0, "a plugin that refuses leaves no thread of its own running");
     FreeLibrary(plugin);

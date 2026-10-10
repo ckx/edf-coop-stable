@@ -5,3 +5,8 @@ release/
 build-*/
 .venv/
 tmp/
+# The plugin and the race-fixed loader (CMakeLists.txt OUT_DIR).
+out/
+# Official EDFModLoader, fetched and hash-checked by tools/fetch_modloader.py.
+third_party/EDFModLoader/winmm.dll
+__pycache__/

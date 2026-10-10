@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds EDF6Coop.dll and its tests on Linux (clang for MinGW-w64, cmake/mingw-w64.cmake); -t runs them under Wine.
 #   ./build.sh [-t] [-r]
-# Lands in multislot/dist/ like build.ps1. Set EDF6_GAME_DIR to the game folder (holds EDF.dll; only read) for the
+# Lands in out/ like build.ps1. Set EDF6_GAME_DIR to the game folder (holds EDF.dll; only read) for the
 # tests against the game's code; without it those tests report themselves skipped. -r refuses to configure without
 # EDF.dll, so no test against the game's code can pass as skipped.
 # Fedora: dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
@@ -9,7 +9,6 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")" && pwd)
-multislot=$root/multislot
 build=$root/build-mingw
 test=0
 require=OFF
@@ -29,10 +28,10 @@ if [ ! -x "$venv/bin/python" ]; then
 fi
 python=$venv/bin/python
 
-"$python" -B "$multislot/tools/fetch_modloader.py"
+"$python" -B "$root/tools/fetch_modloader.py"
 
 # Always explicit: CMake keeps cached values.
-cmake -S "$multislot" -B "$build" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" \
+cmake -S "$root" -B "$build" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo -DEDF6_REQUIRE_GAME=$require \
     -DPython3_EXECUTABLE="$python" ${EDF6_GAME_DIR:+-DEDF6_GAME_DIR="$EDF6_GAME_DIR"}
 cmake --build "$build"

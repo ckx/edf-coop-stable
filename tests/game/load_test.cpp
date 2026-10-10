@@ -1,7 +1,7 @@
 // Loads the built plugin the way EDFModLoader does, against the real EDF.dll mapped without running its
 // initialisation, and checks which of the game's sites it took over. The plugin sits in <work-folder>\<mode>\Mods\Plugins,
 // as in a game folder.
-//   MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced
+//   PluginLoadTests EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced
 #include <windows.h>
 #include "late_fault.h"
 
@@ -20,9 +20,9 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 
-#include "../src/hitauthgame.h"
-#include "../src/midhook.h"
-#include "../src/patches.h"
+#include "../../game/hitauthgame.h"
+#include "../../game/midhook.h"
+#include "../../game/patches.h"
 
 using namespace multislot;
 
@@ -135,7 +135,7 @@ void ThrowAndCatch() {
 
 int wmain(int argc, wchar_t** argv) {
     if (argc < 5) {
-        std::printf("usage: MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced\n");
+        std::printf("usage: PluginLoadTests EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced\n");
         return 2;
     }
     const std::wstring mode = argv[4];
@@ -195,8 +195,8 @@ int wmain(int argc, wchar_t** argv) {
         Check(loaded, "EML6_Load succeeds against the supported EDF.dll");
         Check(info.infoVersion == PluginInfo::MaxInfoVer && info.name && std::strcmp(info.name, "EDF6Coop") == 0,
               "PluginInfo names EDF6Coop");
-        Check(info.version.major == MULTISLOT_VERSION_MAJOR && info.version.minor == MULTISLOT_VERSION_MINOR &&
-                  info.version.patch == MULTISLOT_VERSION_PATCH && info.version.build == 0,
+        Check(info.version.major == EDF6COOP_VERSION_MAJOR && info.version.minor == EDF6COOP_VERSION_MINOR &&
+                  info.version.patch == EDF6COOP_VERSION_PATCH && info.version.build == 0,
               "PluginInfo carries the project version");
         for (const auto& hook : guard) Check(HookedInto(base, hook, plugin), hook.name);
         const bool keepRoom = mode != L"keeproomoff";
@@ -225,7 +225,7 @@ int wmain(int argc, wchar_t** argv) {
             const std::string crash = ReadText(logPath);
             Check(Contains(crash, "EXCEPTION C0000005"), "access violation is logged");
             Check(Contains(crash, "writing 0000000000000010"), "fault address and access kind are logged");
-            Check(Contains(crash, "#01 MultiSlotLoadTest.exe+"), "call stack is unwound into the caller");
+            Check(Contains(crash, "#01 PluginLoadTests.exe+"), "call stack is unwound into the caller");
             Check(!Contains(crash, "E06D7363"), "a C++ exception thrown and caught outside EDF.dll is not reported");
         }
     }

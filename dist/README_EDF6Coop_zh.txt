@@ -20,7 +20,7 @@ Linux（Steam Proton）：解压整个 zip，在那里运行 "bash install.sh"�
 "bash install.sh <游戏文件夹>"），然后在 Steam 里把游戏的启动选项（属性）设为
     WINEDLLOVERRIDES="winmm=n,b" %command%
 不设的话 Wine 会加载它自己的 winmm.dll，EDFModLoader 不会运行。
-没有 EDFModLoader（winmm.dll）时会装上自带的：官方 v1.0.10 加多线程问题的修复（见 LOADER_FIX_JA.md）。
+没有 EDFModLoader（winmm.dll）时会装上自带的：官方 v1.0.10 加多线程问题的修复（见 LOADER_FIX.md）。
 已有的 winmm.dll 一律不覆盖，唯一例外是与官方 v1.0.10 字节完全相同的那个：会换成修复版，原文件保存为
 winmm.dll.bak-official。
 从 EDF6DirectNet / EDF6MultiSlot 升级：Mods\Plugins 里它们的 DLL 会改名为 .disabled。旧设置文件保留，但不再
@@ -51,4 +51,4 @@ EDF6Coop.ini 里设 [DirectNet] Enabled=0：插件自行卸载，游戏就是原
 [包含的内容]
 - EDF6Coop：Mods\Plugins\EDF6Coop.dll（MIT，见 LICENSE.txt；游戏部分最初由 momotori01 作为 EDF6MultiSlot
   编写，属于公有领域）。
-- BlueAmulet 的 EDFModLoader（MIT，见 EDFModLoader_LICENSE.txt）：winmm.dll，含 LOADER_FIX_JA.md 所述的修复。
+- BlueAmulet 的 EDFModLoader（MIT，见 EDFModLoader_LICENSE.txt）：winmm.dll，含 LOADER_FIX.md 所述的修复。

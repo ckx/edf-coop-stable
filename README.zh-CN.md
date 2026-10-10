@@ -35,7 +35,7 @@
 
 1. 从 [Releases](https://github.com/hajisensai/edf-coop-stable/releases/latest) 下载 `EDF6Coop-<版本>.zip`，**把整个压缩包解压**到任意文件夹。
 2. 双击 **`INSTALL.bat`**。它会在 Steam 库里自动找到 EDF6 并安装。
-   - 没有 EDFModLoader 时会装上自带的加载器：[BlueAmulet/EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) v1.0.10（MIT）**加上对官方版多线程问题的修复**（它的调用转发共用一个目标变量，多个线程同时调用时可能跳到错误的函数；详见 [multislot/packaging/LOADER_FIX_JA.md](multislot/packaging/LOADER_FIX_JA.md)）。已有的 `winmm.dll` 一律不覆盖，唯一例外：与官方 v1.0.10 字节完全相同的会换成修复版，原文件保存为 `winmm.dll.bak-official`。
+   - 没有 EDFModLoader 时会装上自带的加载器：[BlueAmulet/EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) v1.0.10（MIT）**加上对官方版多线程问题的修复**（它的调用转发共用一个目标变量，多个线程同时调用时可能跳到错误的函数；详见 [dist/LOADER_FIX.md](dist/LOADER_FIX.md)）。已有的 `winmm.dll` 一律不覆盖，唯一例外：与官方 v1.0.10 字节完全相同的会换成修复版，原文件保存为 `winmm.dll.bak-official`。
    - 找不到游戏时会请你输入游戏文件夹（在 Steam 库里右键 EDF6 → 管理 → 浏览本地文件）。
 3. 照常从 Steam 启动游戏。第一次启动会生成 `Mods\Plugins\EDF6Coop.ini`（设置）和 `EDF6Coop.log`（日志）。
 
@@ -175,13 +175,13 @@ EDF6 把收到的每个 EOS 包都当游戏数据读，插件没法通过 P2P �
 
 ```powershell
 $env:EDF6_GAME_DIR = 'C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6'
-powershell -ExecutionPolicy Bypass -File build.ps1 -Test    # -> multislot\dist\EDF6Coop.dll
+powershell -ExecutionPolicy Bypass -File build.ps1 -Test    # -> out\EDF6Coop.dll
 powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coop-<版本>.zip（+ .sha256）
 ```
 
 - `-Test` 运行测试：单元测试、本机回环的直连测试，以及针对游戏代码的测试（用真实的 `EDF.dll` 和假的 EOS 跑多进程房间）。没有游戏时后者报告为跳过；`-RequireGame` 在没有游戏时拒绝配置。
 - 游戏文件夹只读不写。
-- `build.ps1` 会下载官方 EDFModLoader v1.0.10 的 `winmm.dll`（校验 SHA-256），并生成安装包附带的修复版加载器（`multislot/tools/fix_winmm_proxy.py`）。
+- `build.ps1` 会下载官方 EDFModLoader v1.0.10 的 `winmm.dll`（校验 SHA-256），并生成安装包附带的修复版加载器（`tools/fix_winmm_proxy.py`）。
 - `package.ps1` 拒绝版本不对或比源码旧的 DLL。
 
 ### Linux
@@ -191,7 +191,7 @@ powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coo
 ```sh
 sudo dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
 export EDF6_GAME_DIR="$HOME/.local/share/Steam/steamapps/common/EARTH DEFENSE FORCE 6"
-./build.sh -t    # -> multislot/dist/EDF6Coop.dll；-r 在没有 EDF.dll 时拒绝配置
+./build.sh -t    # -> out/EDF6Coop.dll；-r 在没有 EDF.dll 时拒绝配置
 ```
 
 Python 工具在 `build.sh` 于 `.venv` 中创建的虚拟环境里运行。发布包在 Windows 上用 `build.ps1` 和 `package.ps1` 构建。
@@ -200,7 +200,7 @@ Python 工具在 `build.sh` 于 `.venv` 中创建的虚拟环境里运行。发�
 
 发布包在装有游戏的机器上构建，这样针对游戏代码的测试都会运行。GitHub Actions 运行其余测试（`.github/workflows/ci.yml`）。
 
-1. 改版本号：`multislot/CMakeLists.txt` 里的 `project(EDF6Coop VERSION x.y.z)`，以及三份附带说明 `dist/README_EDF6Coop*.txt` 的第一行。
+1. 改版本号：`CMakeLists.txt` 里的 `project(EDF6Coop VERSION x.y.z)`，以及三份附带说明 `dist/README_EDF6Coop*.txt` 的第一行。
 2. 写发布说明 `release-notes/<版本>.md`（Release 页面的正文，也是安装包里的 `RELEASE_NOTES_EDF6Coop.md`）。
 3. 提交到 `main`，打标签并推送标签：`git tag vX.Y.Z && git push origin vX.Y.Z`。
 4. 在装有游戏的机器上、在那个提交处运行：`powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`。它运行 `build.ps1 -Test -RequireGame` 和 `package.ps1`，然后创建一个**草稿** Release，附上 `EDF6Coop-<版本>.zip` 及其 `.sha256`（不带 `-Upload` 时只把它们放到 `release\upload-<版本>\`）。
@@ -210,8 +210,8 @@ Python 工具在 `build.sh` 于 `.venv` 中创建的虚拟环境里运行。发�
 
 | 路径 | 内容 |
 |---|---|
-| `multislot/src/plugin.cpp` | EDFModLoader 入口：读取 `EDF6Coop.ini`，启动传输部分，修补 `EDF.dll` |
-| `multislot/src/` | 游戏部分：补丁（武器保护、握手超时）、联机协议版本门槛、玩家同步、命中判定、崩溃日志、日志 |
+| `game/plugin.cpp` | EDFModLoader 入口：读取 `EDF6Coop.ini`，启动传输部分，修补 `EDF.dll` |
+| `game/` | 游戏部分：补丁（武器保护、握手超时）、联机协议版本门槛、玩家同步、命中判定、崩溃日志、日志 |
 | `src/config.*` | 设置及其注释（按 Windows 显示语言为中文 / 日文 / 英文） |
 | `src/eos_min.h` | 用到的 EOS SDK 结构体（来自官方 1.15.5 头文件；游戏用的是 1.16.1） |
 | `src/eos_hooks.cpp`、`src/iat.*` | 修改 `EDF.dll` 导入表，接管 EOS P2P 和大厅调用 |
@@ -219,10 +219,10 @@ Python 工具在 `build.sh` 于 `.venv` 中创建的虚拟环境里运行。发�
 | `src/lobby_marker.*` | 大厅成员属性：谁装了插件、房主地址 |
 | `src/direct_net.*`、`src/reliable.*`、`src/wire.*`、`src/auth.*`、`src/fragment.*` | 直连传输、拆包 |
 | `src/netif.*`、`src/upnp.*` | 物理网卡识别、UPnP |
-| `multislot/CMakeLists.txt` | 构建和唯一的版本号（`project(EDF6Coop VERSION x.y.z)`） |
-| `multislot/packaging/` | 随安装包附带的加载器修复说明 |
-| `dist/` | 安装脚本和附带说明（英文 / 中文 / 日文） |
-| `tests/`、`multislot/tests/` | 测试 |
+| `CMakeLists.txt` | 构建和唯一的版本号（`project(EDF6Coop VERSION x.y.z)`） |
+| `dist/` | 安装脚本、附带说明（英文 / 中文 / 日文）和加载器修复说明 |
+| `tests/` | 测试：传输部分；`tests/game/` 游戏部分；`tests/gamenet/` 用真实 `EDF.dll` 跑的多进程房间 |
+| `tools/`、`third_party/` | 加载器修复工具及其输入、MSVC 环境脚本；EDFModLoader 的插件头文件和许可证 |
 
 ## 已知限制
 
@@ -236,7 +236,7 @@ Python 工具在 `build.sh` 于 `.venv` 中创建的虚拟环境里运行。发�
 
 ## 许可
 
-MIT，见 [LICENSE](LICENSE)。附带的 EDFModLoader 是 MIT 许可，其许可证以 `EDFModLoader_LICENSE.txt` 包含在安装包中。游戏部分（`multislot/`，最初由 momotori01 编写）属于公有领域（[Unlicense](multislot/LICENSE)）。
+MIT，见 [LICENSE](LICENSE)。附带的 EDFModLoader 是 MIT 许可，其许可证以 `EDFModLoader_LICENSE.txt` 包含在安装包中。游戏部分（`game/`，最初由 momotori01 编写）属于公有领域（[Unlicense](game/LICENSE)）。
 
 ## 致谢
 

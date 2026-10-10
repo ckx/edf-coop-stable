@@ -36,7 +36,7 @@ namespace {
 #define EDF6COOP_TEXT2(x) #x
 #define EDF6COOP_TEXT(x) EDF6COOP_TEXT2(x)
 #define EDF6COOP_VERSION_TEXT \
-    EDF6COOP_TEXT(MULTISLOT_VERSION_MAJOR) "." EDF6COOP_TEXT(MULTISLOT_VERSION_MINOR) "." EDF6COOP_TEXT(MULTISLOT_VERSION_PATCH)
+    EDF6COOP_TEXT(EDF6COOP_VERSION_MAJOR) "." EDF6COOP_TEXT(EDF6COOP_VERSION_MINOR) "." EDF6COOP_TEXT(EDF6COOP_VERSION_PATCH)
 constexpr const char* kVersion = EDF6COOP_VERSION_TEXT;
 HMODULE self = nullptr;
 
@@ -210,7 +210,7 @@ bool LoadCoop(PluginInfo* info) {
     dn::logToSink(&ForwardDirectNetLine);
     info->infoVersion = PluginInfo::MaxInfoVer;
     info->name = "EDF6Coop";
-    info->version = PLUG_VER(MULTISLOT_VERSION_MAJOR, MULTISLOT_VERSION_MINOR, MULTISLOT_VERSION_PATCH, 0);
+    info->version = PLUG_VER(EDF6COOP_VERSION_MAJOR, EDF6COOP_VERSION_MINOR, EDF6COOP_VERSION_PATCH, 0);
     Log("==== EDF6Coop %s ====", kVersion);
 
     // Before any file is touched: outside the game nothing is renamed or written.

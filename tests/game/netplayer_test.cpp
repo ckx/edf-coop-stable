@@ -11,9 +11,9 @@
 #include <string>
 #include <vector>
 
-#include "../src/netfeature.h"
-#include "../src/netplayer.h"
-#include "../src/netplayer_tracks.h"
+#include "../../game/netfeature.h"
+#include "../../game/netplayer.h"
+#include "../../game/netplayer_tracks.h"
 
 using namespace multislot;
 

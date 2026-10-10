@@ -2,7 +2,7 @@
 
 EDF.dll TimeDateStamp `0x678CCB46`，地址都是 RVA。纯静态分析（capstone，all-forces 的 `tools/edfre.py`），没有起游戏，没有两机实测。
 置信度：**H** = 指令里直接读到；**M** = 有代码证据的推断；**L** = 推测。
-W3 = 开枪方判定（`multislot/src/hitauth*`），W1 = 联机协议版本门（`multislot/src/netfeature*`）。相关：all-forces `docs/bullet-pass-re.md`、`decoy-blast-re.md`、`swarm-team-re.md`、`online-re.md` §10。
+W3 = 开枪方判定（`game/hitauth*`），W1 = 联机协议版本门（`game/netfeature*`）。相关：all-forces `docs/bullet-pass-re.md`、`decoy-blast-re.md`、`swarm-team-re.md`、`online-re.md` §10。
 
 一句话：**原版对敌人、NPC、物件已经是开枪方判定，对玩家和载具是被打方判定**；W3 把后者也改成开枪方判定，并把所有「打到别人
 机器上的对象」的伤害作为事件送到对象的拥有者那里结算。
@@ -55,7 +55,7 @@ slot 34 只有三个实现（H，按 RTTI 枚举全部 150 个派生类）：
 
 `+0x128` = 自身 NetworkObject+8：bit0 另一台机器的，bit1 本机的（`0x782880`）。
 
-所以 `multislot/src/smoothing.h` 那句「游戏在被打的那台机器上判定」**只对玩家和载具成立**（H）。
+所以「游戏在被打的那台机器上判定」这句（旧 `smoothing.h` 的说法）**只对玩家和载具成立**（H）。
 
 ## 3. HP 怎么复制
 
@@ -91,7 +91,7 @@ slot 34 只有三个实现（H，按 RTTI 枚举全部 150 个派生类）：
 
 ## 6. W3 的实现
 
-代码：`multislot/src/hitauth.{h,cpp}`（纯逻辑）、`hitauthgame.{h,cpp}`（游戏侧）、`netfeature.{h,cpp}`（W1 版本门的最小桩）。
+代码：`game/hitauth.{h,cpp}`（纯逻辑）、`hitauthgame.{h,cpp}`（游戏侧）、`netfeature.{h,cpp}`（W1 版本门的最小桩）。
 
 ### 6.1 判定（`54AA50` 入口钩子）
 
@@ -157,7 +157,7 @@ GDI 的 `+0x20 种类、+0x24 队伍、+0x30 命中点、+0x40 冲量、+0x50 �
 
 ### 6.6 版本门
 
-`NetFeatureActive(NetFeature::HitAuthority)`，ini `[Netcode] HitAuthority=1`（默认开）。由 W1 的版本门（`multislot/src/netfeature.h`）按全房间回答：
+`NetFeatureActive(NetFeature::HitAuthority)`，ini `[Netcode] HitAuthority=1`（默认开）。由 W1 的版本门（`game/netfeature.h`）按全房间回答：
 房间里每个成员都发布同一个网络协议版本并开着这一项时才是新规则，否则整个房间回到原版判定。
 
 **切换窗口**：每台机器在自己的大厅节拍上看到成员进出，相差 1–2 秒；有人加入、属性还没到的这段时间各机器的门开关不同步。只看本机门会在两种

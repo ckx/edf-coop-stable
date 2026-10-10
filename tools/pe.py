@@ -1,4 +1,4 @@
-"""Read-only PE inspection for the multislot research. All addresses are RVAs.
+"""Read-only PE inspection of the game's code. All addresses are RVAs.
 
 Usage examples:
   python -B tools/pe.py --info

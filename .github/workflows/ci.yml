@@ -8,7 +8,10 @@ on:
     paths:
       - 'src/**'
       - 'tests/**'
-      - 'multislot/**'
+      - 'game/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'CMakeLists.txt'
       - 'build.ps1'
       - '.github/workflows/ci.yml'
       - '.github/loader-fix-requirements.txt'
@@ -16,7 +19,10 @@ on:
     paths:
       - 'src/**'
       - 'tests/**'
-      - 'multislot/**'
+      - 'game/**'
+      - 'third_party/**'
+      - 'tools/**'
+      - 'CMakeLists.txt'
       - 'build.ps1'
       - '.github/workflows/ci.yml'
       - '.github/loader-fix-requirements.txt'
@@ -35,9 +41,9 @@ jobs:
 
       - name: Fetch EDFModLoader (pinned by hash)
         shell: pwsh
-        run: python -B multislot/tools/fetch_modloader.py
+        run: python -B tools/fetch_modloader.py
 
-      # The build runs multislot/tools/fix_winmm_proxy.py on the loader, which needs pefile and capstone. The
+      # The build runs tools/fix_winmm_proxy.py on the loader, which needs pefile and capstone. The
       # runner has several Pythons and CMake would pick its own, so the build is told which one has them.
       - name: Install the loader-fix tools (pinned by hash)
         shell: pwsh
@@ -53,7 +59,7 @@ jobs:
       - name: Say which tests were skipped
         shell: pwsh
         run: |
-          $listed = & ctest --test-dir multislot/build -L game --show-only=json-v1 | ConvertFrom-Json
+          $listed = & ctest --test-dir build -L game --show-only=json-v1 | ConvertFrom-Json
           $game = $listed.tests
           $names = ($game | ForEach-Object { $_.name }) -join ', '
           Write-Output "::warning title=Game tests skipped::No EDF.dll in CI, so these ran as skipped: $names. Run build.ps1 -Test on a machine with the game to cover them."

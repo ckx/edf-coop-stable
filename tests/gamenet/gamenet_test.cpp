@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "net_shared.h"
-#include "../../src/netprotocol.h"
+#include "../../game/netprotocol.h"
 #include <winsock2.h>
 #include <ws2tcpip.h>
 

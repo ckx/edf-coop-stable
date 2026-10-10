@@ -9,9 +9,10 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 ## Layout
 
 - `src/`: the transport part, formerly EDF6DirectNet. EOS import-table hooks (`eos_hooks.cpp`, `iat.*`), reliable sending and queue sizing, disconnect hold (`hold.*`), lobby markers, the direct link (`direct_net.*`, `wire.*`, `auth.*`, `reliable.*`), fragments (`fragment.*`), UPnP, config.
-- `multislot/src/`: the game part, first written as EDF6MultiSlot by momotori01. In-memory patches to `EDF.dll` (weapon guard, peer timeout), the netcode version gate (`netfeature*`), player sync (`netplayer*`), hit authority (`hitauth*`), the crash log and the log. `plugin.cpp` is the EDFModLoader entry point for the whole DLL.
-- `multislot/CMakeLists.txt` builds both parts into one DLL and holds the one version number (`project(EDF6Coop VERSION x.y.z)`).
-- `tests/` covers the transport part; `multislot/tests/` covers the game part, and `multislot/tests/gamenet/` runs multi-process rooms against the real `EDF.dll` with a fake EOS.
+- `game/`: the game part, first written as EDF6MultiSlot by momotori01 (its namespace is still `multislot`). In-memory patches to `EDF.dll` (weapon guard, peer timeout), the netcode version gate (`netfeature*`), player sync (`netplayer*`), hit authority (`hitauth*`), the crash log and the log. `plugin.cpp` is the EDFModLoader entry point for the whole DLL.
+- `CMakeLists.txt` builds both parts into one DLL (in `out/`) and holds the one version number (`project(EDF6Coop VERSION x.y.z)`).
+- `tests/` covers the transport part; `tests/game/` covers the game part, and `tests/gamenet/` runs multi-process rooms against the real `EDF.dll` with a fake EOS.
+- `dist/` is what the package ships besides the DLLs (install scripts, readmes, the loader fix note); `tools/` and `third_party/` make the race-fixed EDFModLoader.
 - `docs/net-re/` holds reverse-engineering notes for the game's network code (Chinese).
 
 ## Build and test
@@ -19,7 +20,7 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 - Two toolchains build the same DLL. Requirements for both are in README.md, "Build".
   - Windows: MSVC (Visual Studio 2022). `build.ps1 -Test` builds and runs ctest; release packages come from this build.
   - Linux: `build.sh -t` cross-builds with clang for MinGW-w64 (`cmake/mingw-w64.cmake`) and runs ctest under Wine in its own prefix. This is the everyday loop on the dev box, and the Proton check: every test, GameNet included, runs there.
-- Keep code buildable by both. No `__try`/`__except` (MinGW compilers drop the handler): probes of game memory go through `Guarded`/`ReadGuarded` (`multislot/src/guard.h`). Wide text in a log line goes through `Utf8Text` (`src/utf8.h`), never `%ls`. Library types handed to the game are laid out by hand (`Shared`, `tests/gamenet/msvc_abi.h`), never the toolchain's own `std::` types.
+- Keep code buildable by both. No `__try`/`__except` (MinGW compilers drop the handler): probes of game memory go through `Guarded`/`ReadGuarded` (`game/guard.h`). Wide text in a log line goes through `Utf8Text` (`src/utf8.h`), never `%ls`. Library types handed to the game are laid out by hand (`Shared`, `tests/gamenet/msvc_abi.h`), never the toolchain's own `std::` types.
 - Set `EDF6_GAME_DIR` to the game folder (on the dev box `/mnt/kosmos/SteamLibrary/steamapps/common/EARTH DEFENSE FORCE 6`). Tests against the game's code (label `game`: `PluginLoad_*`, `GameNet_*`, `*GameCode`) report skipped (exit 77) without `EDF.dll`, so CI never runs them. `-RequireGame` / `-r` refuses to configure without it; release builds use it. Say so when reporting results from a build without the game.
 - Only one `EDF.dll` build is supported (TimeDateStamp `0x678CCB46`). Every patch verifies original bytes before writing; keep it that way, and refuse cleanly when they do not match.
 - A green ctest is not a live multiplayer test. Behaviour that only real play can confirm is reported as unverified.
@@ -36,7 +37,7 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 - C++20, 4-space indentation, `/W4 /WX`. Match the surrounding file's naming and comment density.
 - Avoid shallow helpers. A new function or wrapper needs several call sites, an invariant or lifetime it enforces, or domain logic that would obscure the caller.
 - Comments state what the code cannot: game addresses and facts, protocol contracts, the reason behind a non-obvious choice. Do not restate the code.
-- Wire format changes go through the netcode version gate (`multislot/src/netfeature.*`), since peers run mixed versions. Cleanup of what older releases left behind (`RetireReplacedPlugins`, `RemoveOldModFiles`) stays until a deliberate decision drops it.
+- Wire format changes go through the netcode version gate (`game/netfeature.*`), since peers run mixed versions. Cleanup of what older releases left behind (`RetireReplacedPlugins`, `RemoveOldModFiles`) stays until a deliberate decision drops it.
 - Untrusted input includes everything from peers, lobby attributes, the update server and host data files. Bounds-check it at the parse site.
 
 ## Documentation

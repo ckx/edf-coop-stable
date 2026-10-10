@@ -1,6 +1,6 @@
 # Cross-build EDF6Coop.dll and its tests from Linux: clang for the x86_64-w64-mingw32 target, MinGW-w64's headers,
 # runtime and libstdc++, lld; ctest runs the tests under Wine.
-#   cmake -S multislot -B build-mingw -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake
+#   cmake -S . -B build-mingw -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake
 # Fedora: dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine
 # (GCC 16 for this target stops with an internal compiler error on tests/gamenet; clang builds everything.)
 set(CMAKE_SYSTEM_NAME Windows)

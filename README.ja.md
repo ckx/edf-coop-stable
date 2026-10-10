@@ -35,7 +35,7 @@
 
 1. [Releases](https://github.com/hajisensai/edf-coop-stable/releases/latest) から `EDF6Coop-<バージョン>.zip` をダウンロードし、**ZIP 全体を**好きなフォルダに展開します。
 2. **`INSTALL.bat`** をダブルクリックします。Steam ライブラリから EDF6 を見つけてインストールします。
-   - EDFModLoader がなければ同梱のローダーを入れます：[BlueAmulet/EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) v1.0.10（MIT）に**公式版のマルチスレッド不具合の修正**を加えたものです（呼び出しの転送先を1つの変数で共有しており、複数スレッドから同時に呼ぶと別の関数へ飛ぶことがありました。詳しくは [multislot/packaging/LOADER_FIX_JA.md](multislot/packaging/LOADER_FIX_JA.md)）。既存の `winmm.dll` は上書きしません。例外は公式 v1.0.10 とバイト単位で同じものだけで、修正版に置き換え、元のファイルを `winmm.dll.bak-official` に保存します。
+   - EDFModLoader がなければ同梱のローダーを入れます：[BlueAmulet/EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) v1.0.10（MIT）に**公式版のマルチスレッド不具合の修正**を加えたものです（呼び出しの転送先を1つの変数で共有しており、複数スレッドから同時に呼ぶと別の関数へ飛ぶことがありました。詳しくは [dist/LOADER_FIX.md](dist/LOADER_FIX.md)）。既存の `winmm.dll` は上書きしません。例外は公式 v1.0.10 とバイト単位で同じものだけで、修正版に置き換え、元のファイルを `winmm.dll.bak-official` に保存します。
    - ゲームが見つからないときはゲームフォルダを尋ねます（Steam ライブラリで EDF6 を右クリック → 管理 → ローカルファイルを閲覧）。
 3. いつも通り Steam からゲームを起動します。初回起動で `Mods\Plugins\EDF6Coop.ini`（設定）と `EDF6Coop.log`（ログ）ができます。
 
@@ -175,13 +175,13 @@ Windows x64、*C++ によるデスクトップ開発* を入れた Visual Studio
 
 ```powershell
 $env:EDF6_GAME_DIR = 'C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6'
-powershell -ExecutionPolicy Bypass -File build.ps1 -Test    # -> multislot\dist\EDF6Coop.dll
+powershell -ExecutionPolicy Bypass -File build.ps1 -Test    # -> out\EDF6Coop.dll
 powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coop-<バージョン>.zip（+ .sha256）
 ```
 
 - `-Test` はテストを実行します：単体テスト、ループバックでの直接接続テスト、ゲームのコードに対するテスト（本物の `EDF.dll` と偽の EOS で複数プロセスの部屋を動かす）。ゲームがなければ後者はスキップと報告されます。`-RequireGame` はゲームがないと構成を拒否します。
 - ゲームフォルダは読むだけです。
-- `build.ps1` は公式 EDFModLoader v1.0.10 の `winmm.dll` を取得し（SHA-256 で確認）、パッケージに入れる修正版ローダーを作ります（`multislot/tools/fix_winmm_proxy.py`）。
+- `build.ps1` は公式 EDFModLoader v1.0.10 の `winmm.dll` を取得し（SHA-256 で確認）、パッケージに入れる修正版ローダーを作ります（`tools/fix_winmm_proxy.py`）。
 - `package.ps1` は版の違う DLL やソースより古い DLL を拒否します。
 
 ### Linux
@@ -191,7 +191,7 @@ powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coo
 ```sh
 sudo dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
 export EDF6_GAME_DIR="$HOME/.local/share/Steam/steamapps/common/EARTH DEFENSE FORCE 6"
-./build.sh -t    # -> multislot/dist/EDF6Coop.dll。-r は EDF.dll がないと構成を拒否する
+./build.sh -t    # -> out/EDF6Coop.dll。-r は EDF.dll がないと構成を拒否する
 ```
 
 Python のツールは `build.sh` が `.venv` に作る仮想環境で動きます。リリース用パッケージは Windows で `build.ps1` と `package.ps1` で作ります。
@@ -200,7 +200,7 @@ Python のツールは `build.sh` が `.venv` に作る仮想環境で動きま�
 
 リリース用パッケージは、ゲームのコードに対するテストがすべて動くよう、ゲームのあるマシンで作ります。そのほかのテストは GitHub Actions が動かします（`.github/workflows/ci.yml`）。
 
-1. 版を上げます：`multislot/CMakeLists.txt` の `project(EDF6Coop VERSION x.y.z)` と、同梱の説明書 `dist/README_EDF6Coop*.txt` 3つの1行目。
+1. 版を上げます：`CMakeLists.txt` の `project(EDF6Coop VERSION x.y.z)` と、同梱の説明書 `dist/README_EDF6Coop*.txt` 3つの1行目。
 2. リリースノート `release-notes/<バージョン>.md` を書きます（Release ページの本文、パッケージの `RELEASE_NOTES_EDF6Coop.md`）。
 3. `main` にコミットし、タグを付けて push します：`git tag vX.Y.Z && git push origin vX.Y.Z`。
 4. ゲームのあるマシンでそのコミットにして：`powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`。`build.ps1 -Test -RequireGame` と `package.ps1` を実行し、`EDF6Coop-<バージョン>.zip` とその `.sha256` を付けた**下書き**の Release を作ります（`-Upload` なしなら `release\upload-<バージョン>\` に置くだけ）。
@@ -210,8 +210,8 @@ Python のツールは `build.sh` が `.venv` に作る仮想環境で動きま�
 
 | パス | 内容 |
 |---|---|
-| `multislot/src/plugin.cpp` | EDFModLoader の入口：`EDF6Coop.ini` を読み、通信部分を起動し、`EDF.dll` にパッチを当てる |
-| `multislot/src/` | ゲーム部分：パッチ（武器ガード、ハンドシェイクのタイムアウト）、ネットコードの版の確認、プレイヤー同期、命中判定、クラッシュログ、ログ |
+| `game/plugin.cpp` | EDFModLoader の入口：`EDF6Coop.ini` を読み、通信部分を起動し、`EDF.dll` にパッチを当てる |
+| `game/` | ゲーム部分：パッチ（武器ガード、ハンドシェイクのタイムアウト）、ネットコードの版の確認、プレイヤー同期、命中判定、クラッシュログ、ログ |
 | `src/config.*` | 設定とそのコメント（Windows の表示言語に合わせて中国語 / 日本語 / 英語） |
 | `src/eos_min.h` | 使っている EOS SDK の構造体（公式 1.15.5 のヘッダーから。ゲームは 1.16.1） |
 | `src/eos_hooks.cpp`、`src/iat.*` | `EDF.dll` のインポートテーブルを書き換え、EOS の P2P とロビーの呼び出しを引き受ける |
@@ -219,10 +219,10 @@ Python のツールは `build.sh` が `.venv` に作る仮想環境で動きま�
 | `src/lobby_marker.*` | ロビーのメンバー属性：誰がプラグインを入れているか、ホストのアドレス |
 | `src/direct_net.*`、`src/reliable.*`、`src/wire.*`、`src/auth.*`、`src/fragment.*` | 直接接続の通信、分割送信 |
 | `src/netif.*`、`src/upnp.*` | 物理アダプターの判別、UPnP |
-| `multislot/CMakeLists.txt` | ビルドと唯一のバージョン番号（`project(EDF6Coop VERSION x.y.z)`） |
-| `multislot/packaging/` | パッケージに入れるローダー修正の説明 |
-| `dist/` | インストールスクリプトと同梱の説明書（英語 / 中国語 / 日本語） |
-| `tests/`、`multislot/tests/` | テスト |
+| `CMakeLists.txt` | ビルドと唯一のバージョン番号（`project(EDF6Coop VERSION x.y.z)`） |
+| `dist/` | インストールスクリプト、同梱の説明書（英語 / 中国語 / 日本語）、ローダー修正の説明 |
+| `tests/` | テスト：通信部分、`tests/game/` はゲーム部分、`tests/gamenet/` は本物の `EDF.dll` で動かす複数プロセスの部屋 |
+| `tools/`、`third_party/` | ローダー修正ツールとその入力、MSVC 環境スクリプト、EDFModLoader のプラグインヘッダーとライセンス |
 
 ## 既知の制限
 
@@ -236,7 +236,7 @@ Python のツールは `build.sh` が `.venv` に作る仮想環境で動きま�
 
 ## ライセンス
 
-MIT、[LICENSE](LICENSE) を参照。同梱の EDFModLoader は MIT で、そのライセンスはパッケージに `EDFModLoader_LICENSE.txt` として入っています。ゲーム部分（`multislot/`、最初は momotori01 さんが作成）はパブリックドメインです（[Unlicense](multislot/LICENSE)）。
+MIT、[LICENSE](LICENSE) を参照。同梱の EDFModLoader は MIT で、そのライセンスはパッケージに `EDFModLoader_LICENSE.txt` として入っています。ゲーム部分（`game/`、最初は momotori01 さんが作成）はパブリックドメインです（[Unlicense](game/LICENSE)）。
 
 ## 謝辞
 

@@ -7,10 +7,9 @@
 param([switch]$Upload)
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
-$multislot = Join-Path $root 'multislot'
 
-$cmake = Get-Content -LiteralPath (Join-Path $multislot 'CMakeLists.txt') -Raw
-if ($cmake -notmatch 'project\(EDF6Coop VERSION (\d+\.\d+\.\d+)[\s)]') { throw 'project(EDF6Coop VERSION x.y.z) not found in multislot\CMakeLists.txt' }
+$cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
+if ($cmake -notmatch 'project\(EDF6Coop VERSION (\d+\.\d+\.\d+)[\s)]') { throw 'project(EDF6Coop VERSION x.y.z) not found in CMakeLists.txt' }
 $version = $Matches[1]
 $tag = "v$version"
 $notes = Join-Path $root "release-notes\$version.md"

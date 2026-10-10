@@ -1,4 +1,4 @@
-// EDF6Coop: the transport part (src/) and the game part (multislot/src/) as one plugin, EDF6Coop.dll.
+// EDF6Coop: the transport part (src/) and the game part (game/) as one plugin, EDF6Coop.dll.
 #pragma once
 
 namespace coop {

@@ -3,7 +3,7 @@
 #include <cstring>
 #include <vector>
 
-#include "../src/weaponguard.h"
+#include "../../game/weaponguard.h"
 
 using namespace multislot;
 

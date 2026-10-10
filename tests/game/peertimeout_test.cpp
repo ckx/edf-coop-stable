@@ -11,8 +11,8 @@
 #include <iterator>
 #include <string>
 
-#include "../src/log.h"
-#include "../src/peertimeout.h"
+#include "../../game/log.h"
+#include "../../game/peertimeout.h"
 
 using namespace multislot;
 
