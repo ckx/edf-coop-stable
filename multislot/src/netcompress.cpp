@@ -191,7 +191,6 @@ void InitNetCompress(const unsigned char* gameBase, bool on) {
     gameNew = reinterpret_cast<NewFn>(base + kOperatorNew);
     gameDelete = reinterpret_cast<DeleteFn>(base + kOperatorDelete);
     enabled = on && PackingAvailable();
-    if (on && !enabled) Log("NETCODE Compression: XPRESS (ntdll) is not available; datagrams go unpacked");
 }
 
 void TakePackStats(std::uint64_t& packed, std::uint64_t& saved, std::uint64_t& unpacked) {

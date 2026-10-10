@@ -131,7 +131,10 @@ void TestCaps() {
 
 // XPRESS on the plaintext (netcompress.h): a datagram's records packed and back, byte for byte.
 void TestPacking() {
-    Check(PackingAvailable(), "XPRESS is there (ntdll)");
+    if (!PackingAvailable()) {  // Wine's ntdll: the plugin claims no Compression there (netfeature.cpp)
+        std::printf("SKIP XPRESS packing: ntdll has none\n");
+        return;
+    }
     std::vector<std::uint8_t> records;
     for (int r = 0; r < 12; ++r) {  // records shaped like the game's: a header, then data that repeats
         const std::uint32_t header = 80u << 20 | 0x3000;

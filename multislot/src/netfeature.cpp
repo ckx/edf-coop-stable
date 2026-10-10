@@ -322,7 +322,14 @@ void InitNetFeature(const wchar_t* iniPath) {
     if (flag(L"TrafficClasses", 1)) caps |= static_cast<std::uint32_t>(NetFeature::TrafficClasses);
     if (flag(L"Mesh", 1)) caps |= static_cast<std::uint32_t>(NetFeature::Mesh);
     if (flag(L"Fragments", 1)) caps |= static_cast<std::uint32_t>(NetFeature::Fragments);
-    if (flag(L"Compression", 1)) caps |= static_cast<std::uint32_t>(NetFeature::Compression);
+    // Only claimed where ntdll can unpack XPRESS (Wine's cannot): a member that claims it is sent packed datagrams.
+    if (flag(L"Compression", 1)) {
+        if (PackingAvailable())
+            caps |= static_cast<std::uint32_t>(NetFeature::Compression);
+        else
+            Log("NETCODE Compression: XPRESS (ntdll) is not available; this machine neither packs nor is sent packed "
+                "datagrams");
+    }
     // The later workstreams' parts (W2-W4), read here so that every part of the netcode has its key in [Netcode].
     if (flag(L"PlayerSync", 1)) caps |= static_cast<std::uint32_t>(NetFeature::PlayerSync);
     if (flag(L"HitAuthority", 1)) caps |= static_cast<std::uint32_t>(NetFeature::HitAuthority);

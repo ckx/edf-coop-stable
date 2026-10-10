@@ -569,8 +569,16 @@ inline void CheckXpressMission(const std::vector<Spawned>& machines, const gamen
         packing += line.find("XPRESS: 0 datagrams packed") == std::string::npos ? 1 : 0;
         unpacking += line.find(", 0 unpacked") == std::string::npos ? 1 : 0;
     }
-    Check(packing > 0 && unpacking > 0, std::to_string(packing) + " machines packed datagrams, " +
-                                            std::to_string(unpacking) + " unpacked them");
+    // Wine's ntdll has no XPRESS: there no machine may claim Compression, so nothing is packed and the mission goes
+    // through unpacked.
+    std::size_t without = 0;
+    for (const auto& machine : machines)
+        without += machine.text.find("XPRESS (ntdll) is not available") != std::string::npos ? 1 : 0;
+    if (without == machines.size())
+        Check(packing == 0 && unpacking == 0, "no XPRESS on any machine, and none packed or unpacked a datagram");
+    else
+        Check(packing > 0 && unpacking > 0, std::to_string(packing) + " machines packed datagrams, " +
+                                                std::to_string(unpacking) + " unpacked them");
     // A packed datagram keeps its class: the send finds the records of its flush by the packed size.
     for (const auto& machine : machines)
         for (std::size_t at = machine.text.find("NETCLASS datagrams: "); at != std::string::npos;
