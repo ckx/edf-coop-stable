@@ -1,9 +1,7 @@
 // A stand-in EOSSDK-Win64-Shipping.dll for SyncMarkerTests and LobbyStateTests: the lobby and id functions
 // syncmarker.cpp, lobbystate.cpp and identity.cpp use, over one in-memory lobby. Completions run on EOS_Platform_Tick, as EOS runs them. The test
 // drives it through the FakeEos_* exports.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstring>

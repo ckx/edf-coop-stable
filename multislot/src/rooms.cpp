@@ -1,13 +1,11 @@
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include "rooms.h"
 
 #include <atomic>
 #include <cstring>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "log.h"
 #include "patches.h"
 
@@ -65,31 +63,30 @@ const unsigned char* gameImage = nullptr;
 // for room list entries it made itself, EOS knows nothing of those).
 void* GameImport(const char* function) {
     if (!gameImage) return nullptr;
-    return Probing([&]() -> void* {
-        __try {
-            const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(gameImage);
-            const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(gameImage + dos->e_lfanew);
-            const auto& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
-            if (!directory.VirtualAddress) return nullptr;
-            for (auto entry = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(gameImage + directory.VirtualAddress);
-                 entry->Name; ++entry) {
-                if (_stricmp(reinterpret_cast<const char*>(gameImage + entry->Name), "EOSSDK-Win64-Shipping.dll") != 0)
-                    continue;
-                auto names = reinterpret_cast<const IMAGE_THUNK_DATA64*>(
-                    gameImage + (entry->OriginalFirstThunk ? entry->OriginalFirstThunk : entry->FirstThunk));
-                auto slots = reinterpret_cast<const IMAGE_THUNK_DATA64*>(gameImage + entry->FirstThunk);
-                for (; names->u1.AddressOfData; ++names, ++slots) {
-                    if (IMAGE_SNAP_BY_ORDINAL64(names->u1.Ordinal)) continue;
-                    const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(gameImage + names->u1.AddressOfData);
-                    if (std::strcmp(reinterpret_cast<const char*>(byName->Name), function) == 0)
-                        return reinterpret_cast<void*>(slots->u1.Function);
+    void* found = nullptr;
+    Guarded([&] {
+        const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(gameImage);
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(gameImage + dos->e_lfanew);
+        const auto& directory = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+        if (!directory.VirtualAddress) return;
+        for (auto entry = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(gameImage + directory.VirtualAddress);
+             entry->Name; ++entry) {
+            if (_stricmp(reinterpret_cast<const char*>(gameImage + entry->Name), "EOSSDK-Win64-Shipping.dll") != 0)
+                continue;
+            auto names = reinterpret_cast<const IMAGE_THUNK_DATA64*>(
+                gameImage + (entry->OriginalFirstThunk ? entry->OriginalFirstThunk : entry->FirstThunk));
+            auto slots = reinterpret_cast<const IMAGE_THUNK_DATA64*>(gameImage + entry->FirstThunk);
+            for (; names->u1.AddressOfData; ++names, ++slots) {
+                if (IMAGE_SNAP_BY_ORDINAL64(names->u1.Ordinal)) continue;
+                const auto* byName = reinterpret_cast<const IMAGE_IMPORT_BY_NAME*>(gameImage + names->u1.AddressOfData);
+                if (std::strcmp(reinterpret_cast<const char*>(byName->Name), function) == 0) {
+                    found = reinterpret_cast<void*>(slots->u1.Function);
+                    return;
                 }
             }
-            return nullptr;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return nullptr;
         }
     });
+    return found;
 }
 
 // The positive int64 the lobby publishes under `key`, up to kMaxPlayers; 0 when it publishes none or it cannot be read.
@@ -120,13 +117,9 @@ std::atomic<LobbyInfoReleaseFn> releaseInfo{nullptr};
 std::atomic<int> reports{0};
 
 void* HandleOf(void* holder) {
-    return Probing([&]() -> void* {
-        __try {
-            return holder ? **static_cast<void***>(holder) : nullptr;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return nullptr;
-        }
-    });
+    void* handle = nullptr;
+    if (holder) Guarded([&] { handle = **static_cast<void***>(holder); });
+    return handle;
 }
 
 // The room's members and capacity from EOS; the vanilla capacity of 4 (members as counted) when EOS cannot tell.
@@ -207,7 +200,7 @@ std::uint32_t GameRoomMemberCount(void* lobbyInterface, const void* user, const 
 
 void InitRooms(const unsigned char* gameBase) {
     gameImage = gameBase;
-    memberCount = reinterpret_cast<MemberCountFn>(gameBase + kMemberCountWrapper);
+    memberCount = reinterpret_cast<MemberCountFn>(reinterpret_cast<std::uintptr_t>(gameBase) + kMemberCountWrapper);
     const HMODULE sdk = GetModuleHandleW(L"EOSSDK-Win64-Shipping.dll");
     copyInfo = sdk ? reinterpret_cast<LobbyInfoCopyFn>(GetProcAddress(sdk, "EOS_LobbyDetails_CopyInfo")) : nullptr;
     releaseInfo = sdk ? reinterpret_cast<LobbyInfoReleaseFn>(GetProcAddress(sdk, "EOS_LobbyDetails_Info_Release")) : nullptr;

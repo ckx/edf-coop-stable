@@ -1,9 +1,7 @@
 // Who reads a split mission start message (syncmarker.h), against a stand-in EOS SDK (fake_eos.cpp): the game's
 // lobby calls go through the plugin's redirects, completions run on the EOS tick, and the lobby keeps member
 // attributes the way EOS does.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdio>

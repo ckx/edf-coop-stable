@@ -1,6 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include "roomview.h"
 
@@ -10,7 +8,7 @@
 #include <vector>
 
 #include "armor.h"
-#include "crashlog.h"
+#include "guard.h"
 #include "identity.h"
 #include "joinlog.h"
 #include "log.h"
@@ -41,12 +39,7 @@ constexpr std::size_t kMemberClassOk = 0x08;   // byte  (747340 read the source 
 constexpr std::size_t kMemberClass = 0x0C;     // int   soldier type
 constexpr std::size_t kMemberArmorOk = 0x38;   // byte  (745D50)
 constexpr std::size_t kMemberArmor = 0x3C;     // int   the number the room panel prints as _pl_Armor
-constexpr std::size_t kMemberRatioOk = 0x40;   // byte  (745ED0)
-constexpr std::size_t kMemberRatio = 0x44;     // float clear ratio
-constexpr std::size_t kMemberPlaceOk = 0x48;   // byte  (746050)
-constexpr std::size_t kMemberPlace = 0x4C;     // int   index into a name table
 constexpr std::uint32_t kLocalPlayers = 0x6E90;    // GameStatus: class, then the armor field at +4
-constexpr std::size_t kLocalPlayerStride = 0x3E60;
 constexpr std::uint32_t kEffectiveArmor = 0x0D8700;  // (GameStatus, slot) -> the armor limit, or its default
 constexpr std::size_t kPadSlotSize = 0x4A0;
 constexpr std::size_t kChannelPressed = 0x4C;
@@ -99,12 +92,8 @@ std::uint64_t CallWithMembers(RoomFunction original, void* room, Entry* data, st
     members->data = data;
     members->capacity = count;
     members->size = count;
-    std::uint64_t result = 0;
-    __try {
-        result = original(room);
-    } __finally {
-        *members = saved;
-    }
+    const std::uint64_t result = original(room);
+    *members = saved;
     return result;
 }
 
@@ -113,28 +102,24 @@ void RequestRebuild(void* room) { static_cast<std::uint8_t*>(room)[kRebuild] = 1
 // A child screen or dialog of the room is alive; rebuilding now would drop it. An unreadable
 // field counts as open, so nothing is rebuilt.
 bool ChildOpen(void* room) {
-    return Probing([&]() -> bool {
-        __try {
-            const auto* bytes = static_cast<const char*>(room);
-            return Alive(*reinterpret_cast<void* const*>(bytes + kChildA)) || Alive(*reinterpret_cast<void* const*>(bytes + kChildB));
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return true;
-        }
+    bool open = true;
+    Guarded([&] {
+        const auto* bytes = static_cast<const char*>(room);
+        open = Alive(*reinterpret_cast<void* const*>(bytes + kChildA)) || Alive(*reinterpret_cast<void* const*>(bytes + kChildB));
     });
+    return open;
 }
 
 bool PadDown(std::uint32_t channel) {
     if (!channel) return false;
-    return Probing([&]() -> bool {
-        __try {
-            for (std::size_t slot = 0; slot < 2; ++slot) {
-                const auto* button = *reinterpret_cast<const std::uint8_t* const*>(game + kPadSlots + slot * kPadSlotSize + channel);
-                if (button && button[kChannelPressed]) return true;
-            }
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+    bool down = false;
+    Guarded([&] {
+        for (std::size_t slot = 0; slot < 2 && !down; ++slot) {
+            const auto* button = *reinterpret_cast<const std::uint8_t* const*>(game + kPadSlots + slot * kPadSlotSize + channel);
+            down = button && button[kChannelPressed];
         }
-        return false;
     });
+    return down;
 }
 
 bool KeyDown(int key) {
@@ -169,22 +154,19 @@ int Field32(const std::uint8_t* at, std::size_t offset) {
 // Diagnostic: what the game holds for this machine's own player. Logged once and again whenever it
 // changes, so picking a different armor or class on the equipment screen shows up here.
 void ProbeLocalArmor() {
-    Probing([&] {
-        __try {
-            const std::uint8_t* status = GameStatus();
-            if (!status) return;
-            const int soldier = Field32(status, kLocalPlayers);
-            const int armor = Field32(status, kLocalPlayers + 4);
-            if (soldier == lastLocalClass && armor == lastLocalArmor) return;
-            lastLocalClass = soldier;
-            lastLocalArmor = armor;
-            const auto effective = reinterpret_cast<int(__fastcall*)(const void*, int)>(game + kEffectiveArmor);
-            int ownClass = 0, pickups = 0, own = 0;
-            const bool read = LocalArmor(ownClass, pickups, own);
-            Log("ARMOR you: class %d, armor %d from %d pickups%s (armor limit setting %d, effective %d)", soldier,
-                read ? own : -1, read ? pickups : -1, read ? "" : " - could not be read", armor, effective(status, 0));
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-        }
+    Guarded([&] {
+        const std::uint8_t* status = GameStatus();
+        if (!status) return;
+        const int soldier = Field32(status, kLocalPlayers);
+        const int armor = Field32(status, kLocalPlayers + 4);
+        if (soldier == lastLocalClass && armor == lastLocalArmor) return;
+        lastLocalClass = soldier;
+        lastLocalArmor = armor;
+        const auto effective = reinterpret_cast<int(__fastcall*)(const void*, int)>(reinterpret_cast<std::uintptr_t>(game) + kEffectiveArmor);
+        int ownClass = 0, pickups = 0, own = 0;
+        const bool read = LocalArmor(ownClass, pickups, own);
+        Log("ARMOR you: class %d, armor %d from %d pickups%s (armor limit setting %d, effective %d)", soldier,
+            read ? own : -1, read ? pickups : -1, read ? "" : " - could not be read", armor, effective(status, 0));
     });
 }
 
@@ -211,40 +193,37 @@ void NoteRoster(const MemberVector* members, std::size_t count, const RoomMember
         char name[kNameTextBytes]{};
         if (member && member[kMemberNameOk] != 0) NameText(member + kMemberName, name, sizeof(name));
         const int written =
-            _snprintf_s(roster + used, sizeof(roster) - used, _TRUNCATE, "%s%zu %s %s %d", used ? ", " : "", i,
+            FormatText(roster + used, sizeof(roster) - used, "%s%zu %s %s %d", used ? ", " : "", i,
                         name[0] ? name : "(no name)", seen[i].valid ? SoldierName(seen[i].soldier) : "not chosen",
                         seen[i].valid ? seen[i].armor : 0);
         used = written < 0 ? -1 : used + written;
     }
     if (std::strcmp(roster, lastRoster) == 0) return;
-    _snprintf_s(lastRoster, sizeof(lastRoster), _TRUNCATE, "%s", roster);
+    FormatText(lastRoster, sizeof(lastRoster), "%s", roster);
     Log("ROOM members (%zu): %s", count, roster);
 }
 
 // What "copy armor" needs from the room screen: the class and armor of every member, in panel order.
 void NoteMembers(void* room) {
-    Probing([&] {
-        __try {
-            const MemberVector* members = Members(room);
-            const std::size_t count = members->size;
-            if (!members->data || count > static_cast<std::size_t>(kMaxPlayers)) {
-                ForgetRoom();
-                return;
-            }
-            RoomMemberArmor seen[kMaxPlayers]{};
-            for (std::size_t i = 0; i < count; ++i) {
-                const auto* member = static_cast<const std::uint8_t*>(members->data[i].object);
-                if (!member) continue;
-                seen[i].valid = member[kMemberClassOk] != 0 && member[kMemberArmorOk] != 0;
-                seen[i].soldier = Field32(member, kMemberClass);
-                seen[i].armor = Field32(member, kMemberArmor);
-            }
-            NoteRoster(members, count, seen);
-            NoteRoomMembers(seen, count);
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
+    if (!Guarded([&] {
+        const MemberVector* members = Members(room);
+        const std::size_t count = members->size;
+        if (!members->data || count > static_cast<std::size_t>(kMaxPlayers)) {
             ForgetRoom();
+            return;
         }
-    });
+        RoomMemberArmor seen[kMaxPlayers]{};
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto* member = static_cast<const std::uint8_t*>(members->data[i].object);
+            if (!member) continue;
+            seen[i].valid = member[kMemberClassOk] != 0 && member[kMemberArmorOk] != 0;
+            seen[i].soldier = Field32(member, kMemberClass);
+            seen[i].armor = Field32(member, kMemberArmor);
+        }
+        NoteRoster(members, count, seen);
+        NoteRoomMembers(seen, count);
+        }))
+        ForgetRoom();
 }
 
 void Poll(void* room) {
@@ -451,9 +430,9 @@ int VirtualKey(const wchar_t* name) {
 void InitRoomView(const unsigned char* gameBase, const RoomViewSettings& settings) {
     game = gameBase;
     config = settings;
-    originalBuilder = reinterpret_cast<RoomFunction>(gameBase + kPanelBuilder);
-    originalVoiceIcons = reinterpret_cast<RoomFunction>(gameBase + kVoiceIcons);
-    originalOnUpdate = reinterpret_cast<OnUpdateFunction>(gameBase + kRoomOnUpdate);
+    originalBuilder = reinterpret_cast<RoomFunction>(reinterpret_cast<std::uintptr_t>(gameBase) + kPanelBuilder);
+    originalVoiceIcons = reinterpret_cast<RoomFunction>(reinterpret_cast<std::uintptr_t>(gameBase) + kVoiceIcons);
+    originalOnUpdate = reinterpret_cast<OnUpdateFunction>(reinterpret_cast<std::uintptr_t>(gameBase) + kRoomOnUpdate);
 }
 
 std::uint64_t BuildPanelsHook(void* room) { return PagedCall(room, originalBuilder); }

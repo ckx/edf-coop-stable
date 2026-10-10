@@ -1,13 +1,11 @@
 #include "spawn.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <atomic>
 #include <cstring>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "log.h"
 #include "mission.h"
 #include "patches.h"
@@ -49,33 +47,29 @@ void SetInt32At(std::uint64_t address, std::int32_t value) {
 // constructor displacement offset, type descriptor RVA, hierarchy RVA, locator RVA}; the type descriptor
 // holds two pointers and then the decorated name of the most derived class (".?AVGiantAnt@@").
 bool ReadClassName(std::uint64_t object, char* out, std::size_t size) {
-    return Probing([&]() -> bool {
-        __try {
-            const std::uint64_t vtable = *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(object));
-            const std::uint64_t locator = *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(vtable - 8));
-            const auto* col = reinterpret_cast<const std::uint32_t*>(static_cast<std::uintptr_t>(locator));
-            if (col[0] != 1) return false;
-            const std::uint64_t imageBase = locator - col[5];
-            const auto* name = reinterpret_cast<const char*>(static_cast<std::uintptr_t>(imageBase + col[3] + 16));
-            std::size_t i = 0;
-            for (; i + 1 < size && name[i]; ++i) out[i] = name[i];
-            out[i] = 0;
-            return i > 0 && name[i] == 0;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        const std::uint64_t vtable = *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(object));
+        const std::uint64_t locator = *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(vtable - 8));
+        const auto* col = reinterpret_cast<const std::uint32_t*>(static_cast<std::uintptr_t>(locator));
+        if (col[0] != 1) return;
+        const std::uint64_t imageBase = locator - col[5];
+        const auto* name = reinterpret_cast<const char*>(static_cast<std::uintptr_t>(imageBase + col[3] + 16));
+        std::size_t i = 0;
+        for (; i + 1 < size && name[i]; ++i) out[i] = name[i];
+        out[i] = 0;
+        read = i > 0 && name[i] == 0;
     });
+    return read;
 }
 
 bool ReadPointer(std::uint64_t address, std::uint64_t& value) {
-    return Probing([&]() -> bool {
-        __try {
-            value = *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(address));
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        value = *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(address));
+        read = true;
     });
+    return read;
 }
 
 // ".?AVGiantAnt@@" -> "GiantAnt" (in place); nullptr for any other shape (namespaces, templates).
@@ -156,14 +150,12 @@ void EnemyGeneratorHandler(CpuContext* context) { RegisterCount(context, "Object
 void InstantGeneratorHandler(CpuContext* context) { RegisterCount(context, "Object.SetInstantEnemyGenerator"); }
 
 bool ReadUInt32(std::uint64_t address, std::uint32_t& value) {
-    return Probing([&]() -> bool {
-        __try {
-            value = *reinterpret_cast<const std::uint32_t*>(static_cast<std::uintptr_t>(address));
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        value = *reinterpret_cast<const std::uint32_t*>(static_cast<std::uintptr_t>(address));
+        read = true;
     });
+    return read;
 }
 
 // EDF6_TimeShip_CreatePodCrue (1CABB0) once the pod is known ([rsp+0x40]) and before the crew loop runs

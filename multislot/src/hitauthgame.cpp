@@ -1,9 +1,7 @@
 #define _CRT_RAND_S  // rand_s: the sender id (InitHitAuthority)
 #include "hitauthgame.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 #include <intrin.h>
 
 #include <cstdlib>
@@ -186,7 +184,7 @@ void Summarize(std::uint64_t now) {
     int used = 0;
     for (int i = 1; i < 9 && used >= 0; ++i)
         if (stats.rejected[i])
-            used += _snprintf_s(reasons + used, sizeof(reasons) - used, _TRUNCATE, "%s%s %llu", used ? ", " : "",
+            used += FormatText(reasons + used, sizeof(reasons) - used, "%s%s %llu", used ? ", " : "",
                                 HitRejectName(static_cast<HitReject>(i)), stats.rejected[i]);
     Log("NetHit: sent %llu hits to their owners (%llu not sent), dropped %llu copies of others' hits; received %llu, "
         "dealt %llu (%llu unreadable, %llu left to this machine's own copy of the hit)%s%s",

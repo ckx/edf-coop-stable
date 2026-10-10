@@ -1,14 +1,12 @@
 #include "networld.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <atomic>
 #include <cstring>
 
 #include "code.h"
-#include "crashlog.h"
+#include "guard.h"
 #include "log.h"
 #include "mission.h"
 #include "netfeature.h"
@@ -169,32 +167,30 @@ void RngReceiveHandler(CpuContext* context) {
 // Reads everything the decision needs from `object` (GameObjectBase*) and the object its +0x518 weak pointer names.
 // False when any of it could not be read: then the game decides as it always did.
 bool ReadView(std::uint64_t object, RetargetView& view) {
-    return Probing([&]() -> bool {
-        __try {
-            const auto* o = reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(object));
-            std::memcpy(&view.netFlags, o + kObjectNetFlags, sizeof(view.netFlags));
-            view.ownerSendsTarget = o[kObjectSendsTarget] != 0 && o[kObjectNoTargetSync] == 0;
-            std::memcpy(&view.period, o + kObjectRetargetPeriod, sizeof(view.period));
-            std::uint64_t target = 0, control = 0;
-            std::memcpy(&target, o + kObjectTarget, sizeof(target));
-            std::memcpy(&control, o + kObjectTarget + 8, sizeof(control));
-            view.hasTarget = false;
-            if (target && control) {
-                // std::shared_ptr control block: vtable, uses (+8), weaks (+0xC). Uses 0: the target is gone.
-                std::uint32_t uses = 0;
-                std::memcpy(&uses, reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(control)) + 8, sizeof(uses));
-                if (uses != 0) {
-                    const auto* t = reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(target));
-                    std::memcpy(&view.targetState, t + kObjectState, sizeof(view.targetState));
-                    std::memcpy(&view.targetHealth, t + kObjectHealth, sizeof(view.targetHealth));
-                    view.hasTarget = true;
-                }
+    bool read = false;
+    Guarded([&] {
+        const auto* o = reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(object));
+        std::memcpy(&view.netFlags, o + kObjectNetFlags, sizeof(view.netFlags));
+        view.ownerSendsTarget = o[kObjectSendsTarget] != 0 && o[kObjectNoTargetSync] == 0;
+        std::memcpy(&view.period, o + kObjectRetargetPeriod, sizeof(view.period));
+        std::uint64_t target = 0, control = 0;
+        std::memcpy(&target, o + kObjectTarget, sizeof(target));
+        std::memcpy(&control, o + kObjectTarget + 8, sizeof(control));
+        view.hasTarget = false;
+        if (target && control) {
+            // std::shared_ptr control block: vtable, uses (+8), weaks (+0xC). Uses 0: the target is gone.
+            std::uint32_t uses = 0;
+            std::memcpy(&uses, reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(control)) + 8, sizeof(uses));
+            if (uses != 0) {
+                const auto* t = reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(target));
+                std::memcpy(&view.targetState, t + kObjectState, sizeof(view.targetState));
+                std::memcpy(&view.targetHealth, t + kObjectHealth, sizeof(view.targetHealth));
+                view.hasTarget = true;
             }
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
         }
+        read = true;
     });
+    return read;
 }
 
 // GameObjectBase::Update at 54BF39, `cmp ecx, [rdi+0x514]` (displaced, runs after this) then `jb 54C22C`: ecx is

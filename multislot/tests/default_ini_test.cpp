@@ -2,9 +2,7 @@
 // plugin reads in the section it reads it from: a key under another section is silently ignored, and the
 // line in the file then promises a setting that does nothing.
 //   DefaultIniTests src-folder work-folder
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdio>
 #include <fstream>

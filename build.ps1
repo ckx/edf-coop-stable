@@ -13,8 +13,8 @@ $multislot = Join-Path $PSScriptRoot 'multislot'
 $buildDir = Join-Path $multislot 'build'
 
 if (-not (Test-Path -LiteralPath (Join-Path $multislot 'third_party\EDFModLoader\winmm.dll'))) {
-    & (Join-Path $multislot 'tools\fetch_modloader.ps1')
-    if ($LASTEXITCODE) { throw "fetch_modloader.ps1 failed ($LASTEXITCODE)" }
+    python -B (Join-Path $multislot 'tools\fetch_modloader.py')
+    if ($LASTEXITCODE) { throw "fetch_modloader.py failed ($LASTEXITCODE)" }
 }
 if (-not $CI -and -not (Test-Path -LiteralPath (Join-Path $multislot 'assets\LYT_MAINFRAME.SGO'))) {
     python -B (Join-Path $multislot 'tools\make_menu_label.py')

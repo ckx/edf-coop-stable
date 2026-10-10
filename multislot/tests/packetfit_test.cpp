@@ -1,9 +1,7 @@
 // The mission start message against EOS's packet size (packetfit.h), without the game: a stand-in record
 // writer/reader shaped like 773840/773740 (a record starts with a number, never with a byte array), a byte stream
 // laid out like the game's, and a fake EOS that records what is sent and hands back what is queued.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <cstdint>

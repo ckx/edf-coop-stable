@@ -1,9 +1,7 @@
 // The lobby the game is in (lobbystate.h), against a stand-in EOS SDK (fake_eos.cpp): what a room update
 // publishes is read from the lobby, the label follows it, and the game's lobby calls never leave this machine
 // behind as a member of a lobby it no longer plays in.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <array>
 #include <cstdint>

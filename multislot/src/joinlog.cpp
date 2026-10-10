@@ -1,13 +1,11 @@
 #include "joinlog.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <atomic>
 #include <cstring>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "identity.h"
 #include "log.h"
 #include "patches.h"
@@ -37,14 +35,7 @@ const char* lastSlotFailure = nullptr;
 
 template <typename T>
 bool Read(std::uint64_t address, T& value) {
-    return Probing([&]() -> bool {
-        __try {
-            value = *reinterpret_cast<const T*>(static_cast<std::uintptr_t>(address));
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    });
+    return ReadGuarded(static_cast<std::uintptr_t>(address), value);
 }
 
 // HUiLobby join button (8EC476, `cmp byte [rcx+0x300], 0`): rcx = GameStatus, r14 = selected RoomInfo.
@@ -279,31 +270,29 @@ MidHandler JoinLogHookHandler(std::uint32_t rva) {
 bool ReadUserSlots(const void* users, UserSlotsSnapshot& out) {
     out = {};
     if (!users) return false;
-    return Probing([&]() -> bool {
-        __try {
-            const auto* vector = static_cast<const std::uintptr_t*>(users);
-            const auto begin = vector[0], end = vector[1], allocatedEnd = vector[2];
-            if (!begin || end < begin || allocatedEnd < end || (end - begin) % 16 ||
-                (end - begin) / 16 > static_cast<std::uintptr_t>(kMaxPlayers)) return false;
-            UserSlotsSnapshot snapshot{};
-            snapshot.capacity = (end - begin) / 16;
-            for (std::size_t i = 0; i < snapshot.capacity; ++i) {
-                const auto object = *reinterpret_cast<const std::uintptr_t*>(begin + 16 * i);
-                if (!object) continue;
-                auto& slot = snapshot.slots[i];
-                slot.object = object;
-                slot.productId = *reinterpret_cast<const std::uintptr_t*>(object + 0x18);
-                slot.flags = *reinterpret_cast<const std::uint32_t*>(object + 0x10);
-                slot.index = *reinterpret_cast<const std::int32_t*>(object + 0x40);
-                ++snapshot.occupied;
-                if (slot.flags & 1) ++snapshot.ready;
-            }
-            out = snapshot;
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
+    bool read = false;
+    Guarded([&] {
+        const auto* vector = static_cast<const std::uintptr_t*>(users);
+        const auto begin = vector[0], end = vector[1], allocatedEnd = vector[2];
+        if (!begin || end < begin || allocatedEnd < end || (end - begin) % 16 ||
+            (end - begin) / 16 > static_cast<std::uintptr_t>(kMaxPlayers)) return;
+        UserSlotsSnapshot snapshot{};
+        snapshot.capacity = (end - begin) / 16;
+        for (std::size_t i = 0; i < snapshot.capacity; ++i) {
+            const auto object = *reinterpret_cast<const std::uintptr_t*>(begin + 16 * i);
+            if (!object) continue;
+            auto& slot = snapshot.slots[i];
+            slot.object = object;
+            slot.productId = *reinterpret_cast<const std::uintptr_t*>(object + 0x18);
+            slot.flags = *reinterpret_cast<const std::uint32_t*>(object + 0x10);
+            slot.index = *reinterpret_cast<const std::int32_t*>(object + 0x40);
+            ++snapshot.occupied;
+            if (slot.flags & 1) ++snapshot.ready;
         }
+        out = snapshot;
+        read = true;
     });
+    return read;
 }
 
 bool ReadCurrentRoomUsers(std::uintptr_t gameBase, std::uintptr_t& users, const char*& failure) {

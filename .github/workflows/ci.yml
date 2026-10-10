@@ -39,7 +39,7 @@ jobs:
 
       - name: Fetch EDFModLoader (pinned by hash)
         shell: pwsh
-        run: ./multislot/tools/fetch_modloader.ps1
+        run: python -B multislot/tools/fetch_modloader.py
 
       # The build runs multislot/tools/fix_winmm_proxy.py on the loader, which needs pefile and capstone. The
       # runner has several Pythons and CMake would pick its own, so the build is told which one has them.

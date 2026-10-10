@@ -1,6 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include "userslots.h"
 
@@ -8,7 +6,7 @@
 #include <cstring>
 #include <mutex>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "log.h"
 #include "patches.h"
 #include "../../src/extension_api.h"
@@ -41,14 +39,7 @@ std::string MemberText(const void* puid) {
 
 template <typename T>
 bool Read(std::uint64_t address, T* out) {
-    return Probing([&] {
-        __try {
-            std::memcpy(out, reinterpret_cast<const void*>(static_cast<std::uintptr_t>(address)), sizeof(T));
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    });
+    return ReadGuarded(static_cast<std::uintptr_t>(address), *out);
 }
 
 // Users::Add (12B7F50) after its search for the first empty slot, `movsxd rax, ecx; cmp rax, r8` (run after this):
@@ -72,11 +63,8 @@ void AddHandler(CpuContext* context) {
     if (slot != firstEmpty) {
         const auto index = static_cast<std::int32_t>(slot);
         context->rcx = static_cast<std::uint32_t>(index);
-        Probing([&] {
-            __try {
-                std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(context->rbp)), &index, sizeof(index));
-            } __except (EXCEPTION_EXECUTE_HANDLER) {
-            }
+        Guarded([&] {
+            std::memcpy(reinterpret_cast<void*>(static_cast<std::uintptr_t>(context->rbp)), &index, sizeof(index));
         });
         Log("ROOM member %s takes slot %d, the one the room's host's game has it in (the first empty one here: %d)",
             member.c_str(), slot, firstEmpty);

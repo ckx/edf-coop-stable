@@ -16,9 +16,12 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 
 ## Build and test
 
-- Windows x64 only: MSVC (Visual Studio 2022), CMake, Ninja, Python 3.10+. Requirements are in README.md, "Build".
-- `build.ps1 -Test` builds and runs ctest. `build.ps1 -CI` builds without the game's assets; that build embeds placeholders and `package.ps1` refuses it.
-- Set `EDF6_GAME_DIR` to the game folder. Tests against the game's code (`PatchTablesMatchEDF`, `PluginLoad_*`, `GameNet_*`, `*GameCode`, `*MatchEDF`) report skipped (exit 77) without `EDF.dll`, so CI never runs them. Say so when reporting results from a build without the game.
+- Two toolchains build the same DLL. Requirements for both are in README.md, "Build".
+  - Windows: MSVC (Visual Studio 2022). `build.ps1 -Test` builds and runs ctest; release packages come from this build.
+  - Linux: `build.sh -t` cross-builds with clang for MinGW-w64 (`cmake/mingw-w64.cmake`) and runs ctest under Wine in its own prefix. This is the everyday loop on the dev box, and the Proton check: every test, GameNet included, runs there.
+- Keep code buildable by both. No `__try`/`__except` (MinGW compilers drop the handler): probes of game memory go through `Guarded`/`ReadGuarded` (`multislot/src/guard.h`). Wide text in a log line goes through `Utf8Text` (`src/utf8.h`), never `%ls`. Library types handed to the game are laid out by hand (`Shared`, `tests/gamenet/msvc_abi.h`), never the toolchain's own `std::` types.
+- `-CI` / `-c` builds without the game's assets; that build embeds placeholders and `package.ps1` refuses it.
+- Set `EDF6_GAME_DIR` to the game folder (on the dev box `/mnt/kosmos/SteamLibrary/steamapps/common/EARTH DEFENSE FORCE 6`). Tests against the game's code (`PatchTablesMatchEDF`, `PluginLoad_*`, `GameNet_*`, `*GameCode`, `*MatchEDF`) report skipped (exit 77) without `EDF.dll`, so CI never runs them. Say so when reporting results from a build without the game.
 - Only one `EDF.dll` build is supported (TimeDateStamp `0x678CCB46`). Every patch verifies original bytes before writing; keep it that way, and refuse cleanly when they do not match.
 - A green ctest is not a live multiplayer test. Behaviour that only real play can confirm is reported as unverified.
 

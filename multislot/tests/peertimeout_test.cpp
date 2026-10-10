@@ -2,9 +2,7 @@
 // with its eos::Users and P2P link manager, the manager's list of links, links with their weak_ptr<eos::User>,
 // deadline and timed-out flag. No game needed; the offsets are tied to EDF.dll by PatchTablesMatchEDF.
 //   PeerTimeoutTests log-file
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <array>
 #include <cstdio>

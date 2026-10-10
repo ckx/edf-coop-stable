@@ -1,9 +1,7 @@
 // Host mode against a fake game: the room create/update handlers with both settings, the menu label
 // choice, and the menu frame update with stand-ins for the three HUiLayout/HUiTextField functions it calls
 // (component index by name, text component by index, set text) reached through jumps at their RVAs.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <array>
 #include <cstdint>

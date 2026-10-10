@@ -4,7 +4,7 @@
 // resolved with GetProcAddress, so no import library is needed. The structures here are declared under
 // #pragma pack(4): a hand-written copy with natural alignment puts ExceptionPointers 4 bytes too far
 // along and MiniDumpWriteDump fails with ERROR_NOACCESS.
-#include <DbgHelp.h>
+#include <dbghelp.h>
 
 #include <atomic>
 #include <cstdarg>
@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <cwchar>
 
+#include "guard.h"
 #include "log.h"
 
 namespace multislot {
@@ -61,9 +62,9 @@ struct Text {
         if (length >= kTextSize - 1) return;
         va_list args;
         va_start(args, format);
-        const int n = _vsnprintf_s(data + length, kTextSize - length, _TRUNCATE, format, args);
+        const int n = std::vsnprintf(data + length, kTextSize - length, format, args);
         va_end(args);
-        length = n < 0 ? kTextSize - 1 : length + static_cast<std::size_t>(n);
+        length = n < 0 || static_cast<std::size_t>(n) >= kTextSize - length ? kTextSize - 1 : length + static_cast<std::size_t>(n);
     }
 };
 
@@ -93,7 +94,7 @@ void Where(Text& text, std::uintptr_t address) {
                            reinterpret_cast<LPCWSTR>(address), &module) &&
         GetModuleFileNameW(module, path, MAX_PATH)) {
         const wchar_t* name = wcsrchr(path, L'\\');
-        text.Add("%ls+%llX", name ? name + 1 : path,
+        text.Add("%s+%llX", Utf8Text(name ? name + 1 : path).c_str(),
                  static_cast<unsigned long long>(address - reinterpret_cast<std::uintptr_t>(module)));
         return;
     }
@@ -102,7 +103,7 @@ void Where(Text& text, std::uintptr_t address) {
 
 // MSVC C++ exception: ExceptionInformation = {magic, object, ThrowInfo, image base}.
 void CppTypeName(Text& text, const EXCEPTION_RECORD* record) {
-    __try {
+    const bool read = Guarded([&] {
         if (record->NumberParameters < 4) return;
         const auto base = static_cast<std::uintptr_t>(record->ExceptionInformation[3]);
         const auto throwInfo = static_cast<std::uintptr_t>(record->ExceptionInformation[2]);
@@ -112,13 +113,12 @@ void CppTypeName(Text& text, const EXCEPTION_RECORD* record) {
         const auto first = base + static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(types + 4));
         const auto descriptor = base + static_cast<std::uint32_t>(*reinterpret_cast<const std::int32_t*>(first + 4));
         text.Add(" type=%.120s", reinterpret_cast<const char*>(descriptor + 16));
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        text.Add(" type=?");
-    }
+    });
+    if (!read) text.Add(" type=?");
 }
 
 void Stack(Text& text, CONTEXT context) {
-    __try {
+    const bool walked = Guarded([&] {
         for (int frame = 0; frame < 24 && context.Rip; ++frame) {
             text.Add("  #%02d ", frame);
             Where(text, context.Rip);
@@ -136,32 +136,35 @@ void Stack(Text& text, CONTEXT context) {
                 context.Rsp += 8;
             }
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        text.Add("  (stack unreadable beyond this point)\r\n");
-    }
+    });
+    if (!walked) text.Add("  (stack unreadable beyond this point)\r\n");
 }
 
 // Other modules throw and catch C++ exceptions as a matter of course (the OpenXR runtime does while it
 // starts), so only those raised by the game, or by a runtime helper it called, are reported: EDF.dll has
 // to be among the first few frames of the throw.
 bool ThrownForGame(CONTEXT context) {
-    __try {
+    bool thrown = false;
+    Guarded([&] {
         for (int frame = 0; frame < 6 && context.Rip; ++frame) {
-            if (context.Rip >= gameBase && context.Rip < gameEnd) return true;
+            if (context.Rip >= gameBase && context.Rip < gameEnd) {
+                thrown = true;
+                return;
+            }
             DWORD64 imageBase = 0;
             const auto function = RtlLookupFunctionEntry(context.Rip, &imageBase, nullptr);
-            if (!function) return false;
+            if (!function) return;
             PVOID handlerData = nullptr;
             DWORD64 establisher = 0;
             RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, context.Rip, function, &context, &handlerData, &establisher,
                              nullptr);
         }
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-    }
-    return false;
+    });
+    return thrown;
 }
 
 std::atomic<DWORD> writerThread{0};
+std::atomic<DWORD> dumpThreadId{0};
 
 // On the dump thread, while the faulting thread (`thread`) waits with the report lock held; at most once per launch.
 void WriteMiniDump(EXCEPTION_POINTERS* info, DWORD thread) {
@@ -186,17 +189,17 @@ void WriteMiniDump(EXCEPTION_POINTERS* info, DWORD thread) {
     if (!GetFileSizeEx(file, &size)) size.QuadPart = 0;
     CloseHandle(file);
     if (written)
-        Log("CRASH DUMP written: %ls (%lld MB). Send this with the log", dumpPathW,
+        Log("CRASH DUMP written: %s (%lld MB). Send this with the log", Utf8Text(dumpPathW).c_str(),
             static_cast<long long>(size.QuadPart / (1024 * 1024)));
     else
         Log("CRASH DUMP failed (error %lu); the log above is all there is", GetLastError());
 }
 
 DWORD WINAPI DumpThreadMain(void*) {
+    dumpThreadId.store(GetCurrentThreadId());
     for (;;) {
         WaitForSingleObject(dumpRequest, INFINITE);
-        // DbgHelp reads memory that may be gone and catches its own faults: not a crash to report.
-        Probing([] { WriteMiniDump(dumpException, dumpFaultingThread); });
+        WriteMiniDump(dumpException, dumpFaultingThread);
         SetEvent(dumpDone);
     }
 }
@@ -215,10 +218,12 @@ LONG CALLBACK OnException(EXCEPTION_POINTERS* info) {
     const EXCEPTION_RECORD* record = info->ExceptionRecord;
     const DWORD code = record->ExceptionCode;
     if (!CrashClass(code)) return EXCEPTION_CONTINUE_SEARCH;
-    // One of the plugin's own probes, which its __except is about to catch (crashlog.h).
-    if (InProbe()) return EXCEPTION_CONTINUE_SEARCH;
+    // One of the plugin's own probes, which Guarded is about to catch (guard.h).
+    if (InGuarded()) return EXCEPTION_CONTINUE_SEARCH;
+    // DbgHelp reads memory that may be gone and catches its own faults: not a crash to report.
+    if (GetCurrentThreadId() == dumpThreadId.load()) return EXCEPTION_CONTINUE_SEARCH;
     if (code == kCppException && !ThrownForGame(*info->ContextRecord)) return EXCEPTION_CONTINUE_SEARCH;
-    // A fault while this thread is already writing a report (caught by the __try blocks below)
+    // A fault while this thread is already writing a report (caught by the Guarded blocks below)
     // re-enters here first; the SRW lock is not recursive, so leave it to those blocks.
     const DWORD thread = GetCurrentThreadId();
     if (writerThread.load() == thread) return EXCEPTION_CONTINUE_SEARCH;

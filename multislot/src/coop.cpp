@@ -1,6 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include "coop.h"
 
@@ -37,26 +35,26 @@ bool RetireReplacedPlugins(const std::wstring& dir) {
         const bool loaded = GetModuleHandleW(name) != nullptr;
         if (!Exists(path)) {
             if (loaded) {  // loaded from elsewhere, which is just as bad
-                Log("REFUSED: %ls is running in this game, so EDF6Coop stays off (both would hook the same game "
-                    "code). Remove it", name);
+                Log("REFUSED: %s is running in this game, so EDF6Coop stays off (both would hook the same game "
+                    "code). Remove it", Utf8Text(name).c_str());
                 clear = false;
             }
             continue;
         }
         if (!MoveFileExW(path.c_str(), aside.c_str(), MOVEFILE_REPLACE_EXISTING)) {
-            Log("REFUSED: %ls is still in Mods\\Plugins and could not be renamed (error %lu), so EDF6Coop stays off "
-                "(both would hook the same game code). Delete %ls by hand; EDF6Coop replaces it",
-                name, GetLastError(), name);
+            Log("REFUSED: %s is still in Mods\\Plugins and could not be renamed (error %lu), so EDF6Coop stays off "
+                "(both would hook the same game code). Delete %s by hand; EDF6Coop replaces it",
+                Utf8Text(name).c_str(), GetLastError(), Utf8Text(name).c_str());
             clear = false;
             continue;
         }
         if (loaded) {
-            Log("REFUSED: %ls was loaded before EDF6Coop in this game, so EDF6Coop stays off this time (both would "
-                "hook the same game code). It is renamed to %ls.disabled and EDF6Coop runs from the next start",
-                name, name);
+            Log("REFUSED: %s was loaded before EDF6Coop in this game, so EDF6Coop stays off this time (both would "
+                "hook the same game code). It is renamed to %s.disabled and EDF6Coop runs from the next start",
+                Utf8Text(name).c_str(), Utf8Text(name).c_str());
             clear = false;
         } else {
-            Log("Replaced plugin: %ls renamed to %ls.disabled (EDF6Coop does what it did)", name, name);
+            Log("Replaced plugin: %s renamed to %s.disabled (EDF6Coop does what it did)", Utf8Text(name).c_str(), Utf8Text(name).c_str());
         }
     }
     return clear;
@@ -71,7 +69,7 @@ void PrepareSettings(const std::wstring& dir, const std::wstring& iniPath, const
     std::vector<dn::IniValue> carried;
     for (const wchar_t* name : coop::kReplacedSettings) {
         std::vector<dn::IniValue> values = dn::readIniValues(dir + name);
-        if (!values.empty()) Log("Settings: carrying %zu values over from %ls", values.size(), name);
+        if (!values.empty()) Log("Settings: carrying %zu values over from %s", values.size(), Utf8Text(name).c_str());
         carried.insert(carried.end(), values.begin(), values.end());
     }
     RenameOldSettings(carried);
@@ -79,10 +77,10 @@ void PrepareSettings(const std::wstring& dir, const std::wstring& iniPath, const
     text = dn::applyIniValues(text, carried, &dropped);
     for (const std::string& line : dropped) Log("Settings: %s is no longer a setting; not carried over", line.c_str());
     if (dn::writeNewIniUtf16(iniPath, text))
-        Log("Settings: wrote %ls%ls", coop::kNameW, carried.empty() ? L".ini with the defaults"
-                                                                     : L".ini (the old settings files are no longer read)");
+        Log("Settings: wrote %s%s", Utf8Text(coop::kNameW).c_str(), Utf8Text(carried.empty() ? L".ini with the defaults"
+                                                                     : L".ini (the old settings files are no longer read)").c_str());
     else
-        Log("Settings: could not write %ls.ini (error %lu); running on the defaults", coop::kNameW, GetLastError());
+        Log("Settings: could not write %s.ini (error %lu); running on the defaults", Utf8Text(coop::kNameW).c_str(), GetLastError());
 }
 
 void ForwardDirectNetLine(const char* line) { Log("[DN] %s", line); }

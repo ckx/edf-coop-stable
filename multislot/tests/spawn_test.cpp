@@ -1,9 +1,7 @@
 // Enemy spawn counts against a fake game: a GameStatus with the online-mode chain OnlineSession() follows
 // and the mission player count, fake scene objects that carry MSVC RTTI, and CpuContext values laid out
 // the way the thunks hand them to the handlers at each site.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdio>

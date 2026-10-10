@@ -167,7 +167,7 @@ A weapon page is a set of modified weapon and vehicle files you can switch in th
 
 ## Build
 
-Requires Windows x64, Visual Studio 2022 with *Desktop development with C++* (its CMake and Ninja are used), Python 3.10+ with `pip install numpy pillow pefile==2024.8.26 capstone==5.0.9`, and EARTH DEFENSE FORCE 6 installed (EDF.dll build `678CCB46`).
+Requires Windows x64, Visual Studio 2022 with *Desktop development with C++* (its CMake and Ninja are used), Python 3.10+ with `pip install numpy pefile==2024.8.26 capstone==5.0.9`, and EARTH DEFENSE FORCE 6 installed (EDF.dll build `678CCB46`).
 
 ```powershell
 $env:EDF6_GAME_DIR = 'C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6'
@@ -179,6 +179,18 @@ powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coo
 - The game folder is only read: `Root.cpk` for the menu frame with the "Player MOD" label (`multislot/tools/make_menu_label.py` writes `multislot/assets/LYT_MAINFRAME.SGO`, which is derived from the game and therefore never committed) , `HUD/ONLINEHUDTEXTURE.RAB` for the per-player HUD colours (`multislot/tools/make_hud_colours.py` writes `multislot/assets/ONLINEHUDTEXTURE.RAB`, also derived and never committed) and `EDF.dll` for the tests.
 - `build.ps1` fetches the official EDFModLoader v1.0.10 `winmm.dll` (checked by SHA-256) and builds the race-fixed loader the package ships (`multislot/tools/fix_winmm_proxy.py`).
 - `package.ps1` refuses a build that is not this version, a DLL older than its sources, and a CI build (`build.ps1 -CI` builds without the game's menu and HUD assets and embeds placeholders).
+
+### Linux
+
+`build.sh` cross-builds the same DLL with clang for MinGW-w64 (`cmake/mingw-w64.cmake`) and runs the tests under Wine, in a Wine prefix of their own (`~/.local/share/wine-edf6coop-tests`). It needs no Windows SDK or Visual Studio. On Fedora:
+
+```sh
+sudo dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
+export EDF6_GAME_DIR="$HOME/.local/share/Steam/steamapps/common/EARTH DEFENSE FORCE 6"
+./build.sh -t    # -> multislot/dist/EDF6Coop.dll; -c builds without the game (placeholders, tests against the game skipped)
+```
+
+The Python tools run from a virtual environment `build.sh` makes in `.venv`. Release packages are still built with `build.ps1` and `package.ps1` on Windows.
 
 ## Release
 

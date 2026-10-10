@@ -1,6 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include "log.h"
 
@@ -266,7 +264,7 @@ void RecoverQueue(LogQueueHeader* queue, const char* bytes) {
     if (from == to) return;
     AppendQueued(queue, bytes, from, to);
     char note[160];
-    const int length = _snprintf_s(note, sizeof(note), _TRUNCATE,
+    const int length = FormatText(note, sizeof(note),
                                    "[... the %llu bytes above were logged by the run before, which ended before they "
                                    "were written; recovered from the .queue file ...]\r\n",
                                    static_cast<unsigned long long>(to - from));
@@ -401,7 +399,7 @@ void LogEnd(const char* mark, const char* why) {
     SYSTEMTIME now{};
     GetLocalTime(&now);
     char line[256]{};
-    const int length = _snprintf_s(line, sizeof(line), _TRUNCATE, "[%04u-%02u-%02u %02u:%02u:%02u.%03u] %s%s\r\n",
+    const int length = FormatText(line, sizeof(line), "[%04u-%02u-%02u %02u:%02u:%02u.%03u] %s%s\r\n",
                                    now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
                                    now.wMilliseconds, mark, why);
     if (length <= 0) return;
@@ -477,10 +475,6 @@ void LogClose() {
 }
 
 void LogOpen(const wchar_t* path) {
-    // %ls arguments (the menu label with its arrow, paths under a Chinese or Japanese user name) are written
-    // as UTF-8 like the rest of the file; in the default "C" locale anything past ASCII fails the whole line.
-    // The CRT is linked statically, so this locale is the plugin's own and the game's is untouched.
-    setlocale(LC_CTYPE, ".UTF8");
     // Lengths are checked by hand: *_s string functions end the process when something does not fit.
     const std::size_t length = wcslen(path);
     if (length >= MAX_PATH) return;
@@ -537,25 +531,32 @@ void LogWrite(const char* text, std::size_t length) {
     }
 }
 
+int FormatText(char* out, std::size_t size, const char* format, ...) {
+    if (!out || !size) return -1;
+    va_list args;
+    va_start(args, format);
+    const int length = std::vsnprintf(out, size, format, args);
+    va_end(args);
+    if (length < 0) {
+        out[0] = 0;
+        return -1;
+    }
+    return static_cast<std::size_t>(length) < size ? length : -1;
+}
+
 void Log(const char* format, ...) {
-    char line[1024]{};  // zeroed: a failed conversion below leaves what it wrote, then zeros, never old stack
+    char line[1024]{};
     SYSTEMTIME now{};
     GetLocalTime(&now);
-    int used = _snprintf_s(line, sizeof(line), _TRUNCATE, "[%04u-%02u-%02u %02u:%02u:%02u.%03u] ", now.wYear, now.wMonth,
+    int used = FormatText(line, sizeof(line), "[%04u-%02u-%02u %02u:%02u:%02u.%03u] ", now.wYear, now.wMonth,
                            now.wDay, now.wHour, now.wMinute, now.wSecond, now.wMilliseconds);
     if (used < 0) used = 0;
     va_list args;
     va_start(args, format);
-    int body = _vsnprintf_s(line + used, sizeof(line) - used, _TRUNCATE, format, args);
+    std::vsnprintf(line + used, sizeof(line) - used, format, args);
     va_end(args);
-    // -1 is both "truncated" (the buffer is full) and "an argument could not be converted" (it is not):
-    // the text that is really there is up to the first NUL either way.
-    std::size_t length = body < 0 ? strnlen(line, sizeof(line) - 1) : static_cast<std::size_t>(used + body);
-    if (body < 0 && length == static_cast<std::size_t>(used)) {
-        // The conversion emptied the line: say which one it was (the format is the plugin's own text).
-        const int note = _snprintf_s(line + used, sizeof(line) - used, _TRUNCATE, "(text not convertible) %s", format);
-        length = note < 0 ? strnlen(line, sizeof(line) - 1) : static_cast<std::size_t>(used + note);
-    }
+    // Wide text goes in as Utf8Text (log.h), never as %ls, which needs a UTF-8 locale MinGW's runtime does not have.
+    std::size_t length = strnlen(line, sizeof(line) - 1);
     if (length > sizeof(line) - 3) length = sizeof(line) - 3;
     // One call, one line: text that comes from elsewhere (member names, EOS messages) may hold CR, LF or other
     // controls, which would end this line early and start one that reads as the plugin's own.
@@ -587,7 +588,7 @@ void Log(const char* format, ...) {
         // The text of the repeated line is quoted, so the count still makes sense when the log is read
         // with one noisy source filtered out.
         char repeat[256];
-        const int written = _snprintf_s(repeat, sizeof(repeat), _TRUNCATE,
+        const int written = FormatText(repeat, sizeof(repeat),
                                         "[%04u-%02u-%02u %02u:%02u:%02u.%03u] (repeated %llu more times: %.120s)\r\n",
                                         now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
                                         now.wMilliseconds, static_cast<unsigned long long>(pending), repeatedBody);

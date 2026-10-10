@@ -5,8 +5,8 @@
 // message, the few objects listed in mission.cpp. Everything that encrypts, frames, sends, receives, decrypts,
 // dispatches, writes and reads a message is the game's code, with EDF6Coop's patches and hooks in it.
 //
-// The harness is built like the game (MSVC, /MD, no iterator debugging): the std types handed to the game
-// (std::string, std::wstring, std::vector, std::function, the shared_ptr layout) have the game's layout.
+// The library types handed to the game (std::string, std::wstring, std::vector, std::function, shared_ptr) are
+// laid out by hand as the game's (msvc_abi.h, Shared below), so the harness builds with MSVC and MinGW alike.
 #include <cstdint>
 #include <cstring>
 #include <functional>

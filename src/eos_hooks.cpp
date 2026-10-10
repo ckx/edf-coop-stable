@@ -2778,7 +2778,7 @@ void hookVirtualJoin(EOS_HLobby h, const EOS_Lobby_JoinLobbyOptionsHead* o, void
     if (g_shutdown || !o || !cb) return g.outer.join(h, o, clientData, cb);
     if (g.fakes.lookup(o->LobbyDetailsHandle, &d)) {
         if (!CompatibleLocalRoom(d.attributes)) {
-            defer([cb, clientData] { completeLobbyCall(cb, clientData, EOS_InvalidParameters, ""); });
+            defer([cb, clientData] { completeLobbyCall(reinterpret_cast<void*>(cb), clientData, EOS_InvalidParameters, ""); });
             return;
         }
         return startVirtualJoin(o->LocalUserId, d.roomId, clientData, cb);

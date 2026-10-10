@@ -422,11 +422,11 @@ std::optional<std::vector<hostdata::DataFile>> WriteStore(const std::wstring& st
     // Only what was just written and checked becomes <digest>: a folder that is somehow there already is not used.
     ok = ok && MoveFileExW(part.c_str(), name.c_str(), 0);
     if (!ok) {
-        Log("Host data: the files fetched could not be written to %ls (error %lu)", part.c_str(), GetLastError());
+        Log("Host data: the files fetched could not be written to %s (error %lu)", Utf8Text(part.c_str()).c_str(), GetLastError());
         DeleteTree(part);
         return std::nullopt;
     }
-    Log("Host data: %zu file(s) from the room kept in %ls", files->size(), name.c_str());
+    Log("Host data: %zu file(s) from the room kept in %s", files->size(), Utf8Text(name.c_str()).c_str());
     for (const hostdata::DataFile& file : *files) Log("Host data:   %s, %zu bytes", file.path.c_str(), file.bytes.size());
     return files;
 }
@@ -562,8 +562,8 @@ void NextPageLocked() {
     const std::wstring name = rt.page >= 0 ? rt.pages[static_cast<std::size_t>(rt.page)].name : std::wstring();
     if (!rt.settings.iniPath.empty())
         WritePrivateProfileStringW(L"HostData", L"Page", name.c_str(), rt.settings.iniPath.c_str());
-    Log("Host data: %ls - weapon page %ls (from the next mission)", rt.settings.pageKeyName,
-        name.empty() ? L"off" : name.c_str());
+    Log("Host data: %s - weapon page %s (from the next mission)", Utf8Text(rt.settings.pageKeyName).c_str(),
+        Utf8Text(name.empty() ? L"off" : name.c_str()).c_str());
     ShareLocked();
     DecideLocked();
 }
@@ -699,20 +699,20 @@ void LoadPagesLocked() {
     const std::wstring variants = rt.settings.gameFolder + L"\\Mods\\Variants";
     for (const std::wstring& name : PageNames(variants)) {
         if (rt.pages.size() == kMaxPages) {
-            Log("Host data: more than %zu weapon pages under Mods\\Variants; %ls and after are not used", kMaxPages, name.c_str());
+            Log("Host data: more than %zu weapon pages under Mods\\Variants; %s and after are not used", kMaxPages, Utf8Text(name.c_str()).c_str());
             break;
         }
         std::vector<std::string> skipped;
         std::vector<hostdata::DataFile> files = hostdata::ScanMods(variants + L"\\" + name, &skipped);
-        for (const std::string& line : skipped) Log("Host data: weapon page %ls: %s; not used", name.c_str(), line.c_str());
+        for (const std::string& line : skipped) Log("Host data: weapon page %s: %s; not used", Utf8Text(name.c_str()).c_str(), line.c_str());
         std::vector<std::string> paths = PathsOf(files);
         std::string why;
         auto bundle = hostdata::MakeBundle(std::move(files), &why);
         if (!bundle || paths.empty()) {
-            Log("Host data: weapon page %ls is not used (%s)", name.c_str(), bundle ? "no weapon or vehicle files" : why.c_str());
+            Log("Host data: weapon page %s is not used (%s)", Utf8Text(name.c_str()).c_str(), bundle ? "no weapon or vehicle files" : why.c_str());
             continue;
         }
-        Log("Host data: weapon page %ls: %zu file(s), %zu bytes, SHA-256 %s", name.c_str(), paths.size(),
+        Log("Host data: weapon page %s: %zu file(s), %zu bytes, SHA-256 %s", Utf8Text(name.c_str()).c_str(), paths.size(),
             bundle->bytes.size(), hostdata::DigestHex(bundle->digest).c_str());
         Page page;
         page.name = name;
@@ -726,7 +726,7 @@ void LoadPagesLocked() {
     if (picked != rt.pages.end())
         rt.page = static_cast<int>(picked - rt.pages.begin());
     else if (!rt.settings.page.empty())
-        Log("Host data: [HostData] Page=%ls is not a weapon page here; no page", rt.settings.page.c_str());
+        Log("Host data: [HostData] Page=%s is not a weapon page here; no page", Utf8Text(rt.settings.page.c_str()).c_str());
 }
 
 // This machine's Mods, scanned and checked. Caller holds the lock.
@@ -788,8 +788,8 @@ void Answered(std::uint64_t question, const std::vector<Digest>& digests, bool u
 void TakeAnswersLocked() {
     Runtime& rt = Rt();
     for (const HostDataAnswers::Answer& answer : rt.answers.Take()) {
-        Log("Host data: the player %s the room's files (%zu bundle(s)); %ls switches", answer.use ? "takes" : "declines",
-            answer.digests.size(), rt.settings.keyName);
+        Log("Host data: the player %s the room's files (%zu bundle(s)); %s switches", answer.use ? "takes" : "declines",
+            answer.digests.size(), Utf8Text(rt.settings.keyName).c_str());
         AnswerLocked(answer.digests, answer.use);
     }
 }
@@ -826,7 +826,7 @@ void AskLocked() {
         Log("Host data: asking the player about %zu bundle(s) of other members, %zu file(s)", digests.size(), files);
         return;
     }
-    Log("Host data: keeping this machine's own files; %ls takes the room's", rt.settings.keyName);
+    Log("Host data: keeping this machine's own files; %s takes the room's", Utf8Text(rt.settings.keyName).c_str());
     rt.answers.Invalidate();
     AnswerLocked(digests, false);
 }
@@ -837,7 +837,7 @@ void SwitchLocked() {
     std::vector<Digest> digests;
     for (const RoomSource& source : RemoteLocked()) digests.push_back(source.digest);
     const bool take = !TakenLocked();
-    Log("Host data: %ls - %s the room's weapon files", Rt().settings.keyName, take ? "taking" : "giving back");
+    Log("Host data: %s - %s the room's weapon files", Utf8Text(Rt().settings.keyName).c_str(), take ? "taking" : "giving back");
     AnswerLocked(digests, take);
 }
 
@@ -853,8 +853,8 @@ bool StartHostData(HMODULE game, ImportRedirect redirect, const HostDataSettings
         Tidy(rt.store);
         LoadModsLocked();
         LoadPagesLocked();
-        Log("Host data: %zu weapon page(s) under Mods\\Variants; using %ls (%ls switches)", rt.pages.size(),
-            rt.page >= 0 ? rt.pages[static_cast<std::size_t>(rt.page)].name.c_str() : L"none", settings.pageKeyName);
+        Log("Host data: %zu weapon page(s) under Mods\\Variants; using %s (%s switches)", rt.pages.size(),
+            Utf8Text(rt.page >= 0 ? rt.pages[static_cast<std::size_t>(rt.page)].name.c_str() : L"none").c_str(), Utf8Text(settings.pageKeyName).c_str());
         rt.send = eos ? reinterpret_cast<EosSendFn>(reinterpret_cast<void*>(GetProcAddress(eos, "EOS_P2P_SendPacket")))
                       : nullptr;
         DecideLocked();  // outside a room: the page, from the first menu frame

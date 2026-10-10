@@ -1,8 +1,6 @@
 // Room screen paging without the game: a fake HUiRoom member vector and fake "original" functions
 // record what the panel builder would see for each page and with dummy members.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -55,20 +53,6 @@ std::uint64_t FakeOriginal(void* room) {
     seen.entries.assign(members->data, members->data + members->size);
     ++seen.calls;
     return 0x1234;
-}
-
-int profileCalls = 0;
-std::uint64_t FakeProfile(void*, void*) {
-    ++profileCalls;
-    return 7;
-}
-
-std::wstring NameOf(void* object) {
-    const auto* body = static_cast<const std::uint8_t*>(object);
-    std::uint64_t length = 0;
-    std::memcpy(&length, body + 0x28, sizeof(length));
-    if (length > 7) return L"(heap)";
-    return std::wstring(reinterpret_cast<const wchar_t*>(body + 0x18), length);
 }
 
 }  // namespace

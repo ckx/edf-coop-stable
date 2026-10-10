@@ -1,9 +1,7 @@
 // Mission handlers against a fake game image: a zero-filled region the size of EDF.dll with a
 // GameStatus pointer at 20B2890 and two tiny stand-in functions (MissionContext constructor and the
 // per-player-count scale lookup). The handlers see CpuContext values like the thunks would give them.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -276,7 +274,7 @@ int main(int argc, char** argv) {
     std::memcpy(image + kPlayerCountScale + 2, &fakeScale, 8);
     const auto durability = reinterpret_cast<float(__fastcall*)(void*, int, int)>(MissionCallHandler(0x0D7770));
     const auto damage = reinterpret_cast<float(__fastcall*)(void*, int, int)>(MissionCallHandler(0x54F0DF));
-    Check(MissionCallHandler(0x54F1B1) == static_cast<void*>(damage) && durability != damage, "one durability and one damage hook");
+    Check(MissionCallHandler(0x54F1B1) == reinterpret_cast<void*>(damage) && durability != damage, "one durability and one damage hook");
     Check(durability(nullptr, 2, 1) == 1.2f && durability(nullptr, 2, 2) == 0.8f && durability(nullptr, 2, 4) == 1.2f &&
               damage(nullptr, 2, 3) == 1.0f && damage(nullptr, 2, 4) == 1.2f,
           "1-4 players read the game's factors");
@@ -345,7 +343,7 @@ int main(int argc, char** argv) {
 
     // Item counts: positions 0-3 into GameStatus+0x14FD4, the rest into sidecars, others dropped; totals include them.
     const auto store = reinterpret_cast<void(__fastcall*)(void*, const std::int32_t*, const std::uint64_t*)>(MissionSlotHandler(0x17EEF70));
-    Check(store && MissionSlotHandler(0x1791DF0) == static_cast<void*>(store) && MissionSlotHandler(0x179DE90) == static_cast<void*>(store),
+    Check(store && MissionSlotHandler(0x1791DF0) == reinterpret_cast<void*>(store) && MissionSlotHandler(0x179DE90) == reinterpret_cast<void*>(store),
           "one item store for all three callbacks");
     const auto itemAt = [&](int position) {
         std::uint64_t value = 0;

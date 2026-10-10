@@ -3,6 +3,8 @@
 #include <cstring>
 #include <new>
 
+#include "msvc_abi.h"
+
 namespace gamenet {
 namespace {
 
@@ -25,16 +27,16 @@ constexpr std::uintptr_t kUserFlags = 0x10, kUserNetworkIndex = 0x40;
 
 // Room+0x30 in the game: the local user as p2p::Manager::Initialize takes it.
 struct LocalUser {
-    Shared id;           // PlatformId
-    std::wstring name;
-    const void* puid;    // EOS_ProductUserId
+    Shared id;                    // PlatformId
+    msvc::String<wchar_t> name;
+    const void* puid;             // EOS_ProductUserId
 };
 static_assert(offsetof(LocalUser, puid) == 0x30, "LocalUser layout");
 
 // What eos::Users::Add takes (built at Room::Initialize 12BDF83).
 struct ConnectInfo {
     Shared id;
-    std::wstring name;
+    msvc::String<wchar_t> name;
 };
 struct UserDesc {
     const void* puid;
@@ -59,6 +61,10 @@ const void* Puid(const std::string& text) {
 template <typename F, typename L>
 F* ByValue(L&& lambda) {
     return new F(std::forward<L>(lambda));  // the callee destroys the function; its storage is leaked, harmlessly
+}
+
+std::wstring Wide(const std::string& text) {
+    return std::wstring(text.begin(), text.end());
 }
 
 }  // namespace
@@ -99,8 +105,8 @@ bool Transport::Start(const Machine& machine, const std::string& lobbyId, const 
 
     Result("start-step", "%s", "users");
     manager_ = game_.MakeShared(kManagerSize, kManagerRef);
-    const std::function<void(std::shared_ptr<void>)> onReject = [](std::shared_ptr<void>) {};
-    auto* filter = ByValue<std::function<bool(const std::string&)>>([](const std::string&) { return true; });
+    const msvc::Function<void, Shared> onReject([](Shared*) {});
+    auto* filter = ByValue<msvc::Function<bool, const msvc::String<char>>>([](const msvc::String<char>*) { return true; });
     game_.Fn<void(*)(void*, void*, const void*, void*)>(kManagerCtor)(manager_.object, core_, &onReject, filter);
 
     Result("start-step", "%s", "manager ctor");
@@ -109,11 +115,11 @@ bool Transport::Start(const Machine& machine, const std::string& lobbyId, const 
     local.id = game_.MakeShared(kEpicIdSize, kEpicIdRef);
     const std::string self = machine.user;
     game_.Fn<void(*)(void*, const char*, const char*)>(kEpicIdCtor)(local.id.object, self.c_str(), "");
-    local.name.assign(self.begin(), self.end());
+    local.name.Assign(Wide(self), [this](std::size_t size) { return game_.New(size); });
     local.puid = Puid(self);
-    const std::string token;
+    const msvc::String<char> token;
     Shared usersCopy = AddRef(users_);
-    game_.Fn<void(*)(void*, Shared*, const char*, LocalUser*, const std::string*)>(kManagerInitialize)(
+    game_.Fn<void(*)(void*, Shared*, const char*, LocalUser*, const msvc::String<char>*)>(kManagerInitialize)(
         manager_.object, &usersCopy, lobbyId.c_str(), &local, &token);
 
     Result("start-step", "%s", "manager initialize");
@@ -137,7 +143,7 @@ bool Transport::Add(const std::string& member) {
     game_.Fn<void(*)(void*)>(kConnectInfoCtor)(&desc.info);
     if (!desc.remote) {
         desc.info.id = AddRef(local.id);
-        desc.info.name = local.name;
+        desc.info.name.Assign(Wide(game_.machine->user), [this](std::size_t size) { return game_.New(size); });
     }
     Shared user;
     game_.Fn<void(*)(void*, Shared*, UserDesc*)>(kUsersAdd)(users_.object, &user, &desc);
@@ -192,29 +198,32 @@ int Transport::NetworkIndex(const std::string& member) const {
 bool Transport::SendReliable(const std::string& member, std::uint32_t type, const void* data, std::size_t size) const {
     const int index = NetworkIndex(member);
     if (index < 0) return false;
-    const std::vector<IndexKey> to{{index, 0}};
-    using Send = bool (*)(void*, const std::vector<IndexKey>*, std::uint32_t, const void*, std::size_t, int);
+    const IndexKey key{index, 0};
+    const msvc::VectorView<IndexKey> to{&key, &key + 1, &key + 1};
+    using Send = bool (*)(void*, const msvc::VectorView<IndexKey>*, std::uint32_t, const void*, std::size_t, int);
     return game_.Fn<Send>(kSendReliable)(controller_.object, &to, type, data, size, 6);
 }
 
 bool Transport::SendUnreliable(const std::string& member, std::uint32_t type, const void* data, std::size_t size) const {
     const int index = NetworkIndex(member);
     if (index < 0) return false;
-    const std::vector<IndexKey> to{{index, 0}};
-    using Send = bool (*)(void*, const std::vector<IndexKey>*, std::uint32_t, const void*, std::size_t);
+    const IndexKey key{index, 0};
+    const msvc::VectorView<IndexKey> to{&key, &key + 1, &key + 1};
+    using Send = bool (*)(void*, const msvc::VectorView<IndexKey>*, std::uint32_t, const void*, std::size_t);
     return game_.Fn<Send>(kSendUnreliable)(controller_.object, &to, type, data, size);
 }
 
 void Transport::Subscribe(std::uint32_t type, Handler handler) {
-    using Filter = std::function<bool(const void*)>;
-    using Receive = std::function<void(const IndexKey&, const std::int32_t&, const void*, const void*, std::uint64_t)>;
-    auto* filter = ByValue<Filter>([type](const void* packet) {
-        return (*static_cast<const std::uint32_t*>(packet) & 0xFFFFF) == type;
+    using Filter = msvc::Function<bool, const void* const>;
+    using Receive =
+        msvc::Function<void, const IndexKey, const std::int32_t, const void* const, const void* const, const std::uint64_t>;
+    auto* filter = ByValue<Filter>([type](const void* const* packet) {
+        return (*static_cast<const std::uint32_t*>(*packet) & 0xFFFFF) == type;
     });
-    auto* receive = ByValue<Receive>(
-        [handler](const IndexKey& from, const std::int32_t&, const void*, const void* data, std::uint64_t size) {
-            handler(from.index, static_cast<const std::uint8_t*>(data), static_cast<std::size_t>(size));
-        });
+    auto* receive = ByValue<Receive>([handler](const IndexKey* from, const std::int32_t*, const void* const*,
+                                               const void* const* data, const std::uint64_t* size) {
+        handler(from->index, static_cast<const std::uint8_t*>(*data), static_cast<std::size_t>(*size));
+    });
     Shared token;
     game_.Fn<void(*)(void*, Shared*, Filter*, Receive*)>(kSubscribe)(
         static_cast<std::uint8_t*>(controller_.object) + kDataObservable, &token, filter, receive);

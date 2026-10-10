@@ -1,10 +1,8 @@
 #include "peertimeout.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "identity.h"
 #include "log.h"
 #include "patches.h"  // kMaxPlayers
@@ -56,44 +54,42 @@ struct TimedOutLink {
     float deadline = 0;
 };
 
-// Mirrors 12C86B0: every node of the manager's link list, Link+0xA8. Only reads, and only inside __try.
+// Mirrors 12C86B0: every node of the manager's link list, Link+0xA8. Only reads, and only inside Guarded.
 bool ReadTimedOutLinks(const void* room, std::uintptr_t& local, TimedOutLink* out, std::size_t& count) {
     count = 0;
     local = 0;
     if (!room) return false;
-    return Probing([&]() -> bool {
-        __try {
-            const auto base = reinterpret_cast<std::uintptr_t>(room);
-            const auto users = *reinterpret_cast<const std::uintptr_t*>(base + kRoomUsersOffset);
-            if (!users) return false;
-            local = *reinterpret_cast<const std::uintptr_t*>(users + kUsersLocalOffset);
-            const auto manager = *reinterpret_cast<const std::uintptr_t*>(base + kRoomLinksOwnerOffset);
-            if (!manager) return false;
-            const auto sentinel = *reinterpret_cast<const std::uintptr_t*>(manager + kLinkListOffset);
-            if (!sentinel) return false;
-            auto node = *reinterpret_cast<const std::uintptr_t*>(sentinel);
-            for (std::size_t walked = 0; node != sentinel; ++walked) {
-                if (!node || walked >= kMaxLinks) return false;
-                const auto link = *reinterpret_cast<const std::uintptr_t*>(node + kLinkNodeValueOffset);
-                if (link && *reinterpret_cast<const std::uint8_t*>(link + kLinkTimedOutOffset)) {
-                    auto& entry = out[count++];
-                    entry = {};
-                    entry.deadline = *reinterpret_cast<const float*>(link + kLinkDeadlineOffset);
-                    // weak_ptr<eos::User>: object, then the control block whose use count (+8) says it is alive.
-                    const auto user = *reinterpret_cast<const std::uintptr_t*>(link + kLinkUserOffset);
-                    const auto control = *reinterpret_cast<const std::uintptr_t*>(link + kLinkUserOffset + 8);
-                    if (user && control && *reinterpret_cast<const std::int32_t*>(control + 8) > 0) {
-                        entry.user = user;
-                        entry.productId = *reinterpret_cast<const std::uintptr_t*>(user + kUserProductIdOffset);
-                    }
+    bool read = false;
+    Guarded([&] {
+        const auto base = reinterpret_cast<std::uintptr_t>(room);
+        const auto users = *reinterpret_cast<const std::uintptr_t*>(base + kRoomUsersOffset);
+        if (!users) return;
+        local = *reinterpret_cast<const std::uintptr_t*>(users + kUsersLocalOffset);
+        const auto manager = *reinterpret_cast<const std::uintptr_t*>(base + kRoomLinksOwnerOffset);
+        if (!manager) return;
+        const auto sentinel = *reinterpret_cast<const std::uintptr_t*>(manager + kLinkListOffset);
+        if (!sentinel) return;
+        auto node = *reinterpret_cast<const std::uintptr_t*>(sentinel);
+        for (std::size_t walked = 0; node != sentinel; ++walked) {
+            if (!node || walked >= kMaxLinks) return;
+            const auto link = *reinterpret_cast<const std::uintptr_t*>(node + kLinkNodeValueOffset);
+            if (link && *reinterpret_cast<const std::uint8_t*>(link + kLinkTimedOutOffset)) {
+                auto& entry = out[count++];
+                entry = {};
+                entry.deadline = *reinterpret_cast<const float*>(link + kLinkDeadlineOffset);
+                // weak_ptr<eos::User>: object, then the control block whose use count (+8) says it is alive.
+                const auto user = *reinterpret_cast<const std::uintptr_t*>(link + kLinkUserOffset);
+                const auto control = *reinterpret_cast<const std::uintptr_t*>(link + kLinkUserOffset + 8);
+                if (user && control && *reinterpret_cast<const std::int32_t*>(control + 8) > 0) {
+                    entry.user = user;
+                    entry.productId = *reinterpret_cast<const std::uintptr_t*>(user + kUserProductIdOffset);
                 }
-                node = *reinterpret_cast<const std::uintptr_t*>(node);
             }
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
+            node = *reinterpret_cast<const std::uintptr_t*>(node);
         }
+        read = true;
     });
+    return read;
 }
 
 // The game's own deadline (12D5E0B) when the link holds nothing sensible.
@@ -133,14 +129,11 @@ void ForgetPeerJoins() {
 void PeerJoinedHandler(CpuContext* context) {
     std::uintptr_t user = 0;
     std::uint8_t remote = 0xFF;
-    const bool read = Probing([&]() -> bool {
-        __try {
-            user = *reinterpret_cast<const std::uintptr_t*>(static_cast<std::uintptr_t>(context->rax));
-            remote = *reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(context->rbx) + 8);
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        user = *reinterpret_cast<const std::uintptr_t*>(static_cast<std::uintptr_t>(context->rax));
+        remote = *reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(context->rbx) + 8);
+        read = true;
     });
     // An unreadable add records nothing, and a decision about that user then falls back to the game's.
     if (read && user && remote <= 1) NotePeerJoined(reinterpret_cast<const void*>(user), remote == 0, GetTickCount64());
@@ -208,14 +201,14 @@ bool KeepRoomAfterPeerTimeout(const void* room, std::uint64_t now) {
     ProductUserIdText(reinterpret_cast<const void*>(decision.productId), id, sizeof(id));
     char peer[160]{};
     if (decision.peer && decision.joinKnown)
-        _snprintf_s(peer, _TRUNCATE, " (EOS %s, deadline %.0f ms, joined %.1f s after this machine)", id[0] ? id : "?",
+        FormatText(peer, " (EOS %s, deadline %.0f ms, joined %.1f s after this machine)", id[0] ? id : "?",
                     static_cast<double>(decision.deadlineMs), static_cast<double>(decision.joinedAfterMs) / 1000.0);
     else if (decision.peer)
-        _snprintf_s(peer, _TRUNCATE, " (EOS %s, deadline %.0f ms)", id[0] ? id : "?",
+        FormatText(peer, " (EOS %s, deadline %.0f ms)", id[0] ? id : "?",
                     static_cast<double>(decision.deadlineMs));
     char repeats[64]{};
     if (logged && quietChecks)
-        _snprintf_s(repeats, _TRUNCATE, "; %llu more checks since the last line", quietChecks);
+        FormatText(repeats, "; %llu more checks since the last line", quietChecks);
     if (stay)
         Log("HANDSHAKE TIMEOUT: this machine STAYS in the room, which the game would have left "
             "(KeepRoomOnPeerTimeout=1): %s%s. %zu timed-out link(s) left unconnected until they finish or the lobby "

@@ -4,14 +4,13 @@
 // the loader does, without the game: with no EDF.dll in the process it refuses before touching any file.
 // (Enabled=0 against the real game is PluginLoad_off.)
 //   RefusalTests EDF6Coop.dll work-folder
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
-#include <TlHelp32.h>
+#include <windows.h>
+#include <tlhelp32.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -35,7 +34,7 @@ void Check(bool condition, const char* what) {
 }
 
 std::string ReadText(const std::wstring& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
@@ -110,12 +109,12 @@ int wmain(int argc, wchar_t** argv) {
         CopyFileW(argv[1], dll.c_str(), FALSE);
         for (const auto& path : {log, log + multislot::kLogQueueSuffix, ini, replaced, replaced + L".disabled"})
             DeleteFileW(path.c_str());
-        std::ofstream(replaced, std::ios::binary | std::ios::trunc) << "MZ not loaded";
+        std::ofstream(std::filesystem::path(replaced), std::ios::binary | std::ios::trunc) << "MZ not loaded";
         // A clean run of an earlier start before this one: the log has seen a SHUTDOWN, so a run without one
         // after its banner would be called cut.
         const char* seed = "[2026-09-20 00:00:00.000] ==== EDF6Coop 2.0.0 ====\r\n"
                            "[2026-09-20 00:09:00.000] SHUTDOWN the game exited\r\n";
-        std::ofstream(log, std::ios::binary | std::ios::trunc) << seed;
+        std::ofstream(std::filesystem::path(log), std::ios::binary | std::ios::trunc) << seed;
         const char* mode = "without EDF.dll the plugin refuses";
 
         LoadAndRefuse(dll, mode);

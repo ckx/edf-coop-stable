@@ -1,6 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <bit>
@@ -18,6 +16,7 @@
 #include "code.h"
 #include "armor.h"
 #include "crashlog.h"
+#include "guard.h"
 #include "default_ini.h"
 #include "fakemembers.h"
 #include "hostdataopen.h"
@@ -98,7 +97,7 @@ int HostDataKey(const wchar_t* ini, const wchar_t* setting, const wchar_t* fallb
     auto key = IniText(ini, L"HostData", setting, fallback);
     int vk = VirtualKey(key.c_str());
     if (vk <= 0) {
-        Log("[HostData] %ls=%ls is not a known key; using %ls", setting, key.c_str(), fallback);
+        Log("[HostData] %s=%s is not a known key; using %s", Utf8Text(setting).c_str(), Utf8Text(key.c_str()).c_str(), Utf8Text(fallback).c_str());
         vk = fallbackKey;
         key = fallback;
     }
@@ -121,7 +120,7 @@ HostDataSettings ReadHostData(const wchar_t* ini, int* acceptKey, int* pageKey) 
         // the choice to take the room's files without being asked.
         Log("[HostData] Accept=Always is read as Ask (asked first, naming the files); Auto takes them without asking");
     else if (_wcsicmp(accept.c_str(), L"Ask") != 0)
-        Log("[HostData] Accept=%ls is not Ask, Auto or Never; using Ask", accept.c_str());
+        Log("[HostData] Accept=%s is not Ask, Auto or Never; using Ask", Utf8Text(accept.c_str()).c_str());
     *acceptKey = HostDataKey(ini, L"AcceptKey", L"F1", VK_F1, keyName);
     *pageKey = HostDataKey(ini, L"WeaponPageKey", L"F6", VK_F6, pageKeyName);
     settings.keyName = keyName;
@@ -135,12 +134,12 @@ RoomViewSettings ReadRoomView(const wchar_t* ini) {
     RoomViewSettings settings;
     const auto button = IniText(ini, L"RoomScreen", L"PageButton", L"RightStick");
     const int offset = PadButtonOffset(button.c_str());
-    if (offset < 0) Log("PageButton=%ls is not a known button; using RightStick", button.c_str());
+    if (offset < 0) Log("PageButton=%s is not a known button; using RightStick", Utf8Text(button.c_str()).c_str());
     settings.padButton = static_cast<std::uint32_t>(offset < 0 ? 0xB8 : offset);
     const auto key = [&](const wchar_t* name, const wchar_t* fallback, int fallbackKey) {
         const auto text = IniText(ini, L"RoomScreen", name, fallback);
         const int vk = VirtualKey(text.c_str());
-        if (vk < 0) Log("%ls=%ls is not a known key; using %ls", name, text.c_str(), fallback);
+        if (vk < 0) Log("%s=%s is not a known key; using %s", Utf8Text(name).c_str(), Utf8Text(text.c_str()).c_str(), Utf8Text(fallback).c_str());
         return vk < 0 ? fallbackKey : vk;
     };
     // 0.6.0: F2 became the 8Player MOD key, so the page key moved (PageKey=F2 was the old default).
@@ -150,7 +149,7 @@ RoomViewSettings ReadRoomView(const wchar_t* ini) {
     wchar_t skipped[64]{};
     int pageKeys[kMaxPageKeys]{};
     ParseKeyList(pageText.c_str(), pageKeys, kMaxPageKeys, skipped, 64);
-    if (skipped[0]) Log("PageKeys: %ls left out (not a known key, or F2, which is the 8Player MOD key)", skipped);
+    if (skipped[0]) Log("PageKeys: %s left out (not a known key, or F2, which is the 8Player MOD key)", Utf8Text(skipped).c_str());
     std::memcpy(settings.pageKeys, pageKeys, sizeof(pageKeys));
     settings.dummies = GetPrivateProfileIntW(L"RoomScreen", L"DummyMembers", 0, ini) != 0;
     settings.dummyAddKey = key(L"DummyAddKey", L"F6", VK_F6);
@@ -163,17 +162,15 @@ RoomViewSettings ReadRoomView(const wchar_t* ini) {
 }
 
 bool SupportedImage(const unsigned char* base) {
-    return Probing([&]() -> bool {
-        __try {
-            const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
-            if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || dos->e_lfanew > 0x1000) return false;
-            const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-            return nt->Signature == IMAGE_NT_SIGNATURE && nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
-                   nt->FileHeader.TimeDateStamp == kImageTimeDateStamp && nt->OptionalHeader.SizeOfImage == kImageSize;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+        if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew <= 0 || dos->e_lfanew > 0x1000) return;
+        const auto nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+        read = nt->Signature == IMAGE_NT_SIGNATURE && nt->FileHeader.Machine == IMAGE_FILE_MACHINE_AMD64 &&
+               nt->FileHeader.TimeDateStamp == kImageTimeDateStamp && nt->OptionalHeader.SizeOfImage == kImageSize;
     });
+    return read;
 }
 
 struct Redirect {
@@ -433,27 +430,27 @@ bool KeepModFile(const ModFile& file, bool active, const char* area, const char*
     if (!active) {
         const FileRemoval removal = RemoveModFile(file, path);
         if (removal == FileRemoval::Removed)
-            Log("%s: removed Mods\\%ls; the game's own file is used", area, file.path);
+            Log("%s: removed Mods\\%s; the game's own file is used", area, Utf8Text(file.path).c_str());
         else if (removal == FileRemoval::Failed)
-            Log("%s: could not remove Mods\\%ls (error %lu)", area, file.path, GetLastError());
+            Log("%s: could not remove Mods\\%s (error %lu)", area, Utf8Text(file.path).c_str(), GetLastError());
         return false;
     }
 #ifdef MULTISLOT_PLACEHOLDER_ASSETS
     // A CI build (CMake MULTISLOT_CI) has no files of the game's to embed, only placeholders that would break the
     // game; they are never written to a game folder.
-    Log("%s: this is a CI test build with placeholder files; Mods\\%ls (%s) is not written, so %s", area, file.path,
+    Log("%s: this is a CI test build with placeholder files; Mods\\%s (%s) is not written, so %s", area, Utf8Text(file.path).c_str(),
         contents, without);
     return false;
 #else
     switch (InstallModFile(file, path)) {
-        case FileInstall::Written: Log("%s: wrote Mods\\%ls (%s)", area, file.path, contents); return true;
-        case FileInstall::Updated: Log("%s: updated Mods\\%ls", area, file.path); return true;
+        case FileInstall::Written: Log("%s: wrote Mods\\%s (%s)", area, Utf8Text(file.path).c_str(), contents); return true;
+        case FileInstall::Updated: Log("%s: updated Mods\\%s", area, Utf8Text(file.path).c_str()); return true;
         case FileInstall::Current: return true;
         case FileInstall::Foreign:
-            Log("%s: Mods\\%ls belongs to another mod and was left alone; %s", area, file.path, without);
+            Log("%s: Mods\\%s belongs to another mod and was left alone; %s", area, Utf8Text(file.path).c_str(), without);
             return false;
         case FileInstall::Failed:
-            Log("%s: could not write Mods\\%ls (error %lu); %s", area, file.path, GetLastError(), without);
+            Log("%s: could not write Mods\\%s (error %lu); %s", area, Utf8Text(file.path).c_str(), GetLastError(), without);
             return false;
     }
     return false;
@@ -462,8 +459,8 @@ bool KeepModFile(const ModFile& file, bool active, const char* area, const char*
 
 bool KeepMenuLayout(bool active) {
     char contents[64]{}, without[64]{};
-    _snprintf_s(contents, _TRUNCATE, "the menu layout plus the Player MOD label");
-    _snprintf_s(without, _TRUNCATE, "the Player MOD label is not shown (F2 still works)");
+    FormatText(contents, "the menu layout plus the Player MOD label");
+    FormatText(without, "the Player MOD label is not shown (F2 still works)");
     return KeepModFile(MenuLayoutFile(), active, "Menu", contents, without);
 }
 
@@ -556,7 +553,7 @@ bool LoadRooms(const wchar_t* iniPath) {
     const auto hostKeyText = IniText(iniPath, L"MultiSlot", L"Key", L"F2");
     int hostModeKey = VirtualKey(hostKeyText.c_str());
     if (hostModeKey < 0) {
-        Log("[MultiSlot] Key=%ls is not a known key; using F2", hostKeyText.c_str());
+        Log("[MultiSlot] Key=%s is not a known key; using F2", Utf8Text(hostKeyText.c_str()).c_str());
         hostModeKey = VK_F2;
     }
     // The left stick is free outside a room (the page button is the right one, and copy armor only works
@@ -564,7 +561,7 @@ bool LoadRooms(const wchar_t* iniPath) {
     const auto hostPadText = IniText(iniPath, L"MultiSlot", L"PadButton", L"LeftStick");
     int hostPadOffset = PadButtonOffset(hostPadText.c_str());
     if (hostPadOffset < 0) {
-        Log("[MultiSlot] PadButton=%ls is not a known button; using LeftStick", hostPadText.c_str());
+        Log("[MultiSlot] PadButton=%s is not a known button; using LeftStick", Utf8Text(hostPadText.c_str()).c_str());
         hostPadOffset = 0xB0;
     }
     if (hostPadOffset && static_cast<std::uint32_t>(hostPadOffset) == roomView.padButton) {
@@ -590,7 +587,7 @@ bool LoadRooms(const wchar_t* iniPath) {
     if (GetPrivateProfileIntW(L"CopyArmor", L"Enabled", 1, iniPath) != 0) {
         const auto text = IniText(iniPath, L"CopyArmor", L"Key", L"F4");
         const int vk = VirtualKey(text.c_str());
-        if (vk < 0) Log("[CopyArmor] Key=%ls is not a known key; using F4", text.c_str());
+        if (vk < 0) Log("[CopyArmor] Key=%s is not a known key; using F4", Utf8Text(text.c_str()).c_str());
         copyArmorKey = vk < 0 ? VK_F4 : vk;
         if (copyArmorKey == hostModeKey) {
             Log("[CopyArmor] Key may not be the Player MOD key; using F4");
@@ -603,7 +600,7 @@ bool LoadRooms(const wchar_t* iniPath) {
             }
         const auto padText = IniText(iniPath, L"CopyArmor", L"PadButton", L"LeftStick");
         const int padOffset = PadButtonOffset(padText.c_str());
-        if (padOffset < 0) Log("[CopyArmor] PadButton=%ls is not a known button; using LeftStick", padText.c_str());
+        if (padOffset < 0) Log("[CopyArmor] PadButton=%s is not a known button; using LeftStick", Utf8Text(padText.c_str()).c_str());
         copyArmorPad = static_cast<std::uint32_t>(padOffset < 0 ? 0xB0 : padOffset);
         if (copyArmorPad && copyArmorPad == roomView.padButton) {
             Log("[CopyArmor] PadButton may not be the page button; using none");
@@ -624,7 +621,7 @@ bool LoadRooms(const wchar_t* iniPath) {
         for (int i = 0; i < kSoldierTypeCount; ++i) {
             copyArmorCaps[i] = static_cast<int>(GetPrivateProfileIntW(L"CopyArmor", caps[i].key, caps[i].fallback, iniPath));
             if (copyArmorCaps[i] >= 0) continue;
-            Log("[CopyArmor] %ls=%d is below zero; using no ceiling", caps[i].key, copyArmorCaps[i]);
+            Log("[CopyArmor] %s=%d is below zero; using no ceiling", Utf8Text(caps[i].key).c_str(), copyArmorCaps[i]);
             copyArmorCaps[i] = 0;
         }
         if (copyArmorPad && copyArmorPad == roomView.padButton) {
@@ -704,22 +701,22 @@ bool LoadRooms(const wchar_t* iniPath) {
         "room; 4 or fewer: the extra ones stay empty)", kMaxPlayers, kMaxPlayers);
     char hosting[32]{};
     if (roomSize)
-        _snprintf_s(hosting, _TRUNCATE, "%dPlayer MOD ON", roomSize);
+        FormatText(hosting, "%dPlayer MOD ON", roomSize);
     else
-        _snprintf_s(hosting, _TRUNCATE, "Player MOD OFF");
-    Log("Hosting: %s (%ls on a menu screen outside a room steps OFF/8/10/12/16/24/32/48/64/128/256/512/1024; inside one "
+        FormatText(hosting, "Player MOD OFF");
+    Log("Hosting: %s (%s on a menu screen outside a room steps OFF/8/10/12/16/24/32/48/64/128/256/512/1024; inside one "
         "those page through "
         "the members instead): OFF = normal 4-player rooms anyone can join, N = MultiSlot rooms for N players, "
         "hidden from players without this mod",
-        hosting, hostModeHint);
+        hosting, Utf8Text(hostModeHint).c_str());
     if (copyArmorKey || copyArmorPad)
-        Log("Copy armor: %ls in a room follows the lowest armor in it that is more than %d from yours (your own "
+        Log("Copy armor: %s in a room follows the lowest armor in it that is more than %d from yours (your own "
             "class if anyone else plays it, otherwise the room), up to %d/%d/%d/%d for Ranger/Wing Diver/Air "
             "Raider/Fencer; it never lowers, never reaches the room's own display and never saves",
-            copyArmorHint, copyArmorIgnore, copyArmorCaps[0], copyArmorCaps[1], copyArmorCaps[2], copyArmorCaps[3]);
+            Utf8Text(copyArmorHint).c_str(), copyArmorIgnore, copyArmorCaps[0], copyArmorCaps[1], copyArmorCaps[2], copyArmorCaps[3]);
     else
         Log("Copy armor: off, the armor sites are untouched");
-    Log("Room screen: 4 member panels per page, switched with %ls; fake members %s", roomView.pageHint[0] ? roomView.pageHint : L"(nothing)",
+    Log("Room screen: 4 member panels per page, switched with %s; fake members %s", Utf8Text(roomView.pageHint[0] ? roomView.pageHint : L"(nothing)").c_str(),
         roomView.dummies ? "ON (test mode: F6 adds one to the room's member list, F7 removes one)" : "off");
     if (mission) {
         Log("Mission: players 5-%d get loadout sidecars, player slots 5-%d and spawn points (4 or fewer: unchanged)",
@@ -735,7 +732,7 @@ bool LoadRooms(const wchar_t* iniPath) {
             char factors[400]{};
             int used = 0;
             for (int players = kVanillaPlayers + 1; players <= kMaxPlayers && used >= 0; ++players) {
-                const int written = _snprintf_s(factors + used, sizeof(factors) - used, _TRUNCATE, "%sx%d.%d (%d)",
+                const int written = FormatText(factors + used, sizeof(factors) - used, "%sx%d.%d (%d)",
                                                 used ? " " : "", (players + 1) / 5, (players + 1) * 2 % 10, players);
                 used = written < 0 ? -1 : used + written;
             }
@@ -768,11 +765,11 @@ bool LoadRooms(const wchar_t* iniPath) {
         }
         if (!settings.gameFolder.empty() && StartHostData(game, &RedirectGameImport, settings)) {
             SetWeaponFeature(acceptKey, pageKey, &HostDataMenuFrame);
-            Log("Host data: on; Share=%d, Accept=%ls, AcceptKey=%ls, WeaponPageKey=%ls (weapon and vehicle files only, "
+            Log("Host data: on; Share=%d, Accept=%s, AcceptKey=%s, WeaponPageKey=%s (weapon and vehicle files only, "
                 "checked against the SHA-256 their member published, kept in Mods\\Plugins\\EDF6Coop.hostdata)",
                 settings.share ? 1 : 0,
-                settings.accept == HostAccept::Ask ? L"Ask" : settings.accept == HostAccept::Auto ? L"Auto" : L"Never",
-                settings.keyName, settings.pageKeyName);
+                Utf8Text(settings.accept == HostAccept::Ask ? L"Ask" : settings.accept == HostAccept::Auto ? L"Auto" : L"Never").c_str(),
+                Utf8Text(settings.keyName).c_str(), Utf8Text(settings.pageKeyName).c_str());
         } else {
             Log("Host data: UNAVAILABLE - the host's files cannot be fetched in rooms");
         }
@@ -875,9 +872,9 @@ bool LoadRooms(const wchar_t* iniPath) {
         const bool wantDump = crashDump && SiblingPath(dumpPath, L"-crash.dmp");
         InstallCrashLog(game, wantDump ? dumpPath : nullptr);
         if (CrashDumpArmed())
-            Log("Crash log armed; CrashDump=1, so the first access violation in EDF.dll or the plugin also writes %ls "
+            Log("Crash log armed; CrashDump=1, so the first access violation in EDF.dll or the plugin also writes %s "
                 "(one per launch, overwritten each time). It holds process memory, so only send it on "
-                "purpose", dumpPath);
+                "purpose", Utf8Text(dumpPath).c_str());
         else if (crashDump)
             Log("Crash log armed; CrashDump=1 but no dump can be written (DbgHelp.dll or the path was "
                 "not usable)");

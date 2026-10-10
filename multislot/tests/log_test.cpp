@@ -1,15 +1,14 @@
 // The log file cap (log.h): trimming keeps the newest whole lines after a note, opening and writing past
 // 2 MB trim, and threads writing while a trim runs lose no line and break none.
 //   LogTests work-folder
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <set>
@@ -37,7 +36,7 @@ constexpr std::size_t kFillerLine = 64;
 
 std::string ReadText(const std::wstring& path) {
     LogFlush();  // lines are queued for the writer thread (log.h); everything logged so far goes out first
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
@@ -58,7 +57,7 @@ std::string Filler(std::size_t first, std::size_t count) {
 }
 
 void WriteText(const std::wstring& path, const std::string& text) {
-    std::ofstream(path, std::ios::binary | std::ios::trunc).write(text.data(), static_cast<std::streamsize>(text.size()));
+    std::ofstream(std::filesystem::path(path), std::ios::binary | std::ios::trunc).write(text.data(), static_cast<std::streamsize>(text.size()));
 }
 
 bool StartsWithNote(const std::string& text) { return text.compare(0, sizeof(kNote) - 1, kNote) == 0; }
@@ -92,7 +91,7 @@ bool FillerIntact(const std::string& text, std::size_t last) {
 }
 
 std::string ReadRaw(const std::wstring& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
@@ -121,7 +120,7 @@ void WriteQueueFile(const std::wstring& path, const std::string& lines, std::uin
     header.appendingAt = appendingAt;
     std::memcpy(file.data(), &header, sizeof(header));
     for (std::size_t i = 0; i < lines.size(); ++i) file[sizeof(header) + (start + i) % kLogQueueBytes] = lines[i];
-    std::ofstream(path + kLogQueueSuffix, std::ios::binary | std::ios::trunc).write(file.data(), static_cast<std::streamsize>(file.size()));
+    std::ofstream(std::filesystem::path(path + kLogQueueSuffix), std::ios::binary | std::ios::trunc).write(file.data(), static_cast<std::streamsize>(file.size()));
 }
 
 std::size_t Count(const std::string& text, const std::string& needle) {
@@ -204,7 +203,7 @@ void QueueRecoveryTests(const std::wstring& folder) {
     WriteText(partial, earlier);
     WriteQueueFile(partial, queued, start, 0, 0);
     {
-        std::fstream broken(partial + kLogQueueSuffix, std::ios::binary | std::ios::in | std::ios::out);
+        std::fstream broken(std::filesystem::path(partial + kLogQueueSuffix), std::ios::binary | std::ios::in | std::ios::out);
         const std::uint64_t behind = 1;  // produced below consumed
         broken.seekp(offsetof(LogQueueHeader, produced));
         broken.write(reinterpret_cast<const char*>(&behind), sizeof(behind));
@@ -362,7 +361,7 @@ int wmain(int argc, wchar_t** argv) {
     const auto write = [&](const std::string& body, bool create = true) {
         DeleteFileW(mark.c_str());
         if (create) {
-            std::ofstream out(mark, std::ios::binary);
+            std::ofstream out(std::filesystem::path(mark), std::ios::binary);
             out << body;
         }
         LogOpen(mark.c_str());
@@ -413,14 +412,14 @@ int wmain(int argc, wchar_t** argv) {
     Check(PreviousRun() == LastRun::Cut, "a name or message that says SHUTDOWN does not make a cut run look ended");
 
     // Wide text past ASCII (the menu label's arrow, a path under a Japanese user name) is written as UTF-8;
-    // one that cannot be converted at all only cuts its line short, never fills it with old stack bytes.
-    Log("MENU label shown: \"%ls\"", L"NEW EDF6VR 2.0.0 \x2192 2.1.8 \x65E5\x672C");
-    Log("UNCONVERTIBLE <%ls> tail", L"ok\xD800" L"bad");  // a lone surrogate: no UTF-8 for it
+    // a lone surrogate, which has no UTF-8, becomes U+FFFD and the rest of the line stays.
+    Log("MENU label shown: \"%s\"", Utf8Text(L"NEW EDF6VR 2.0.0 \x2192 2.1.8 \x65E5\x672C").c_str());
+    Log("UNCONVERTIBLE <%s> tail", Utf8Text(L"ok\xD800" L"bad").c_str());
     const std::string wide = ReadText(mark);
     Check(wide.find("MENU label shown: \"NEW EDF6VR 2.0.0 \xE2\x86\x92 2.1.8 \xE6\x97\xA5\xE6\x9C\xAC\"\r\n") != std::string::npos,
-          "a %ls argument past ASCII is written as UTF-8, whole");
-    Check(wide.find("] (text not convertible) UNCONVERTIBLE <%ls> tail\r\n") != std::string::npos,
-          "a %ls argument that cannot be converted leaves the line's own format, not a buffer of stack bytes");
+          "wide text past ASCII is written as UTF-8, whole");
+    Check(wide.find("UNCONVERTIBLE <ok\xEF\xBF\xBD" "bad> tail\r\n") != std::string::npos,
+          "a lone surrogate is written as U+FFFD and the line goes on");
     // A mark counts only right after a line's own timestamp.
     Check(write(banner + ended + banner + line("[2026-09-20 00:09:00.000] ROOM x SHUTDOWN y")) == LastRun::Cut,
           "SHUTDOWN later in a line is not the mark");

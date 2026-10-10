@@ -8,15 +8,15 @@
 //   CrashDumpTests work-folder [plugin]
 // `plugin` runs it with another module as the game, so this executable (where crashlog.cpp is linked, as in the
 // plugin) is only the plugin.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdio>
 #include <cstring>
 #include <string>
 
 #include "../src/crashlog.h"
+#include "../src/guard.h"
+#include "late_fault.h"
 #include "../src/log.h"
 
 using namespace multislot;
@@ -38,16 +38,9 @@ long long FileSize(const std::wstring& path) {
     return (static_cast<long long>(data.nFileSizeHigh) << 32) | data.nFileSizeLow;
 }
 
-// An access violation raised from this executable, so the faulting instruction is inside the module
-// the handler was installed for. The handler never handles anything, so this __except catches it and
-// the test survives to look at what was written.
-void FaultOnce() {
-    __try {
-        volatile int* nowhere = nullptr;
-        *nowhere = 1;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-    }
-}
+// An access violation raised from this executable, so the faulting instruction is inside the module the handler was
+// installed for. The handler never handles anything; LateFault resumes after it.
+void FaultOnce() { LateFault(0); }
 
 std::size_t Count(const std::string& text, const char* needle) {
     std::size_t count = 0;
@@ -75,11 +68,11 @@ int main(int argc, char** argv) {
     InstallCrashLog(pluginOnly ? GetModuleHandleW(L"kernel32.dll") : GetModuleHandleW(nullptr), dump.c_str());
     Check(CrashDumpArmed(), "a usable path and DbgHelp arm the dump");
 
-    // One of the plugin's probes (armor.cpp RulesFor calling into the game, say): its __except catches the fault,
-    // so the crash handler looks away - no report, and the one dump is not spent on it.
-    Probing([] { FaultOnce(); });
+    // One of the plugin's probes (armor.cpp RulesFor calling into the game, say): Guarded catches the fault, so the
+    // crash handler looks away - no report, and the one dump is not spent on it.
+    Check(!Guarded([] { *static_cast<volatile int*>(nullptr) = 1; }), "a probe's fault comes back as false");
     Check(FileSize(dump) < 0, "a fault inside a probe writes no dump");
-    Check(!InProbe() && Probing([] { return 5; }) == 5 && !InProbe(), "a probe passes its result on and ends with it");
+    Check(!InGuarded(), "the probe ends with its fault");
 
     FaultOnce();
     const long long first = FileSize(dump);

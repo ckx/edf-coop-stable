@@ -16,7 +16,7 @@ namespace multislot {
 // log to a line in another, and the SteamID ties both to the friend list.
 //
 // Nothing here touches the game. Steam and EOS are asked through their own public exports, both calls
-// are read-only, and everything runs on the game's UI thread inside __try: if either SDK is not there,
+// are read-only, and everything runs on the game's UI thread inside Guarded (guard.h): if either SDK is not there,
 // or answers with nothing, the mod logs that it could not read it and carries on.
 
 // Called every menu frame (hostmode.cpp). Writes the WHOAMI line once, as soon as Steam answers; until

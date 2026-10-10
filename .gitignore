@@ -2,3 +2,6 @@ build/
 *.obj
 # package.ps1 output
 release/
+build-*/
+.venv/
+tmp/

@@ -167,7 +167,7 @@ EDF6 は受信した EOS パケットをすべてゲームデータとして解�
 
 ## ビルド
 
-必要なもの：Windows x64、「C++ によるデスクトップ開発」入りの Visual Studio 2022（付属の CMake と Ninja を使います）、Python 3.10+ と `pip install numpy pillow pefile==2024.8.26 capstone==5.0.9`、インストール済みの地球防衛軍6（EDF.dll ビルド `678CCB46`）。
+必要なもの：Windows x64、「C++ によるデスクトップ開発」入りの Visual Studio 2022（付属の CMake と Ninja を使います）、Python 3.10+ と `pip install numpy pefile==2024.8.26 capstone==5.0.9`、インストール済みの地球防衛軍6（EDF.dll ビルド `678CCB46`）。
 
 ```powershell
 $env:EDF6_GAME_DIR = 'C:\Program Files (x86)\Steam\steamapps\common\EARTH DEFENSE FORCE 6'
@@ -179,6 +179,18 @@ powershell -ExecutionPolicy Bypass -File package.ps1        # -> release\EDF6Coo
 - ゲームフォルダは読むだけです：`Root.cpk` から「Player MOD」表示付きのメニュー枠を作り（`multislot/tools/make_menu_label.py` が `multislot/assets/LYT_MAINFRAME.SGO` を書きます。ゲーム由来なのでコミットしません）、`HUD/ONLINEHUDTEXTURE.RAB` からプレイヤーごとの色の HUD テクスチャを作り（`multislot/tools/make_hud_colours.py` が `multislot/assets/ONLINEHUDTEXTURE.RAB` を書きます。これもコミットしません）、`EDF.dll` はテストに使います。
 - `build.ps1` は公式 EDFModLoader v1.0.10 の `winmm.dll` を取得し（SHA-256 で確認）、パッケージに入れる修正版ローダーを作ります（`multislot/tools/fix_winmm_proxy.py`）。
 - `package.ps1` はバージョンの合わないビルド、ソースより古い DLL、CI ビルド（`build.ps1 -CI` はゲームのメニューと HUD の素材なしでビルドし、仮のデータを入れます）をパッケージにしません。
+
+### Linux
+
+`build.sh` は同じ DLL を MinGW-w64 向けの clang（`cmake/mingw-w64.cmake`）でクロスビルドし、テストを専用の Wine プレフィックス（`~/.local/share/wine-edf6coop-tests`）で実行します。Windows SDK も Visual Studio も要りません。Fedora の場合：
+
+```sh
+sudo dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
+export EDF6_GAME_DIR="$HOME/.local/share/Steam/steamapps/common/EARTH DEFENSE FORCE 6"
+./build.sh -t    # -> multislot/dist/EDF6Coop.dll。-c はゲームなしでビルド（仮のデータ、ゲームとの照合テストはスキップ）
+```
+
+Python のツールは `build.sh` が `.venv` に作る仮想環境で動きます。リリースパッケージは今まで通り Windows で `build.ps1` と `package.ps1` から作ります。
 
 ## リリース
 

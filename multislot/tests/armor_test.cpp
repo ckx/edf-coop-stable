@@ -1,9 +1,7 @@
 // "copy armor" (armor.h) without a game: the armor a pickup count gives, the count an armor needs, who
 // gets copied, and which member the machine is. The three sites that read the count are checked against
 // EDF.dll by tests.cpp; this is the part that decides what they hand back.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <climits>
 #include <cmath>

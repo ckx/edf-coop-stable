@@ -5,7 +5,7 @@
 #include <cstring>
 #include <string>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "hostmode.h"
 #include "identity.h"
 #include "log.h"
@@ -170,15 +170,14 @@ std::string UserText(const void* user) {
 
 // Lobby ids come from EOS or the game: bounded and printable in the log.
 std::string IdText(const char* id) {
-    std::string text;
-    Probing([&] {
-        __try {
-            for (std::size_t i = 0; id && id[i] && i < 64; ++i) text.push_back(id[i] > 0x20 && id[i] < 0x7F ? id[i] : '?');
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            text = "(unreadable)";
-        }
-    });
-    return text.empty() ? std::string("?") : text;
+    char text[65]{};
+    std::size_t length = 0;
+    if (!Guarded([&] {
+            for (; id && id[length] && length < 64; ++length)
+                text[length] = id[length] > 0x20 && id[length] < 0x7F ? id[length] : '?';
+        }))
+        return "(unreadable)";
+    return length ? std::string(text, length) : std::string("?");
 }
 
 // Our copy of `lobbyId` for `user`; EOS has one only while that user is a member of it.
@@ -238,21 +237,21 @@ std::string LobbyIdOf(void* details) {
 std::string KindText(LobbyKind kind, int capacity) {
     char text[48]{};
     if (kind == LobbyKind::MultiSlot)
-        _snprintf_s(text, _TRUNCATE, "a MultiSlot room for %d", capacity);
+        FormatText(text, "a MultiSlot room for %d", capacity);
     else if (kind == LobbyKind::Normal)
-        _snprintf_s(text, _TRUNCATE, "a normal %d-player room", kVanillaPlayers);
+        FormatText(text, "a normal %d-player room", kVanillaPlayers);
     else
-        _snprintf_s(text, _TRUNCATE, "of an unknown kind");
+        FormatText(text, "of an unknown kind");
     return text;
 }
 
 std::string FactsText(const LobbyFacts& facts) {
     char text[64]{};
     if (facts.hasSearchType)
-        _snprintf_s(text, _TRUNCATE, "MaxMembers %u, SEARCH_TYPE 0x%llX, room size %u", facts.maxMembers,
+        FormatText(text, "MaxMembers %u, SEARCH_TYPE 0x%llX, room size %u", facts.maxMembers,
                     static_cast<unsigned long long>(facts.searchType), facts.roomSize);
     else
-        _snprintf_s(text, _TRUNCATE, "MaxMembers %u, no SEARCH_TYPE yet, room size %u", facts.maxMembers, facts.roomSize);
+        FormatText(text, "MaxMembers %u, no SEARCH_TYPE yet, room size %u", facts.maxMembers, facts.roomSize);
     return text;
 }
 
@@ -314,22 +313,20 @@ struct RoomLobby {
 
 bool ReadRoomLobby(std::uintptr_t room, RoomLobby& out) {
     if (!room) return false;
-    return Probing([&]() -> bool {
-        __try {
-            out.lobby = *reinterpret_cast<void* const*>(room + kRoomLobbyOffset);
-            out.user = *reinterpret_cast<const void* const*>(room + kRoomUserOffset);
-            const auto size = *reinterpret_cast<const std::size_t*>(room + kRoomLobbyIdOffset + 0x10);
-            const auto capacity = *reinterpret_cast<const std::size_t*>(room + kRoomLobbyIdOffset + 0x18);
-            if (!size || size >= sizeof(out.id) || size > capacity) return false;
-            const char* chars = capacity >= 16 ? *reinterpret_cast<const char* const*>(room + kRoomLobbyIdOffset)
-                                               : reinterpret_cast<const char*>(room + kRoomLobbyIdOffset);
-            std::memcpy(out.id, chars, size);
-            out.id[size] = 0;
-            return out.lobby && out.user;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        out.lobby = *reinterpret_cast<void* const*>(room + kRoomLobbyOffset);
+        out.user = *reinterpret_cast<const void* const*>(room + kRoomUserOffset);
+        const auto size = *reinterpret_cast<const std::size_t*>(room + kRoomLobbyIdOffset + 0x10);
+        const auto capacity = *reinterpret_cast<const std::size_t*>(room + kRoomLobbyIdOffset + 0x18);
+        if (!size || size >= sizeof(out.id) || size > capacity) return;
+        const char* chars = capacity >= 16 ? *reinterpret_cast<const char* const*>(room + kRoomLobbyIdOffset)
+                                           : reinterpret_cast<const char*>(room + kRoomLobbyIdOffset);
+        std::memcpy(out.id, chars, size);
+        out.id[size] = 0;
+        read = out.lobby && out.user;
     });
+    return read;
 }
 
 // --- the lobby the game is in ---
@@ -769,7 +766,7 @@ RoomUpdate DecideRoomUpdate(std::uintptr_t room) {
         if (createdSize > 0) creation.roomSize = static_cast<std::uint32_t>(createdSize);
         const RoomUpdate update{KindOf(creation), CapacityToKeep(creation)};
         char detail[48]{};
-        _snprintf_s(detail, _TRUNCATE, "created for %u players", created);
+        FormatText(detail, "created for %u players", created);
         NoteDecision(id, update, "how this machine created it, as EOS has nothing on it", detail);
         return update;
     }

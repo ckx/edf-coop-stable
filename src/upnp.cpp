@@ -4,7 +4,7 @@
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
 #include <windows.h>
-#include <natupnp.h>
+#include "natupnp_min.h"
 #include <oleauto.h>
 
 #include <algorithm>
@@ -91,7 +91,7 @@ public:
     Router() {
         com_ = SUCCEEDED(CoInitializeEx(nullptr, COINIT_MULTITHREADED));
         if (!com_) return;
-        hr_ = CoCreateInstance(__uuidof(UPnPNAT), nullptr, CLSCTX_ALL, __uuidof(IUPnPNAT), reinterpret_cast<void**>(&nat_));
+        hr_ = CoCreateInstance(kClsidUPnPNAT, nullptr, CLSCTX_ALL, kIidUPnPNAT, reinterpret_cast<void**>(&nat_));
         if (SUCCEEDED(hr_)) hr_ = nat_->get_StaticPortMappingCollection(&mappings_);
     }
     ~Router() {

@@ -3,16 +3,16 @@
 // they now return, compared with what the same functions returned before the plugin loaded.
 // The plugin sits in <work-folder>\<mode>\Mods\Plugins, as in a game folder.
 //   MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder off|host4|host8|fresh|upgrade|nomission
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 #include "native_runtime.h"
+#include "late_fault.h"
 
 #include <climits>
 #include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <stdexcept>
@@ -45,7 +45,7 @@ void Check(bool condition, const char* what) {
 }
 
 std::string ReadText(const std::wstring& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
@@ -80,10 +80,10 @@ Behaviour Observe(const unsigned char* base) {
     Behaviour b;
     for (int v = -0x20; v < 0x240; ++v) b.values.push_back(v);
     for (int v : {0x1590, 0x7FFFFFFF, INT_MIN, INT_MIN + 1}) b.values.push_back(v);
-    const auto family = reinterpret_cast<FamilyFn>(base + 0x749AC0);
-    const auto decode = reinterpret_cast<DecodeFn>(base + 0x74AC20);
-    const auto range = reinterpret_cast<RangeFn>(base + 0x74AC50);
-    const auto map = reinterpret_cast<MapFn>(base + 0x74ACA0);
+    const auto family = reinterpret_cast<FamilyFn>(reinterpret_cast<std::uintptr_t>(base) + 0x749AC0);
+    const auto decode = reinterpret_cast<DecodeFn>(reinterpret_cast<std::uintptr_t>(base) + 0x74AC20);
+    const auto range = reinterpret_cast<RangeFn>(reinterpret_cast<std::uintptr_t>(base) + 0x74AC50);
+    const auto map = reinterpret_cast<MapFn>(reinterpret_cast<std::uintptr_t>(base) + 0x74ACA0);
     for (int v : b.values) {
         b.family.push_back(family(v));
         b.decode.push_back(decode(v));
@@ -141,11 +141,11 @@ void CheckVoiceHudLifetime(const unsigned char* base, HMODULE game, HMODULE plug
     std::int32_t displacement = 0;
     std::memcpy(&displacement, base + call.rva + 1, sizeof(displacement));
     using Allocate = void* (*)(std::size_t);
-    const auto allocate = reinterpret_cast<Allocate>(base + call.rva + 5 + displacement);
+    const auto allocate = reinterpret_cast<Allocate>(reinterpret_cast<std::uintptr_t>(base) + call.rva + 5 + displacement);
     using Resize = void (*)(void*, std::size_t, const void*);
     using Destroy = void (*)(void*);
-    const auto resize = reinterpret_cast<Resize>(base + 0x9621A0);
-    const auto destroy = reinterpret_cast<Destroy>(base + 0x961930);
+    const auto resize = reinterpret_cast<Resize>(reinterpret_cast<std::uintptr_t>(base) + 0x9621A0);
+    const auto destroy = reinterpret_cast<Destroy>(reinterpret_cast<std::uintptr_t>(base) + 0x961930);
     // Native vector: +8 data, +0x10 capacity, +0x18 count. The template record has two empty wstrings
     // (inline capacity 7) followed by the HUD's flags. Exercise real record construction and destruction,
     // not a C++ copy of the alignment check. Repeat so a leaked/stale vector state cannot pass silently.
@@ -256,14 +256,7 @@ int Untouched(const unsigned char* base, const std::vector<Patch>& patches) {
     return count;
 }
 
-// Kept free of C++ objects: __try cannot share a function with destructors.
-__declspec(noinline) void WriteToBadAddress() {
-    __try {
-        volatile std::uintptr_t bad = 0x10;
-        *reinterpret_cast<int*>(bad) = 1;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-    }
-}
+void WriteToBadAddress() { LateFault(0x10); }
 
 __declspec(noinline) void ThrowAndCatch() {
     try {
@@ -273,12 +266,12 @@ __declspec(noinline) void ThrowAndCatch() {
 }
 
 void WriteBytes(const std::wstring& path, const std::vector<unsigned char>& bytes) {
-    std::ofstream(path, std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()),
+    std::ofstream(std::filesystem::path(path), std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()),
                                                                   static_cast<std::streamsize>(bytes.size()));
 }
 
 std::vector<unsigned char> ReadBytes(const std::wstring& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     return std::vector<unsigned char>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
@@ -324,11 +317,11 @@ int wmain(int argc, wchar_t** argv) {
     const bool upgrade = mode == L"upgrade";  // no EDF6Coop.ini, but the replaced plugins and their settings
     const bool fresh = mode == L"fresh" || upgrade;  // no EDF6Coop.ini: one is written and used
     if (upgrade) {
-        std::ofstream(oldRooms + L".dll", std::ios::binary) << "MZ not loaded";
-        std::ofstream(oldDirect + L".dll", std::ios::binary) << "MZ not loaded";
-        std::ofstream(oldRooms + L".ini", std::ios::binary)
+        std::ofstream(std::filesystem::path(oldRooms + L".dll"), std::ios::binary) << "MZ not loaded";
+        std::ofstream(std::filesystem::path(oldDirect + L".dll"), std::ios::binary) << "MZ not loaded";
+        std::ofstream(std::filesystem::path(oldRooms + L".ini"), std::ios::binary)
             << "[MultiSlot]\r\nEnabled=1\r\nEightPlayerRooms=1\r\nMaxPlayers=8\r\n[RoomScreen]\r\nPageKeys=F2,Tab\r\n";
-        std::ofstream(oldDirect + L".ini", std::ios::binary)
+        std::ofstream(std::filesystem::path(oldDirect + L".ini"), std::ios::binary)
             << "\xEF\xBB\xBF[DirectNet]\r\nEnabled=1\r\nKey=secret\r\n[Update]\r\nAutoUpdate=0\r\n";
     }
     if (!fresh) {
@@ -342,7 +335,7 @@ int wmain(int argc, wchar_t** argv) {
                                                  : "[MultiSlot]\r\nEnabled=1\r\nEightPlayerRooms=1\r\nCrashLog=1\r\nNetLog=1\r\n"
                                                    "[RoomScreen]\r\nDummyMembers=1\r\nPageKey=F2\r\nDummyAddKey=F3\r\nDummyRemoveKey=F4\r\n"
                                                    "[Test]\r\nGhostPlayers=4\r\n[Mission]\r\nScale6=1.25\r\n";
-        std::ofstream(iniPath, std::ios::binary | std::ios::trunc) << ini;
+        std::ofstream(std::filesystem::path(iniPath), std::ios::binary | std::ios::trunc) << ini;
     }
 
     // Mods\UI\LYT_MAINFRAME.SGO before loading: ours (off, host8), another mod's (nomission), none (host4, fresh).

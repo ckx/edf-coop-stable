@@ -3,9 +3,7 @@
 // (fake_eos_net.cpp) and the test driver (gamenet_test.cpp) map. It holds the room (one EOS lobby) and an inbox per
 // machine. A packet is written straight into its receiver's inbox, so nothing has to route it, and the driver can
 // read every packet that crossed the wire afterwards (the wire log).
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstring>

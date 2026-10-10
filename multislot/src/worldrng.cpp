@@ -1,9 +1,7 @@
 #define _CRT_RAND_S
 #include "worldrng.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdlib>
 

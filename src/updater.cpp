@@ -1,4 +1,5 @@
 #include "updater.h"
+#include "utf8.h"
 
 #include <windows.h>
 #include <bcrypt.h>
@@ -645,9 +646,9 @@ RunState beginRunFiles(const std::wstring& installed, const std::string& version
     bool rolledBackBefore = badVersion(installed) == me;  // an older updater installed it again
     if (!rolledBackBefore && !(trial.version == me)) {
         writeText(trialPath, versionText(me) + " " + std::to_string(GetCurrentProcessId()) + "\n");
-        logf("UPDATE first run of %s: keeping %s as %ls.old until this version has run for %u seconds "
+        logf("UPDATE first run of %s: keeping %s as %s.old until this version has run for %u seconds "
              "past the game's first EOS tick",
-             versionString.c_str(), fileVersionImpl(old).c_str(), coop::kDllFileW, kHealthySeconds);
+             versionString.c_str(), fileVersionImpl(old).c_str(), Utf8Text(coop::kDllFileW).c_str(), kHealthySeconds);
         return RunState::Trial;
     }
     if (!rolledBackBefore && sameGameRunning(trial.pid)) return RunState::Trial;  // that game's trial, not over

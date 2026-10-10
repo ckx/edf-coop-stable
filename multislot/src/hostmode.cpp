@@ -1,8 +1,6 @@
 #include "hostmode.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <atomic>
 #include <cstring>
@@ -11,7 +9,7 @@
 #include "armor.h"
 #include "updatecheck.h"
 #include "identity.h"
-#include "crashlog.h"
+#include "guard.h"
 #include "lobbystate.h"
 #include "log.h"
 #include "mission.h"
@@ -80,16 +78,9 @@ void Release(SharedPtr& pointer) {
 }
 
 bool InRoomSession() {
-    return Probing([&]() -> bool {
-        __try {
-            std::uint64_t holder = 0;
-            std::memcpy(&holder, game + kSessionHolder, sizeof(holder));
-            if (!holder) return false;
-            return *reinterpret_cast<const std::uint64_t*>(static_cast<std::uintptr_t>(holder - 0x98 + 0xC0)) != 0;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
-    });
+    std::uint64_t holder = 0, session = 0;
+    return ReadGuarded(game + kSessionHolder, holder) && holder &&
+           ReadGuarded(static_cast<std::uintptr_t>(holder - 0x98 + 0xC0), session) && session != 0;
 }
 
 bool RoomHost() {
@@ -362,7 +353,7 @@ void UpdateMenuFrame(void* frame, bool keyDown, const MenuContext& context) {
     // so a frame without one is normal; the log only records that the label reached a menu frame.
     if (!ShowLabel(frame, label) || std::wcscmp(lastLoggedLabel, label) == 0) return;
     std::wmemcpy(lastLoggedLabel, label, kLabelChars);
-    Log("MENU label shown: \"%ls\"", label);
+    Log("MENU label shown: \"%s\"", Utf8Text(label).c_str());
 }
 
 MidHandler HostModeHookHandler(std::uint32_t rva) {

@@ -1,9 +1,7 @@
 // Execute the actual on-disk export thunks, with benign test targets instead of
 // Windows functions. Never run DllMain or load the game. A breakpoint at the
 // common dispatch deterministically inserts another call after PA was written.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 #include <atomic>
 #include <cstdint>
 #include <cstdio>

@@ -1,8 +1,6 @@
 // Runs widened compares in this process: a `cmp r/m, imm8; jcc` pair is patched to jump to its cave, and the patched
 // function must take the same exits it did, with the bound the cave compares against instead of the imm8.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdio>

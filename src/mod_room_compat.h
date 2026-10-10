@@ -1,5 +1,5 @@
 #pragma once
-#include <Windows.h>
+#include <windows.h>
 #include <cstdint>
 namespace dn {
 constexpr std::int64_t kAllForcesPrefix=0x41460100;

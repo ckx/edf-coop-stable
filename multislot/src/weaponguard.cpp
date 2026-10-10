@@ -1,13 +1,12 @@
 #include "weaponguard.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstring>
 #include <mutex>
 #include <set>
 
+#include "guard.h"
 #include "log.h"
 
 namespace multislot {
@@ -40,16 +39,11 @@ std::int32_t FirstOwn(const LocalWeapons& local, int weaponClass) {
 
 // GameStatus and the table's rows, or false (the game not that far yet, or not this build of it).
 bool ReadStatus(std::uint32_t& rows) {
-    __try {
-        std::uint64_t pointer = 0;
-        std::memcpy(&pointer, game + kGameStatus, sizeof(pointer));
-        if (!pointer) return false;
-        status = reinterpret_cast<const unsigned char*>(static_cast<std::uintptr_t>(pointer));
-        using RowsFn = std::uint32_t(__fastcall*)();
-        rows = reinterpret_cast<RowsFn>(game + kWeaponRows)();
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    std::uint64_t pointer = 0;
+    if (!ReadGuarded(game + kGameStatus, pointer) || !pointer) return false;
+    status = reinterpret_cast<const unsigned char*>(static_cast<std::uintptr_t>(pointer));
+    using RowsFn = std::uint32_t(__fastcall*)();
+    if (!Guarded([&] { rows = reinterpret_cast<RowsFn>(reinterpret_cast<std::uintptr_t>(game) + kWeaponRows)(); })) return false;
     // Once: what the guard compares with, so a log shows which table this machine had.
     static bool told = false;
     if (rows && !told) {
@@ -61,24 +55,14 @@ bool ReadStatus(std::uint32_t& rows) {
 }
 
 bool ReadEquipped(std::int32_t (&equipped)[kWeaponClasses][kWeaponSlots]) {
-    __try {
-        std::memcpy(equipped, status + kEquipped, sizeof(equipped));
-        return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return false;
-    }
+    return Guarded([&] { std::memcpy(equipped, status + kEquipped, sizeof(equipped)); });
 }
 
 std::uint64_t LocalLevel(std::int32_t id) {
     const std::int64_t row = WeaponRow(id);
     if (row < 0 || !status) return 0;
-    __try {
-        std::uint64_t level = 0;
-        std::memcpy(&level, status + kLevels + static_cast<std::size_t>(row) * 12, sizeof(level));
-        return level;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return 0;
-    }
+    std::uint64_t level = 0;
+    return ReadGuarded(status + kLevels + static_cast<std::size_t>(row) * 12, level) ? level : 0;
 }
 
 bool ReadLocal(LocalWeapons& local) {

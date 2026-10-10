@@ -2,9 +2,7 @@
 //   HitAuthTests                the event, the decision and the owner's checks
 //   HitAuthTests <EDF.dll>      against the game's code: the hook sites, the game facts the rule rests on, the event's
 //                               round trip through the game's own stream code, and the game's receive passing it by
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 #include "native_runtime.h"
 
 #include <cmath>

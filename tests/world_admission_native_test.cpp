@@ -1,7 +1,7 @@
 // Private mapped EDF.dll + production AF export; never calls EML6_Load or starts the game.
 #include "../src/extension_api.h"
 #include "../src/room_view.h"
-#include <Windows.h>
+#include <windows.h>
 #include <array>
 #include <cstdio>
 #include <cstring>

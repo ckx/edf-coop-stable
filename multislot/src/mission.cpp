@@ -1,14 +1,12 @@
 #include "mission.h"
 
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <atomic>
 #include <cmath>
 #include <cstring>
 
-#include "crashlog.h"
+#include "guard.h"
 #include "log.h"
 #include "patches.h"
 #include "../../src/extension_api.h"
@@ -54,22 +52,20 @@ std::atomic<int> hudTableSize{kVanillaPlayers};
 
 // OnlineSession() without C++ objects so it can use SEH.
 bool OnlineMode() {
-    return Probing([&]() -> bool {
-        __try {
-            std::uint64_t status = 0;
-            std::memcpy(&status, game + kGameStatusPointer, sizeof(status));
-            const auto* s = reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(status));
-            const std::int32_t mode = *reinterpret_cast<const std::int32_t*>(s + 0x38);
-            if (mode == -1) return false;
-            const auto* modes = *reinterpret_cast<const std::uint8_t* const*>(s + 0x20);
-            const auto* entry = *reinterpret_cast<const std::uint8_t* const*>(modes + static_cast<std::uint32_t>(mode) * 8);
-            const auto* info = *reinterpret_cast<const std::uint8_t* const*>(entry + 0x10);
-            const std::int32_t offset = *reinterpret_cast<const std::int32_t*>(info + 8);
-            return *reinterpret_cast<const std::int32_t*>(info + offset + 0x68) != 0;
-        } __except (EXCEPTION_EXECUTE_HANDLER) {
-            return false;
-        }
+    bool read = false;
+    Guarded([&] {
+        std::uint64_t status = 0;
+        std::memcpy(&status, game + kGameStatusPointer, sizeof(status));
+        const auto* s = reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(status));
+        const std::int32_t mode = *reinterpret_cast<const std::int32_t*>(s + 0x38);
+        if (mode == -1) return;
+        const auto* modes = *reinterpret_cast<const std::uint8_t* const*>(s + 0x20);
+        const auto* entry = *reinterpret_cast<const std::uint8_t* const*>(modes + static_cast<std::uint32_t>(mode) * 8);
+        const auto* info = *reinterpret_cast<const std::uint8_t* const*>(entry + 0x10);
+        const std::int32_t offset = *reinterpret_cast<const std::int32_t*>(info + 8);
+        read = *reinterpret_cast<const std::int32_t*>(info + offset + 0x68) != 0;
     });
+    return read;
 }
 
 template <std::uint64_t CpuContext::*Target, std::uint64_t CpuContext::*Index>
@@ -293,20 +289,20 @@ using ConstructorFn = void*(__fastcall*)(void*);
 bool CreatedPlayerControl(const void* object, const void** control) {
     *control = nullptr;
     if (!object) return false;
-    return Probing([&]() -> bool {
-        __try {
-            const auto* bytes = static_cast<const unsigned char*>(object);
-            if (bytes[0x18] & 4) return false;
-            const void* found = nullptr;
-            std::memcpy(&found, bytes + 0x30, sizeof(found));
-            if (!found || *reinterpret_cast<const LONG*>(static_cast<const unsigned char*>(found) + 8) <= 0) return false;
-            const void* current = nullptr;
-            std::memcpy(&current, bytes + 0x30, sizeof(current));
-            if (current != found || (bytes[0x18] & 4)) return false;
-            *control = found;
-            return true;
-        } __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    bool alive = false;
+    Guarded([&] {
+        const auto* bytes = static_cast<const unsigned char*>(object);
+        if (bytes[0x18] & 4) return;
+        const void* found = nullptr;
+        std::memcpy(&found, bytes + 0x30, sizeof(found));
+        if (!found || *reinterpret_cast<const LONG*>(static_cast<const unsigned char*>(found) + 8) <= 0) return;
+        const void* current = nullptr;
+        std::memcpy(&current, bytes + 0x30, sizeof(current));
+        if (current != found || (bytes[0x18] & 4)) return;
+        *control = found;
+        alive = true;
     });
+    return alive;
 }
 
 // Only the 1DC525 call has the verified null-result branch (1DC544..1DC550).

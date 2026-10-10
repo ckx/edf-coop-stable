@@ -1,9 +1,7 @@
 #pragma once
 // One machine of a game-code test (GameMachine.exe): the real EDF.dll, the real EDF6Coop.dll loaded the way
 // EDFModLoader loads it, and fake_eos_net.cpp as EOS. What a machine does once both are in is its role (roles.cpp).
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdarg>
 #include <cstdint>

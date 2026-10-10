@@ -3,9 +3,7 @@
 // the thunk running the displaced `cmp`. With the path of EDF.dll as argument, only the site's bytes against the
 // game's code (exit 77 when the file is missing).
 //   NetWorldTests [EDF.dll]
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdint>
 #include <cstdio>

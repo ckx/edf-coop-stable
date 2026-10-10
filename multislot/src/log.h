@@ -2,7 +2,11 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "../../src/utf8.h"
+
 namespace multislot {
+
+using dn::Utf8Text;
 
 // Append-only text log. Safe to call from an exception handler: no heap, no CRT file locks.
 // Lines are queued and a writer thread appends them to the file (at the latest every 200 ms), so logging never
@@ -20,6 +24,13 @@ void LogWrite(const char* text, std::size_t length);
 // One call is one line: control characters in the formatted text (a member's name, an EOS message) are
 // written as '?', so nothing logged can end the line early or start one that reads as the plugin's own.
 void Log(const char* format, ...);
+// Formats into `out` on every toolchain (MSVC's _snprintf_s with _TRUNCATE): `out` is always terminated; returns the
+// length written, or -1 when the text was cut short.
+int FormatText(char* out, std::size_t size, const char* format, ...);
+template <std::size_t N, typename... Args>
+int FormatText(char (&out)[N], const char* format, Args... args) {
+    return FormatText(out, N, format, args...);
+}
 // Writes everything queued so far to the file on the calling thread, and returns when it is there. Crash
 // reports use it before anything that may not finish (a dump), and so do tests before reading the file.
 void LogFlush();

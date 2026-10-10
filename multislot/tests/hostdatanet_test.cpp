@@ -1,8 +1,6 @@
 // Host data between machines (hostdatanet.h) without EOS: what a lobby says, the menu's words, and two or more
 // HostDataLinks wired together through a queue that can lose, hold back or forge packets.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <cstdio>
 #include <deque>
@@ -280,7 +278,7 @@ void Sizes() {
     Check(!PublishedSize(view, "host", other.digest) && !PublishedSize(view, "old", mods.digest) &&
               !PublishedSize(view, "nobody", mods.digest),
           "another bundle, a member that published nothing, or no such member: not known");
-    for (const std::string broken : {DigestHex(mods.digest) + ":3", DigestHex(mods.digest) + ":3:x",
+    for (const std::string& broken : {DigestHex(mods.digest) + ":3", DigestHex(mods.digest) + ":3:x",
                                      DigestHex(mods.digest) + ":3:4x", "x" + DigestHex(mods.digest) + ":3:4"}) {
         view.members[2].texts[kBundleSizesKey] = broken;
         Check(!PublishedSize(view, "bad", mods.digest), "a malformed value is not a size");

@@ -1,8 +1,6 @@
 // Interest management on the wire (netaoi.h): with budget to spare every state datagram goes; under a tight budget
 // near and engaged players go more often than far ones; nobody goes more than a second without an update.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <cstdio>

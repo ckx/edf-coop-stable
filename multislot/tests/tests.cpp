@@ -1,8 +1,6 @@
 // Verifies the patch tables against the EDF.dll on disk: every original byte must be present, no
 // two writes may overlap, and the SEARCH_TYPE and capacity values must follow the room rules.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <bit>
 #include <algorithm>

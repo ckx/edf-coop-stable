@@ -3,6 +3,8 @@ cmake_minimum_required(VERSION 3.20)
 project(EDF6Coop VERSION 2.5.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+# Every file sees <windows.h> the same way.
+add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
 
 # One build for every room size since 2.3.0: slots for kMaxPlayers (src/patches.h), the size of a room chosen by its
 # host. The INI template names that number; it is read from patches.h so the two cannot disagree.
@@ -30,7 +32,18 @@ else()
     set(EDF6_GAME_DIR_DEFAULT "${CMAKE_SOURCE_DIR}/..")
 endif()
 set(EDF6_GAME_DIR "${EDF6_GAME_DIR_DEFAULT}" CACHE PATH "EARTH DEFENSE FORCE 6 install folder (holds EDF.dll)")
-set(WARNINGS /W4 /WX /utf-8 /permissive-)
+if(MSVC)
+    set(WARNINGS /W4 /WX /utf-8 /permissive-)
+    set(DIRECTNET_FLAGS /W4 /WX /utf-8 /EHsc)
+else()
+    # MinGW-w64 (cmake/mingw-w64.cmake): the plugin and its tests link the C and C++ runtimes statically, so the
+    # DLL needs nothing next to it but what Windows (or Wine) has.
+    set(WARNINGS -Wall -Wextra -Werror -Wno-missing-field-initializers -Wno-unknown-pragmas)
+    set(DIRECTNET_FLAGS ${WARNINGS})
+    add_link_options(-static -static-libgcc -static-libstdc++)
+    string(APPEND CMAKE_CXX_STANDARD_LIBRARIES " -lwinpthread")
+    set(CMAKE_SHARED_LIBRARY_PREFIX "")
+endif()
 
 # The default settings the plugin writes when no INI exists come from EDF6MultiSlot.ini itself.
 file(READ "${CMAKE_SOURCE_DIR}/EDF6MultiSlot.ini" MULTISLOT_DEFAULT_INI)
@@ -87,15 +100,15 @@ set(DIRECTNET_CORE log auth wire reliable direct_net netif config iat hold traff
     fake_lobby extension_transport extension_bridge)
 list(TRANSFORM DIRECTNET_CORE PREPEND "${DIRECTNET_DIR}/")
 list(TRANSFORM DIRECTNET_CORE APPEND ".cpp")
-set(DIRECTNET_DEFINES WIN32_LEAN_AND_MEAN NOMINMAX _WINSOCK_DEPRECATED_NO_WARNINGS _CRT_SECURE_NO_WARNINGS)
+set(DIRECTNET_DEFINES _WINSOCK_DEPRECATED_NO_WARNINGS _CRT_SECURE_NO_WARNINGS)
 add_library(DirectNetCore STATIC ${DIRECTNET_CORE})
 target_compile_definitions(DirectNetCore PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(DirectNetCore PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(DirectNetCore PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(DirectNetCore PUBLIC ws2_32 iphlpapi bcrypt ole32 oleaut32 winhttp)
 add_library(DirectNetPart STATIC "${DIRECTNET_DIR}/lobby_marker.cpp" "${DIRECTNET_DIR}/eos_hooks.cpp"
     "${DIRECTNET_DIR}/dn_part.cpp" "${DIRECTNET_DIR}/extension_room.cpp")
 target_compile_definitions(DirectNetPart PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(DirectNetPart PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(DirectNetPart PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(DirectNetPart PUBLIC DirectNetCore)
 
 add_library(EDF6Coop SHARED
@@ -109,7 +122,9 @@ target_link_libraries(EDF6Coop PRIVATE DirectNetPart winhttp)
 # "src/config.h" and the like name the direct-link part's headers (both parts have a log.h).
 target_include_directories(EDF6Coop PRIVATE ${MODLOADER_INCLUDE} "${CMAKE_BINARY_DIR}/generated" "${CMAKE_SOURCE_DIR}/..")
 target_compile_options(EDF6Coop PRIVATE ${WARNINGS})
-target_link_options(EDF6Coop PRIVATE /DYNAMICBASE /NXCOMPAT /INCREMENTAL:NO /PDBALTPATH:EDF6Coop.pdb)
+if(MSVC)
+    target_link_options(EDF6Coop PRIVATE /DYNAMICBASE /NXCOMPAT /INCREMENTAL:NO /PDBALTPATH:EDF6Coop.pdb)
+endif()
 set_target_properties(EDF6Coop PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${MULTISLOT_DIST}")
 
 enable_testing()
@@ -188,6 +203,10 @@ add_executable(RoomViewTests tests/roomview_test.cpp src/roomview.cpp src/armor.
     src/code.cpp src/patches.cpp src/log.cpp src/identity.cpp src/joinlog.cpp)
 target_compile_options(RoomViewTests PRIVATE ${WARNINGS})
 add_test(NAME RoomViewPaging COMMAND RoomViewTests)
+
+add_executable(GuardTests tests/guard_test.cpp)
+target_compile_options(GuardTests PRIVATE ${WARNINGS})
+add_test(NAME GuardedFaults COMMAND GuardTests)
 
 add_executable(MidHookTests tests/midhook_test.cpp src/midhook.cpp src/code.cpp src/patches.cpp)
 target_compile_options(MidHookTests PRIVATE ${WARNINGS})
@@ -317,6 +336,7 @@ target_compile_options(GameMachine PRIVATE ${WARNINGS})
 add_dependencies(GameMachine GameNetEos)
 add_executable(GameNetTests tests/gamenet/gamenet_test.cpp)
 target_compile_options(GameNetTests PRIVATE ${WARNINGS})
+target_link_libraries(GameNetTests PRIVATE ws2_32)
 add_dependencies(GameNetTests GameMachine EDF6Coop)
 add_test(NAME GameNetLogStats COMMAND GameNetTests --log-stats)
 foreach(scenario room link mission2 mission4 mission8 mission8late mission8lossy mission8busy mission8rushed sidelink mission4modweapon mission4slowpeer
@@ -329,22 +349,22 @@ endforeach()
 # The direct-link part's own tests (they need no game) and its join probe.
 add_executable(DirectNetTests "${CMAKE_SOURCE_DIR}/../tests/test_main.cpp")
 target_compile_definitions(DirectNetTests PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(DirectNetTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(DirectNetTests PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(DirectNetTests PRIVATE DirectNetCore)
 add_test(NAME DirectNet COMMAND DirectNetTests)
 add_executable(ExtensionTransportTests "${CMAKE_SOURCE_DIR}/../tests/extension_transport_test.cpp")
 target_compile_definitions(ExtensionTransportTests PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(ExtensionTransportTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(ExtensionTransportTests PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(ExtensionTransportTests PRIVATE DirectNetCore)
 add_test(NAME ExtensionTransport COMMAND ExtensionTransportTests)
 add_executable(WorldAdmissionTests "${CMAKE_SOURCE_DIR}/../tests/world_admission_test.cpp")
 target_compile_definitions(WorldAdmissionTests PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(WorldAdmissionTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(WorldAdmissionTests PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(WorldAdmissionTests PRIVATE DirectNetCore)
 add_test(NAME WorldAdmission COMMAND WorldAdmissionTests)
 add_executable(WorldAdmissionNativeTests "${CMAKE_SOURCE_DIR}/../tests/world_admission_native_test.cpp"
     "${CMAKE_SOURCE_DIR}/../src/room_view.cpp")
-target_compile_options(WorldAdmissionNativeTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(WorldAdmissionNativeTests PRIVATE ${DIRECTNET_FLAGS})
 add_library(FakeExtensionProfile SHARED "${CMAKE_SOURCE_DIR}/../tests/fake_extension_profile.cpp")
 add_dependencies(GameNetTests FakeExtensionProfile)
 set_target_properties(FakeExtensionProfile PROPERTIES OUTPUT_NAME EDF6VehicleCrew
@@ -358,14 +378,14 @@ set_target_properties(FakeExtensionNoObserver PROPERTIES OUTPUT_NAME EDF6Vehicle
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/extension-no-observer")
 add_executable(ExtensionProfileTests "${CMAKE_SOURCE_DIR}/../tests/extension_profile_test.cpp")
 target_compile_definitions(ExtensionProfileTests PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(ExtensionProfileTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(ExtensionProfileTests PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(ExtensionProfileTests PRIVATE DirectNetPart)
 add_dependencies(ExtensionProfileTests FakeEosSdk FakeExtensionProfile FakeExtensionNoObserver)
 add_test(NAME ExtensionProfile COMMAND ExtensionProfileTests "$<TARGET_FILE:FakeEosSdk>" "$<TARGET_FILE:FakeExtensionProfile>"
     "$<TARGET_FILE:FakeExtensionNoObserver>")
 add_executable(DirectNetProbeJoin "${CMAKE_SOURCE_DIR}/../tests/probe_join.cpp")
 target_compile_definitions(DirectNetProbeJoin PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(DirectNetProbeJoin PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(DirectNetProbeJoin PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(DirectNetProbeJoin PRIVATE DirectNetCore)
 
 # --- Netcode rewrite W1 (transport): datagram classes, fragments, congestion budgets, multipath direct link ---
@@ -373,7 +393,7 @@ target_sources(DirectNetCore PRIVATE "${DIRECTNET_DIR}/netclass.cpp" "${DIRECTNE
     "${DIRECTNET_DIR}/congestion.cpp")
 add_executable(NetTransportTests "${CMAKE_SOURCE_DIR}/../tests/net_transport_test.cpp")
 target_compile_definitions(NetTransportTests PRIVATE ${DIRECTNET_DEFINES})
-target_compile_options(NetTransportTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(NetTransportTests PRIVATE ${DIRECTNET_FLAGS})
 target_link_libraries(NetTransportTests PRIVATE DirectNetCore)
 add_test(NAME NetTransport COMMAND NetTransportTests)
 target_sources(EDF6Coop PRIVATE src/nettraffic.cpp)
@@ -399,5 +419,16 @@ add_test(NAME NetInterestOnTheWire COMMAND NetInterestTests)
 set_tests_properties(GameNet_worldadmission PROPERTIES ENVIRONMENT "EDF6NET_AF_PROFILE=$<TARGET_FILE:FakeExtensionProfile>")
 
 add_executable(ModRoomIsolationTests ../tests/mod_room_test.cpp)
-target_compile_options(ModRoomIsolationTests PRIVATE /W4 /WX /utf-8 /EHsc)
+target_compile_options(ModRoomIsolationTests PRIVATE ${DIRECTNET_FLAGS})
 add_test(NAME ModRoomIsolation COMMAND ModRoomIsolationTests)
+
+# Test programs with wmain: MinGW-w64 links them against its wide-character startup.
+if(NOT MSVC)
+    foreach(target LoaderProxyTests HandshakeTests PeerTimeoutTests ModFileTests LogTests RefusalTests MultiSlotLoadTest
+                   GameMachine GameNetTests DirectNetTests WorldAdmissionNativeTests)
+        target_link_options(${target} PRIVATE -municode)
+    endforeach()
+endif()
+
+# Rooms of 16 and 32 processes run alone: next to other tests they miss their timing on a busy machine.
+set_tests_properties(GameNet_mission16 GameNet_mission32 GameNet_mission32bulk PROPERTIES RUN_SERIAL TRUE)

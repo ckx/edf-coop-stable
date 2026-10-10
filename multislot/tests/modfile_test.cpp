@@ -1,14 +1,13 @@
 // The files the plugin keeps under Mods (modfile.h), in a scratch folder: where each goes, writing, updating,
 // leaving another mod's file alone, and removing only our own.
 //   ModFileTests work-folder
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <cwchar>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -30,12 +29,12 @@ void Check(bool condition, const char* what, const wchar_t* file = L"") {
 }
 
 std::vector<unsigned char> ReadBytes(const std::wstring& path) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(std::filesystem::path(path), std::ios::binary);
     return std::vector<unsigned char>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
 
 void WriteBytes(const std::wstring& path, const std::vector<unsigned char>& bytes) {
-    std::ofstream(path, std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()),
+    std::ofstream(std::filesystem::path(path), std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()),
                                                                   static_cast<std::streamsize>(bytes.size()));
 }
 

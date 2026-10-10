@@ -1,8 +1,6 @@
 // Host data (hostdata.h) without a game: which files may travel, the bundle they travel in, the packets that
 // carry it, and where the game is pointed while a player uses the host's files.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -111,7 +109,7 @@ void Bundles() {
     extra.push_back(0);
     Check(!ParseBundle(extra, &why), "bytes after the end");
     std::vector<std::uint8_t> renamed = a->bytes;
-    const auto at = std::search(renamed.begin(), renamed.end(), "OBJECT/V401.SGO", "OBJECT/V401.SGO" + 15);
+    const auto at = std::search(renamed.begin(), renamed.end(), "OBJECT/V401.SGO", &"OBJECT/V401.SGO"[15]);
     Check(at != renamed.end(), "path in the bundle");
     if (at != renamed.end()) {
         std::copy_n("OBJECT/V401.DLL", 15, at);

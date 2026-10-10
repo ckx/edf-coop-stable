@@ -74,9 +74,10 @@ std::uint8_t* NewSerialize() {
 // A control block as std::shared_ptr's (_Ref_count_base: its two virtuals, then the use and weak counts), with the
 // event after it, as make_shared lays them out. This machine holds the first use for good, so the counts the game
 // moves never reach zero and the virtuals are never called.
+void NoOp(void*) {}
+void* const kEventBlockVtable[] = {Address(&NoOp), Address(&NoOp)};  // _Destroy, _Delete_this
 struct EventBlock {
-    virtual void Destroy() noexcept {}
-    virtual void DeleteThis() noexcept {}
+    void* const* vtable = kEventBlockVtable;
     std::int32_t uses = 1;
     std::int32_t weaks = 1;
     Event event{};

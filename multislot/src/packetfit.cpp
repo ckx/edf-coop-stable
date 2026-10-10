@@ -120,9 +120,6 @@ void FlushHandler(CpuContext* context) {
 EosSendFn eosSend = nullptr;
 EosReceiveFn eosReceive = nullptr;
 constexpr std::int32_t kReliableOrdered = 2;  // EOS_PR_ReliableOrdered
-// Every record of a sync can be a stub: in a room of 32 only about three of them fit the budget inline, and
-// a stub past this count would be neither sent beside the sync nor waited for by the receiver.
-constexpr std::size_t kMaxStubsPerPacket = kMaxPlayers;
 
 SplitSyncReaders splitSyncReaders = nullptr;
 std::size_t syncBudget = kMissionSyncBudget;  // [Test] SplitSyncBudget lowers it

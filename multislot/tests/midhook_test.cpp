@@ -1,14 +1,13 @@
 // Runs hooked machine code in this process: the thunk must hand the handler the live registers,
 // load its changes back, preserve flags and xmm registers, keep the stack aligned, run the displaced
 // instructions and return to the instruction after the site.
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <Windows.h>
+#include <windows.h>
 #include <intrin.h>
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <stdexcept>
 #include <vector>
 
 #include "../src/code.h"
@@ -40,7 +39,12 @@ std::uint64_t alignment = 0xFF;
 std::uint64_t seenRcx = 0;
 
 void TenfoldRcx(CpuContext* context) {
-    alignment = reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress()) & 0xF;
+#if defined(_MSC_VER)
+    const auto returnSlot = reinterpret_cast<std::uintptr_t>(_AddressOfReturnAddress());
+#else
+    const auto returnSlot = reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0)) + sizeof(void*);
+#endif
+    alignment = returnSlot & 0xF;
     seenRcx = context->rcx;
     context->rcx *= 10;
 }
@@ -80,17 +84,16 @@ __declspec(noinline) void WalkFromHandler(CpuContext*) {
     }
 }
 
-void FaultingHandler(CpuContext*) {
-    volatile int* nowhere = nullptr;
-    *nowhere = 1;
+void ThrowingHandler(CpuContext*) {
+    throw std::runtime_error("from a mid-function hook handler");
 }
 
-// The system has to unwind from the handler, through the thunk and the hooked function, to reach this __except.
-bool FaultReachesCaller(int (*hooked)()) {
-    __try {
+// The system has to unwind from the handler, through the thunk and the hooked function, to reach this catch.
+bool ThrowReachesCaller(int (*hooked)()) {
+    try {
         hooked();
         return false;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } catch (const std::runtime_error&) {
         return true;
     }
 }
@@ -252,7 +255,7 @@ int main() {
     unsigned char* q = buffer.code + 0xC0;
     const unsigned char qCode[] = {0x90, 0x90, 0x90, 0x90, 0x90, 0xB8, 0x07, 0x00, 0x00, 0x00, 0xC3};
     std::memcpy(q, qCode, sizeof(qCode));
-    Check(Hook(page, q, 5, 5, &FaultingHandler), "hook q");
+    Check(Hook(page, q, 5, 5, &ThrowingHandler), "hook q");
 
     // A call stub, as the redirected calls use.
     unsigned char* stub = page.Add(reinterpret_cast<void*>(&Seven));
@@ -285,8 +288,8 @@ int main() {
     Check(walked[2] == static_cast<DWORD64>(reinterpret_cast<std::uintptr_t>(p + 5)), "frame 2 is the hooked function, at the site");
     Check(InThisModule(walked[3]), "frame 3 is the function that called it");
 
-    // A fault in a handler is dispatched through the thunk to an __except above the hooked function.
-    Check(FaultReachesCaller(reinterpret_cast<int (*)()>(q)), "a handler's fault unwinds through the thunk to the caller's handler");
+    // An exception thrown in a handler unwinds through the thunk to a catch above the hooked function.
+    Check(ThrowReachesCaller(reinterpret_cast<int (*)()>(q)), "a handler's exception unwinds through the thunk to the caller");
 
     const auto fn = reinterpret_cast<std::uint64_t(*)(std::uint64_t)>(f);
     Check(fn(4) == 45, "handler sees rcx and its change reaches the displaced instructions");
