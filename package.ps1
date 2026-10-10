@@ -35,6 +35,7 @@ $sources = [ordered]@{
     'INSTALL.bat'                     = Join-Path $root 'dist\INSTALL.bat'
     'UNINSTALL.bat'                   = Join-Path $root 'dist\UNINSTALL.bat'
     'install.ps1'                     = Join-Path $root 'dist\install.ps1'
+    'install.sh'                      = Join-Path $root 'dist\install.sh'
     'EDF6Coop_AllowFirewall.bat'      = Join-Path $root 'dist\EDF6Coop_AllowFirewall.bat'
     'README_EDF6Coop.txt'             = Join-Path $root 'dist\README_EDF6Coop.txt'
     'README_EDF6Coop_zh.txt'          = Join-Path $root 'dist\README_EDF6Coop_zh.txt'

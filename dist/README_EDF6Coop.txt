@@ -18,8 +18,8 @@ differs ([Netcode] RejectMismatched=1).
 [Install / uninstall]
 Windows: extract the whole zip, double-click INSTALL.bat, then start the game from Steam as usual. (Or drop
 the contents of the zip into the game folder, next to EDF6.exe: the layout is the game folder's.)
-Linux (Steam Proton): copy the contents of the zip into the game folder by hand, then in Steam set the
-game's launch options (Properties) to
+Linux (Steam Proton): extract the whole zip and run "bash install.sh" there (it finds the game in the Steam
+libraries; or "bash install.sh <game folder>"), then in Steam set the game's launch options (Properties) to
     WINEDLLOVERRIDES="winmm=n,b" %command%
 Without it Wine loads its own winmm.dll and EDFModLoader never runs.
 If EDFModLoader (winmm.dll) is missing, the bundled one is installed: official v1.0.10 with a fix for a
@@ -31,8 +31,8 @@ settings files stay but are not read. The menu layout and HUD files that 2.5.0 a
 same name stays.
 Upgrade: install the newer release the same way; your settings are kept.
 Uninstall: double-click UNINSTALL.bat (as administrator to remove the firewall rule too). It removes
-EDF6Coop's files, settings, log and its UPnP mapping. EDFModLoader and other mods stay. On Linux delete
-Mods\Plugins\EDF6Coop.*.
+EDF6Coop's files, settings, log and its UPnP mapping. EDFModLoader and other mods stay. On Linux run
+"bash install.sh --uninstall".
 
 [Direct link (optional, host only)]
 Players joining your room connect straight to you. The ini comments (Chinese / Japanese / English, after

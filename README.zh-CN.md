@@ -41,7 +41,7 @@
 
 ### Linux（Steam Proton）
 
-1. 解压 zip，把里面的内容复制进游戏文件夹（有 `EDF6.exe` 的那个；在 Steam 里右键 EDF6 → 管理 → 浏览本地文件）：`winmm.dll` 放在 `EDF6.exe` 旁边，另有 `Mods/Plugins/EDF6Coop.dll`。已经在用 EDFModLoader 的话保留你自己的 `winmm.dll`。
+1. 解压 zip，在解压出的文件夹里运行 `bash install.sh`。它会在 Steam 库里（原生和 Flatpak 版 Steam）找到 EDF6，并像 `INSTALL.bat` 一样安装；找不到时把游戏文件夹传给它（`bash install.sh "<文件夹>"`）。也可以手动安装：把 zip 里的内容复制进游戏文件夹（有 `EDF6.exe` 的那个；在 Steam 里右键 EDF6 → 管理 → 浏览本地文件），已有的 `winmm.dll` 保留不动。
 2. 在 Steam 里右键 EDF6 → 属性，把启动选项设为
 
    ```
@@ -55,7 +55,7 @@ zip 里有 README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 
 升级：用同样的方法安装新版本，设置会保留。没有自动更新。
 
-卸载：双击 `UNINSTALL.bat`（Linux 上删除 `Mods/Plugins/EDF6Coop.*`）。它会删除插件、设置、日志、旧版本的残留，以及插件在路由器上建立的 UPnP 映射（只删指向本机、名为 `EDF6DirectNet` 的那条）。EDFModLoader 和其他 MOD 不会动，包括安装程序升级过的加载器及其备份 `winmm.dll.bak-official`。如果添加过防火墙规则，用管理员身份运行 `UNINSTALL.bat` 会一并删除；没有管理员权限时它会显示删除命令。
+卸载：双击 `UNINSTALL.bat`（Linux 上运行 `bash install.sh --uninstall`）。它会删除插件、设置、日志、旧版本的残留，以及插件在路由器上建立的 UPnP 映射（只删指向本机、名为 `EDF6DirectNet` 的那条）。EDFModLoader 和其他 MOD 不会动，包括安装程序升级过的加载器及其备份 `winmm.dll.bak-official`。如果添加过防火墙规则，用管理员身份运行 `UNINSTALL.bat` 会一并删除；没有管理员权限时它会显示删除命令。
 
 ## 房主：直连（可选）
 
@@ -163,6 +163,8 @@ EDF6 把收到的每个 EOS 包都当游戏数据读，插件没法通过 P2P �
 - `DIRECT ... has not answered for ... ms: game data goes over EOS` / `answers again`：直连暂时不通，期间由 EOS 承载游戏。`... packets the link to ... had not delivered: ... go over EOS` 写出转交了多少。STATS 行里这样的链路显示 `NOT ANSWERING`。
 - `DIRECT ... timed out: nothing received for ...`：对方不再发来任何数据。`DIRECT ... stalled: a packet the game sent reliably is unacknowledged ...`：对方还在回应，但游戏需要的某个包一直没送到。
 - `DIRECT refused hello for ...`：有人想以某玩家身份直连却证明不了。玩家刚进房后一两秒内出现 `published no direct-link identity` 是正常的（他的房间信息还没传到房主）。`not signed by the identity that player published` 表示有人冒充该玩家，已被拒绝。
+- `DIRECT the socket's receive buffer is N bytes, not the 1 MB asked for`（Linux）：房主超出这个大小的突发流量会被丢弃再重发。用 `sudo sysctl -w net.core.rmem_max=1048576 net.core.wmem_max=1048576` 调高上限。
+- `UPNP WARNING: the router did not say its WAN address`：映射已建立，但插件无法告诉加入者你的 IPv4 地址。请设置 `PublicAddress`。
 - `DIRECT ... speaks direct-link protocol N, we speak M`：该玩家运行的是别的版本。你们之间没有直连，游戏继续走 EOS。
 
 ## 构建

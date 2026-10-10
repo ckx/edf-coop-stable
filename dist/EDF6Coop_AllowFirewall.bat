@@ -47,11 +47,14 @@ goto :port_done
 echo ListenPort in the settings is not a port number from 1 to 65535, so 27015 is used.
 :port_done
 
-rem The rule EDF6DirectNet made before 2.0.0 is replaced by this one.
+rem The new rule goes in first: if adding it fails, the old ones stay. It then replaces this rule of an earlier run
+rem and the one EDF6DirectNet made before 2.0.0.
+netsh advfirewall firewall delete rule name="EDF6Coop (UDP in) new" >nul 2>&1
+netsh advfirewall firewall add rule name="EDF6Coop (UDP in) new" dir=in action=allow program="%EXE%" protocol=UDP localport=%PORT% enable=yes profile=any
+if errorlevel 1 ( echo Failed to add the firewall rule. & pause & exit /b 1 )
 netsh advfirewall firewall delete rule name="EDF6 DirectNet (UDP in)" >nul 2>&1
 netsh advfirewall firewall delete rule name="EDF6Coop (UDP in)" >nul 2>&1
-netsh advfirewall firewall add rule name="EDF6Coop (UDP in)" dir=in action=allow program="%EXE%" protocol=UDP localport=%PORT% enable=yes profile=any
-if errorlevel 1 ( echo Failed to add the firewall rule. & pause & exit /b 1 )
+netsh advfirewall firewall set rule name="EDF6Coop (UDP in) new" new name="EDF6Coop (UDP in)" >nul
 echo Done: inbound UDP port %PORT% is now allowed for "%EXE%".
 echo If you change ListenPort in EDF6Coop.ini later, run this file again.
 pause

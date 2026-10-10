@@ -41,7 +41,7 @@
 
 ### Linux（Steam Proton）
 
-1. ZIP を展開し、中身をゲームフォルダ（`EDF6.exe` のあるフォルダ。Steam で EDF6 を右クリック → 管理 → ローカルファイルを閲覧）にコピーします：`winmm.dll` を `EDF6.exe` の横に、そして `Mods/Plugins/EDF6Coop.dll`。すでに EDFModLoader を使っているなら自分の `winmm.dll` を残してください。
+1. ZIP を展開し、展開したフォルダで `bash install.sh` を実行します。Steam ライブラリ（通常版と Flatpak 版の Steam）から EDF6 を見つけ、`INSTALL.bat` と同じようにインストールします。見つからないときはゲームフォルダを渡してください（`bash install.sh "<フォルダ>"`）。手で入れる場合は ZIP の中身をゲームフォルダ（`EDF6.exe` のあるフォルダ。Steam で EDF6 を右クリック → 管理 → ローカルファイルを閲覧）にコピーし、すでにある `winmm.dll` は残してください。
 2. Steam で EDF6 を右クリック → プロパティで、起動オプションを次のようにします。
 
    ```
@@ -55,7 +55,7 @@ ZIP には README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 
 更新：新しい版を同じ方法で入れてください。設定は残ります。自動更新はありません。
 
-削除：`UNINSTALL.bat` をダブルクリックします（Linux では `Mods/Plugins/EDF6Coop.*` を消します）。プラグイン、設定、ログ、古い版の残り、プラグインがルーターに作った UPnP の設定（この PC 向けで名前が `EDF6DirectNet` のものだけ）を消します。EDFModLoader とほかの MOD はそのままで、インストーラーが更新したローダーとそのバックアップ `winmm.dll.bak-official` も残ります。ファイアウォールの規則を追加していた場合は、`UNINSTALL.bat` を管理者として実行すると一緒に消します。管理者権限がなければ消すためのコマンドを表示します。
+削除：`UNINSTALL.bat` をダブルクリックします（Linux では `bash install.sh --uninstall`）。プラグイン、設定、ログ、古い版の残り、プラグインがルーターに作った UPnP の設定（この PC 向けで名前が `EDF6DirectNet` のものだけ）を消します。EDFModLoader とほかの MOD はそのままで、インストーラーが更新したローダーとそのバックアップ `winmm.dll.bak-official` も残ります。ファイアウォールの規則を追加していた場合は、`UNINSTALL.bat` を管理者として実行すると一緒に消します。管理者権限がなければ消すためのコマンドを表示します。
 
 ## ホスト：直接接続（任意）
 
@@ -163,6 +163,8 @@ EDF6 は受け取った EOS パケットをすべてゲームのデータとし�
 - `DIRECT ... has not answered for ... ms: game data goes over EOS` / `answers again`：直接接続が一時的に通じず、その間は EOS がゲームを運びました。`... packets the link to ... had not delivered: ... go over EOS` は引き渡した数です。STATS の行ではそのような接続に `NOT ANSWERING` と出ます。
 - `DIRECT ... timed out: nothing received for ...`：相手から何も届かなくなりました。`DIRECT ... stalled: a packet the game sent reliably is unacknowledged ...`：相手は応答していますが、ゲームが必要とするパケットが1つ届いていません。
 - `DIRECT refused hello for ...`：誰かがあるプレイヤーとして接続しようとして証明できませんでした。入室直後の1～2 秒に `published no direct-link identity` が出るのは普通です（その人の部屋の情報がまだホストに届いていない）。`not signed by the identity that player published` は誰かがそのプレイヤーになりすまそうとして拒否されたことを示します。
+- `DIRECT the socket's receive buffer is N bytes, not the 1 MB asked for`（Linux）：ホストでそれを超える一度の通信は捨てられて再送されます。`sudo sysctl -w net.core.rmem_max=1048576 net.core.wmem_max=1048576` で上限を上げてください。
+- `UPNP WARNING: the router did not say its WAN address`：ポート開放はできていますが、参加者に IPv4 アドレスを伝えられません。`PublicAddress` を設定してください。
 - `DIRECT ... speaks direct-link protocol N, we speak M`：そのプレイヤーは別の版です。2人の間に直接接続はなく、ゲームは EOS で続きます。
 
 ## ビルド

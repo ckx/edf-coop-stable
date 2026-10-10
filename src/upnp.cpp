@@ -194,7 +194,11 @@ void mapPort(uint16_t port, const std::string& localIpv4, const std::wstring& re
             logf("UPNP WARNING: the router WAN address %s cannot be reached from the internet; it is not advertised. "
                  "Use your public IPv6 address, or set PublicAddress.",
                  ext.c_str());
-        } else if (!ext.empty() && onPublicIpv4) {
+        } else if (ext.empty()) {
+            logf("UPNP WARNING: the router did not say its WAN address, so no IPv4 address is advertised. Set "
+                 "PublicAddress=<your public IPv4>:%u, or use your public IPv6 address.",
+                 port);
+        } else if (onPublicIpv4) {
             onPublicIpv4(ext);
         }
         SysFreeString(external);

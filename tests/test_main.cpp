@@ -2334,7 +2334,14 @@ void testKeyMismatch() {
 }
 
 void testNetif() {
-    printf("netif: physical adapter\n");
+    printf("netif: physical adapter, and the addresses the routing table sends from\n");
+    // What a host advertises when the adapter list does not say (PPPoE, Wine): any machine with a route has these.
+    const std::string v4 = dn::egressAddress(AF_INET), v6 = dn::egressAddress(AF_INET6);
+    printf("  egress IPv4 %s, IPv6 %s\n", v4.empty() ? "-" : v4.c_str(), v6.empty() ? "-" : v6.c_str());
+    in_addr parsed{};
+    CHECK(inet_pton(AF_INET, v4.c_str(), &parsed) == 1 && v4.rfind("127.", 0) != 0);
+    CHECK(dn::isGlobalIpv6Text("2408:8207::5") && !dn::isGlobalIpv6Text("fe80::1") && !dn::isGlobalIpv6Text("::1") &&
+          !dn::isGlobalIpv6Text("fd00::1") && !dn::isGlobalIpv6Text("1.2.3.4"));
     auto pi = dn::findPhysicalInterface();
     if (!pi && getenv("GITHUB_ACTIONS")) {  // CI runners are Hyper-V VMs: no physical adapter to find
         printf("  skipped: no physical adapter on this CI machine\n");

@@ -41,7 +41,7 @@ Everything is on by default, except the direct link, which the host enables.
 
 ### Linux (Steam Proton)
 
-1. Extract the zip and copy its contents into the game folder (the one with `EDF6.exe`; in Steam, right-click EDF6, Manage, Browse local files): `winmm.dll` next to `EDF6.exe`, and `Mods/Plugins/EDF6Coop.dll`. If you already run EDFModLoader, keep your `winmm.dll`.
+1. Extract the zip and run `bash install.sh` in the extracted folder. It finds EDF6 in your Steam libraries (native and Flatpak Steam) and installs as `INSTALL.bat` does; give it the game folder (`bash install.sh "<folder>"`) when it does not find it. By hand: copy the zip's contents into the game folder (the one with `EDF6.exe`; in Steam, right-click EDF6, Manage, Browse local files), but keep a `winmm.dll` you already have.
 2. In Steam, right-click EDF6, Properties, and set the launch options to
 
    ```
@@ -55,7 +55,7 @@ The zip has README_EDF6Coop.txt (English), README_EDF6Coop_zh.txt (中文) and R
 
 Upgrade: install the newer release the same way. Your settings are kept. There is no automatic update.
 
-Uninstall: double-click `UNINSTALL.bat` (on Linux, delete `Mods/Plugins/EDF6Coop.*`). It removes the plugin, settings, log, leftovers of older versions, and the UPnP mapping the plugin made on your router (only one that points to this PC and is named `EDF6DirectNet`). EDFModLoader and other mods stay, including a loader the installer upgraded and its backup `winmm.dll.bak-official`. If you added the firewall rule, run `UNINSTALL.bat` as administrator to remove it too; without administrator rights it shows the command.
+Uninstall: double-click `UNINSTALL.bat` (on Linux, `bash install.sh --uninstall`). It removes the plugin, settings, log, leftovers of older versions, and the UPnP mapping the plugin made on your router (only one that points to this PC and is named `EDF6DirectNet`). EDFModLoader and other mods stay, including a loader the installer upgraded and its backup `winmm.dll.bak-official`. If you added the firewall rule, run `UNINSTALL.bat` as administrator to remove it too; without administrator rights it shows the command.
 
 ## Host: the direct link (optional)
 
@@ -163,6 +163,8 @@ Every player publishes its netcode protocol and the features it has on (`EDF6NET
 - `DIRECT ... has not answered for ... ms: game data goes over EOS` / `answers again`: the direct link stopped working for a moment and EOS carried the game meanwhile. `... packets the link to ... had not delivered: ... go over EOS` names what was handed over. In the STATS line such a link shows `NOT ANSWERING`.
 - `DIRECT ... timed out: nothing received for ...`: the other side went silent. `DIRECT ... stalled: a packet the game sent reliably is unacknowledged ...`: the other side answers, but one packet the game needs never got through.
 - `DIRECT refused hello for ...`: someone tried to connect as a player and could not prove it. `published no direct-link identity` for a second or two after a player joins is normal (their room info has not reached the host yet). `not signed by the identity that player published` means someone else claimed to be that player and was turned away.
+- `DIRECT the socket's receive buffer is N bytes, not the 1 MB asked for` (Linux): a host's burst beyond that is dropped and resent. Raise the limit with `sudo sysctl -w net.core.rmem_max=1048576 net.core.wmem_max=1048576`.
+- `UPNP WARNING: the router did not say its WAN address`: the mapping is there, but the plugin cannot tell joiners your IPv4 address. Set `PublicAddress`.
 - `DIRECT ... speaks direct-link protocol N, we speak M`: that player runs another version. There is no direct link between you; the game keeps working over EOS.
 
 ## Build

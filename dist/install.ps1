@@ -174,7 +174,8 @@ if ($Uninstall) {
     # First: the UPnP record (and the ini) tell which port to clean up, and are deleted below.
     $port = Get-MappedPort $plugins
     if ($port -ne 0) { Remove-OurUpnpMapping $port }
-    foreach ($f in $files) { Remove-Item -LiteralPath (Join-Path $game $f) -ErrorAction SilentlyContinue }
+    # The loader's license stays with the loader.
+    foreach ($f in $files | Where-Object { $_ -ne 'EDFModLoader_LICENSE.txt' }) { Remove-Item -LiteralPath (Join-Path $game $f) -ErrorAction SilentlyContinue }
     # Settings, logs, the crash dump, the UPnP records, and what the auto-updater of 2.5.0 and older left next to
     # the DLL (.old/.trial/.bad/.rolledback/.new<pid>). EDF6DirectNet.ini / EDF6MultiSlot.ini are the player's
     # old settings and stay; so do the .disabled old plugins.

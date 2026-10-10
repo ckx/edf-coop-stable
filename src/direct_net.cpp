@@ -181,14 +181,24 @@ bool DirectNet::openSocket(int family, uint16_t port) {
     int buf = 1 << 20;
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&buf), sizeof(buf));
     setsockopt(s, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&buf), sizeof(buf));
+    // Linux (Proton) caps both at net.core.rmem_max / wmem_max, often about 200 KB: a burst beyond that is dropped.
+    int got = 0;
+    int gotLen = sizeof(got);
+    if (getsockopt(s, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char*>(&got), &gotLen) == 0 && got < buf)
+        logf("DIRECT the socket's receive buffer is %d bytes, not the 1 MB asked for (on Linux: sysctl "
+             "net.core.rmem_max)", got);
     // Pin egress to the physical adapter so VPN/TUN catch-all routes do not capture game traffic.
     if (opt_.ifIndexV4) {
         DWORD idx = htonl(opt_.ifIndexV4);
-        setsockopt(s, IPPROTO_IP, IP_UNICAST_IF, reinterpret_cast<const char*>(&idx), sizeof(idx));
+        if (setsockopt(s, IPPROTO_IP, IP_UNICAST_IF, reinterpret_cast<const char*>(&idx), sizeof(idx)) != 0)
+            logf("DIRECT cannot keep IPv4 traffic on adapter %u (WSA error %d); the OS routes it", opt_.ifIndexV4,
+                 WSAGetLastError());
     }
     if (family == AF_INET6 && opt_.ifIndexV6) {
         DWORD idx = opt_.ifIndexV6;
-        setsockopt(s, IPPROTO_IPV6, IPV6_UNICAST_IF, reinterpret_cast<const char*>(&idx), sizeof(idx));
+        if (setsockopt(s, IPPROTO_IPV6, IPV6_UNICAST_IF, reinterpret_cast<const char*>(&idx), sizeof(idx)) != 0)
+            logf("DIRECT cannot keep IPv6 traffic on adapter %u (WSA error %d); the OS routes it", opt_.ifIndexV6,
+                 WSAGetLastError());
     }
 
     sockaddr_storage local{};

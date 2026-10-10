@@ -18,7 +18,8 @@ EDF6Coop は EDFModLoader のプラグイン1つ（Mods\Plugins\EDF6Coop.dll）�
 ■ 導入・削除
 Windows：ZIP を全部展開して INSTALL.bat をダブルクリックし、いつも通り Steam から起動します。（ZIP の中身を
 EDF6.exe のあるゲームフォルダにそのままドロップしても同じです。中身の配置はゲームフォルダと同じです。）
-Linux（Steam Proton）：ZIP の中身を手でゲームフォルダにコピーし、Steam でゲームの起動オプション（プロパティ）を
+Linux（Steam Proton）：ZIP を全部展開してそこで "bash install.sh" を実行し（Steam ライブラリからゲームを
+見つけます。"bash install.sh <ゲームフォルダ>" でも可）、Steam でゲームの起動オプション（プロパティ）を
     WINEDLLOVERRIDES="winmm=n,b" %command%
 にします。これがないと Wine が自前の winmm.dll を読み込み、EDFModLoader が動きません。
 EDFModLoader（winmm.dll）がなければ同梱のものを入れます：公式 v1.0.10 にマルチスレッドの不具合修正を
@@ -30,7 +31,7 @@ EDF6DirectNet / EDF6MultiSlot からの更新：Mods\Plugins にあるそれら�
 更新：新しい版を同じ方法で入れてください。設定は残ります。
 削除：UNINSTALL.bat をダブルクリックします（管理者として実行するとファイアウォールの規則も消します）。
 EDF6Coop のファイル・設定・ログ・UPnP の設定を消します。EDFModLoader とほかの MOD はそのままです。Linux では
-Mods\Plugins\EDF6Coop.* を消してください。
+"bash install.sh --uninstall" を実行してください。
 
 ■ 直接接続（任意、ホストだけ）
 あなたの部屋に入った人があなたへ直接つなぎます。INI のコメント（Windows の表示言語に合わせて中国語・日本語・

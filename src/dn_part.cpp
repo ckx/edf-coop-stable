@@ -61,10 +61,6 @@ bool startDirect(dn::Config& c, const std::wstring& upnpRecord) {
         dn::logf("DIRECT Mode=join but HostAddress is empty; direct link disabled");
         return false;
     }
-    if (c.direct.mode == dn::Mode::Host && c.direct.key.empty())
-        dn::logf("DIRECT hosting without Key= : players still prove who they are through the room, but direct-link "
-                 "packets carry no tag, so someone on the network path could alter them. Set the same Key= for "
-                 "everyone in the room to prevent that.");
     g_net = new dn::DirectNet();
     if (!g_net->start(c.direct)) {
         dn::logf("DIRECT failed to start (is UDP port %u already in use?); direct link disabled",
@@ -81,21 +77,33 @@ bool startDirect(dn::Config& c, const std::wstring& upnpRecord) {
                  c.publicAddress.c_str());
         return false;
     }
-    std::string v6 = pi && !pi->globalIpv6.empty() ? "[" + pi->globalIpv6.front() + "]:" + std::to_string(port) : "";
+    // The adapter list says what is on the physical adapter; where it says nothing (an adapter it does not take for
+    // physical, or Wine's list), the address the routing table sends from does.
+    std::string ipv6 = pi && !pi->globalIpv6.empty() ? pi->globalIpv6.front() : "";
+    if (ipv6.empty()) {
+        std::string egress = dn::egressAddress(AF_INET6);
+        if (dn::isGlobalIpv6Text(egress)) ipv6 = egress;
+    }
+    std::string lan = pi && !pi->ipv4.empty() ? pi->ipv4 : dn::egressAddress(AF_INET);
+    std::string v6 = ipv6.empty() ? "" : "[" + ipv6 + "]:" + std::to_string(port);
     if (!v6.empty()) {
         g_advertised->set(v6, {});
         dn::logf("DIRECT players who join your room connect to %s (public IPv6)", v6.c_str());
+    } else {
+        dn::logf("DIRECT this machine has no public IPv6 address (none on its adapters, none it sends from)");
     }
-    if (c.upnp && pi) {
-        dn::upnpMapUdpAsync(port, pi->ipv4, upnpRecord, [port](const std::string& wan) {
+    if (c.upnp && !lan.empty()) {
+        dn::upnpMapUdpAsync(port, lan, upnpRecord, [port](const std::string& wan) {
             std::string v4 = wan + ":" + std::to_string(port);
             g_advertised->set({}, v4);
             dn::logf("DIRECT players who join your room can also connect to %s (UPnP)", v4.c_str());
         });
         return true;
     }
+    if (c.upnp) dn::logf("DIRECT no IPv4 address to ask the router to forward to (no IPv4 route)");
     if (v6.empty())
-        dn::logf("DIRECT WARNING: no public IPv6 and UPnP is off; set PublicAddress= to your public IP:port");
+        dn::logf("DIRECT WARNING: nothing to advertise: no public IPv6 and no UPnP mapping; set PublicAddress= to your "
+                 "public IP:port");
     return false;
 }
 

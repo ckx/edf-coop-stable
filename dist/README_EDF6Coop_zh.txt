@@ -16,7 +16,8 @@ EDF6Coop 是一个 EDFModLoader 插件（Mods\Plugins\EDF6Coop.dll），让联�
 [安装 / 卸载]
 Windows：解压整个 zip，双击 INSTALL.bat，然后照常从 Steam 启动游戏。（也可以把 zip 里的内容直接拖进游戏
 文件夹，和 EDF6.exe 放在一起：压缩包里的目录结构就是游戏文件夹的结构。）
-Linux（Steam Proton）：手动把 zip 里的内容复制进游戏文件夹，然后在 Steam 里把游戏的启动选项（属性）设为
+Linux（Steam Proton）：解压整个 zip，在那里运行 "bash install.sh"（它会在 Steam 库里找到游戏；也可以
+"bash install.sh <游戏文件夹>"），然后在 Steam 里把游戏的启动选项（属性）设为
     WINEDLLOVERRIDES="winmm=n,b" %command%
 不设的话 Wine 会加载它自己的 winmm.dll，EDFModLoader 不会运行。
 没有 EDFModLoader（winmm.dll）时会装上自带的：官方 v1.0.10 加多线程问题的修复（见 LOADER_FIX_JA.md）。
@@ -27,7 +28,7 @@ winmm.dll.bak-official。
 会在第一次启动时删除；其他 MOD 的同名文件不动。
 升级：用同样的方法安装新版本，设置会保留。
 卸载：双击 UNINSTALL.bat（用管理员身份运行可同时删除防火墙规则）。它会删除 EDF6Coop 的文件、设置、日志和
-它建立的 UPnP 映射；EDFModLoader 和其他 MOD 不会动。Linux 上删除 Mods\Plugins\EDF6Coop.* 即可。
+它建立的 UPnP 映射；EDFModLoader 和其他 MOD 不会动。Linux 上运行 "bash install.sh --uninstall"。
 
 [直连（可选，只需房主设置）]
 进你房间的玩家会直接连到你。INI 里的注释（按 Windows 显示语言写成中文 / 日文 / 英文）解释了每一项设置。

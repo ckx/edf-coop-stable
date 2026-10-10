@@ -38,6 +38,49 @@ bool isGlobalIpv6(const sockaddr_in6* a) {
 
 }  // namespace
 
+std::string egressAddress(int family) {
+    sockaddr_storage to{};
+    int toLen = 0;
+    if (family == AF_INET) {
+        auto* a = reinterpret_cast<sockaddr_in*>(&to);
+        a->sin_family = AF_INET;
+        a->sin_port = htons(53);
+        inet_pton(AF_INET, "192.0.2.1", &a->sin_addr);  // TEST-NET-1: routed like any public address, never used
+        toLen = sizeof(sockaddr_in);
+    } else {
+        auto* a = reinterpret_cast<sockaddr_in6*>(&to);
+        a->sin6_family = AF_INET6;
+        a->sin6_port = htons(53);
+        inet_pton(AF_INET6, "2001:db8::1", &a->sin6_addr);  // documentation prefix, likewise
+        toLen = sizeof(sockaddr_in6);
+    }
+    WSADATA wsa;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return {};
+    SOCKET s = socket(family, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) {
+        WSACleanup();
+        return {};
+    }
+    std::string out;
+    sockaddr_storage local{};
+    int localLen = sizeof(local);
+    char text[INET6_ADDRSTRLEN] = {};
+    if (connect(s, reinterpret_cast<const sockaddr*>(&to), toLen) == 0 &&
+        getsockname(s, reinterpret_cast<sockaddr*>(&local), &localLen) == 0) {
+        const void* addr = family == AF_INET ? static_cast<const void*>(&reinterpret_cast<sockaddr_in*>(&local)->sin_addr)
+                                             : static_cast<const void*>(&reinterpret_cast<sockaddr_in6*>(&local)->sin6_addr);
+        if (inet_ntop(family, addr, text, sizeof(text))) out = text;
+    }
+    closesocket(s);
+    WSACleanup();
+    return out == "0.0.0.0" || out == "::" ? std::string() : out;
+}
+
+bool isGlobalIpv6Text(const std::string& address) {
+    sockaddr_in6 a{};
+    return inet_pton(AF_INET6, address.c_str(), &a.sin6_addr) == 1 && isGlobalIpv6(&a);
+}
+
 std::optional<PhysicalInterface> findPhysicalInterface() {
     ULONG size = 32 * 1024;
     std::vector<uint8_t> buf;
