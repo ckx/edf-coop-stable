@@ -2891,7 +2891,10 @@ void testSwapKeepsDllLoadable() {
     done = true;
     watcher.join();
     CHECK(allOk && rolledBack);
-    CHECK(missing == 0 && looks > 0);
+    // Wine refuses to replace a loaded image, so there the plugin is renamed aside first (updater.cpp swapIn) and
+    // its name is briefly missing.
+    const bool wine = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr;
+    CHECK((missing == 0 || wine) && looks > 0);
     CHECK(fileText(dll) == "MZ EDF6COOP_VERSION=0.3.9");
     if (loaded) FreeLibrary(loaded);
     DeleteFileW((dll + L".rolledback").c_str());

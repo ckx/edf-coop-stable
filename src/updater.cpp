@@ -561,6 +561,19 @@ bool swapIn(const std::wstring& target, const std::wstring& replacement, const s
         *why = "cannot remove the old backup (error " + std::to_string(GetLastError()) + ")";
         return false;
     }
+    // Wine (Proton) refuses to replace or delete any name of a file mapped as a loaded image, the running plugin's
+    // own, but lets it be renamed: there it moves aside first, and the plugin's name is missing for that moment.
+    if (GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version")) {
+        if (!MoveFileExW(target.c_str(), aside.c_str(), 0)) {
+            *why = "cannot move the installed file aside (error " + std::to_string(GetLastError()) + ")";
+            return false;
+        }
+        if (renameOver(replacement, target)) return true;
+        *why = "cannot put the new file in place (error " + std::to_string(GetLastError()) + ")";
+        if (!MoveFileExW(aside.c_str(), target.c_str(), 0))
+            *why += "; " + narrow(target) + " is now MISSING: rename " + narrow(aside) + " back to it";
+        return false;
+    }
     if (CreateHardLinkW(aside.c_str(), target.c_str(), nullptr)) {
         if (renameOver(replacement, target)) return true;
         *why = "cannot put the new file in place (error " + std::to_string(GetLastError()) + ")";
