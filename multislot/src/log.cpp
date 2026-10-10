@@ -13,18 +13,6 @@
 namespace multislot {
 namespace {
 wchar_t logPath[MAX_PATH]{};
-std::atomic<bool> detailLog{false};
-
-// The marks that say where one run of the game ends and the next begins, as plugin.cpp, LogShutdown and
-// LogUnloaded write them. Checked against the real banner by the tests. They count only as the first thing
-// after a line's own timestamp: text inside a line (a member's name, an EOS message) cannot fake one.
-constexpr const char* kBannerMark = "==== EDF6Coop ";
-constexpr const char* kShutdownMark = "SHUTDOWN ";
-constexpr const char* kUnloadedMark = "UNLOADED ";
-// "[2026-09-20 00:09:00.000] ": what every line the plugin writes starts with.
-constexpr std::size_t kStampLength = 26;
-LastRun lastRun = LastRun::Unknown;
-std::atomic<bool> endWritten{false};
 
 // A line that repeats (some EOS SDK warnings arrive every frame) is written once and then counted, so one
 // noisy source cannot push everything else out of the log.
@@ -330,108 +318,8 @@ void CloseQueueFile() {
     queueFile = INVALID_HANDLE_VALUE;
 }
 
-// True when `line` starts with the timestamp Log and LogShutdown write, "[YYYY-MM-DD HH:MM:SS.mmm] ".
-bool Stamped(const char* line, const char* end) {
-    constexpr const char* kShape = "[0000-00-00 00:00:00.000] ";
-    if (static_cast<std::size_t>(end - line) < kStampLength) return false;
-    for (std::size_t i = 0; i < kStampLength; ++i) {
-        const bool digit = kShape[i] == '0';
-        if (digit ? (line[i] < '0' || line[i] > '9') : line[i] != kShape[i]) return false;
-    }
-    return true;
-}
-
-bool Marked(const char* line, const char* end, const char* mark) {
-    const std::size_t length = std::strlen(mark);
-    return Stamped(line, end) && static_cast<std::size_t>(end - line) >= kStampLength + length &&
-           std::memcmp(line + kStampLength, mark, length) == 0;
-}
-
-// Looks at the file this session is about to append to and reports how the run before it ended. The file
-// is capped at 2 MB, so it is read whole; this runs once, at load.
-LastRun ReadLastRun(const wchar_t* path) {
-    LastRun verdict = LastRun::Unknown;
-    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
-                              FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) return verdict;
-    LARGE_INTEGER size{};
-    if (GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart <= 4LL * 1024 * 1024) {
-        const auto bytes = static_cast<std::size_t>(size.QuadPart);
-        if (char* text = static_cast<char*>(HeapAlloc(GetProcessHeap(), 0, bytes + 1))) {
-            DWORD read = 0;
-            if (ReadFile(file, text, static_cast<DWORD>(bytes), &read, nullptr) && read) {
-                text[read] = 0;
-                // Whichever mark is last in the file is the one that describes the previous run.
-                const char* banner = nullptr;
-                const char* shutdown = nullptr;
-                const char* unloaded = nullptr;
-                const char* const end = text + read;
-                for (const char* line = text; line < end;) {
-                    const char* next = static_cast<const char*>(std::memchr(line, '\n', static_cast<std::size_t>(end - line)));
-                    next = next ? next + 1 : end;
-                    if (Marked(line, next, kBannerMark)) banner = line;
-                    else if (Marked(line, next, kShutdownMark)) shutdown = line;
-                    else if (Marked(line, next, kUnloadedMark)) unloaded = line;
-                    line = next;
-                }
-                // A missing SHUTDOWN only means the run was cut if this build can write one at all. On
-                // 2026-09-29 it still could not - DLL_PROCESS_DETACH does not run for this game, and
-                // wrapping TerminateProcess did not catch it either - so a file that has never held the
-                // mark says nothing, and claiming otherwise called every ordinary quit a crash. A run whose
-                // plugin was unloaded (UNLOADED after its banner) could not see its own end: nothing either.
-                const bool unseen = unloaded && (!banner || unloaded > banner) && (!shutdown || unloaded > shutdown);
-                if (shutdown && !unseen) verdict = (!banner || shutdown > banner) ? LastRun::Ended : LastRun::Cut;
-            }
-            HeapFree(GetProcessHeap(), 0, text);
-        }
-    }
-    CloseHandle(file);
-    return verdict;
-}
-
-// LogShutdown and LogUnloaded: the last line this module writes, once.
-void LogEnd(const char* mark, const char* why) {
-    if (endWritten.exchange(true)) return;
-    // This runs from DLL_PROCESS_DETACH, where at process exit every other thread has already been terminated
-    // - one of them possibly while holding the log's locks - or from the TerminateProcess hook, where the writer
-    // thread still runs. No repeat collapsing, no trim, no heap: a hang at exit would be blamed on the mod.
-    if (!logPath[0]) return;
-    SYSTEMTIME now{};
-    GetLocalTime(&now);
-    char line[256]{};
-    const int length = FormatText(line, sizeof(line), "[%04u-%02u-%02u %02u:%02u:%02u.%03u] %s%s\r\n",
-                                   now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond,
-                                   now.wMilliseconds, mark, why);
-    if (length <= 0) return;
-    // Queued lines first, then this one, both under drainLock when it can be had, so a trim by the writer
-    // thread can neither cut the line nor be under way when it is written. A thread terminated while holding
-    // the lock never lets go, so after about 100 ms the line is written without it (what is still queued is
-    // then written by the next start, from the .queue file).
-    for (int attempt = 0; attempt < 50; ++attempt) {
-        if (TryAcquireSRWLockExclusive(&drainLock)) {
-            drainThread.store(GetCurrentThreadId());
-            // Tried, not waited for, for the same reason. Once it has been had, the second take in
-            // AppendQueued cannot find it held by a dead thread: those are all gone before this runs.
-            if (TryAcquireSRWLockExclusive(&queueLock)) {
-                LogQueueHeader* const queue = header;
-                const char* const bytes = ring;
-                const std::uint64_t from = queue->consumed, to = queue->produced;
-                ReleaseSRWLockExclusive(&queueLock);
-                if (from != to) AppendQueued(queue, bytes, from, to);
-            }
-            AppendToFile(line, static_cast<std::size_t>(length));
-            drainThread.store(0);
-            ReleaseSRWLockExclusive(&drainLock);
-            return;
-        }
-        Sleep(2);
-    }
-    AppendToFile(line, static_cast<std::size_t>(length));
-}
 }  // namespace
 
-void SetDetailLog(bool on) { detailLog.store(on); }
-bool DetailLog() { return detailLog.load(); }
 
 bool TrimLogFile(const wchar_t* path, long long cap, long long keep) {
     bool trimmed = false;
@@ -488,14 +376,10 @@ void LogOpen(const wchar_t* path) {
         // One file across sessions, so a crash report survives restarts; only its oldest lines go.
         TrimLocked(logPath, kLogCapBytes, kLogKeepBytes);
     });
-    lastRun = ReadLastRun(logPath);
 }
 
-LastRun PreviousRun() { return lastRun; }
 
-void LogShutdown(const char* why) { LogEnd(kShutdownMark, why); }
 
-void LogUnloaded(const char* why) { LogEnd(kUnloadedMark, why); }
 
 void LogWrite(const char* text, std::size_t length) {
     if (!logPath[0] || !length) return;

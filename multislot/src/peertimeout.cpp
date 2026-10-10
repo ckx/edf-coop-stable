@@ -5,7 +5,7 @@
 #include "guard.h"
 #include "identity.h"
 #include "log.h"
-#include "patches.h"  // kMaxPlayers
+#include "patches.h"
 
 namespace multislot {
 namespace {
@@ -21,10 +21,9 @@ struct Join {
 };
 // The local user is kept on its own: a long evening of people coming and going must not push it out.
 Join localJoin{};
-// Everyone else, newest last. A timed-out link is always to someone who joined recently, and a room holds at
-// most kMaxPlayers users, so 64 joins back (four rooms' worth for the larger builds) is far more than a decision
-// ever needs.
-constexpr std::size_t kJoinRing = 4 * kMaxPlayers > 64 ? 4 * kMaxPlayers : 64;
+// Everyone else, newest last. A timed-out link is always to someone who joined recently, and a room holds four
+// users, so 64 joins back is far more than a decision ever needs.
+constexpr std::size_t kJoinRing = 64;
 Join joins[kJoinRing]{};
 std::size_t joinCount = 0;
 
@@ -46,8 +45,8 @@ bool JoinTick(std::uintptr_t user, bool local, std::uint64_t& tick) {
     return found;
 }
 
-// A room of kMaxPlayers has at most kMaxPlayers - 1 links; the walk stops well past that on a broken list.
-constexpr std::size_t kMaxLinks = 2 * kMaxPlayers > 32 ? 2 * kMaxPlayers : 32;
+// A room of four has at most three links; the walk stops well past that on a broken list.
+constexpr std::size_t kMaxLinks = 32;
 struct TimedOutLink {
     std::uintptr_t user = 0;  // 0: the user is gone already (the weak_ptr has expired)
     std::uintptr_t productId = 0;

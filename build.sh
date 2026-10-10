@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Builds EDF6Coop.dll and its tests on Linux (clang for MinGW-w64, cmake/mingw-w64.cmake); -t runs them under Wine.
-#   ./build.sh [-t] [-c]
-# Lands in multislot/dist/ like build.ps1. -c builds without the game's assets (placeholders; cannot be packaged).
-# Set EDF6_GAME_DIR to the game folder (holds EDF.dll and Root.cpk; only read) for the menu and HUD assets and the
-# tests against the game's code; without it those tests report themselves skipped.
+#   ./build.sh [-t] [-r]
+# Lands in multislot/dist/ like build.ps1. Set EDF6_GAME_DIR to the game folder (holds EDF.dll; only read) for the
+# tests against the game's code; without it those tests report themselves skipped. -r refuses to configure without
+# EDF.dll, so no test against the game's code can pass as skipped.
 # Fedora: dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
 # The tests run in their own Wine prefix (EDF6COOP_WINEPREFIX, default ~/.local/share/wine-edf6coop-tests).
 set -euo pipefail
@@ -12,35 +12,28 @@ root=$(cd "$(dirname "$0")" && pwd)
 multislot=$root/multislot
 build=$root/build-mingw
 test=0
-ci=0
-while getopts tc option; do
+require=OFF
+while getopts tr option; do
     case $option in
         t) test=1 ;;
-        c) ci=1 ;;
+        r) require=ON ;;
         *) sed -n '2,7p' "$0"; exit 2 ;;
     esac
 done
 
-# The loader fix and asset tools: pefile and capstone pinned by hash (as in CI), numpy for the HUD colours.
+# The loader fix: pefile and capstone pinned by hash (as in CI).
 venv=$root/.venv
 if [ ! -x "$venv/bin/python" ]; then
     python3 -m venv "$venv"
     "$venv/bin/pip" install -q --disable-pip-version-check --require-hashes -r "$root/.github/loader-fix-requirements.txt"
-    "$venv/bin/pip" install -q --disable-pip-version-check numpy
 fi
 python=$venv/bin/python
 
 "$python" -B "$multislot/tools/fetch_modloader.py"
-if [ $ci = 0 ]; then
-    [ -n "${EDF6_GAME_DIR:-}" ] || { echo "set EDF6_GAME_DIR to the game folder, or build with -c" >&2; exit 1; }
-    [ -f "$multislot/assets/LYT_MAINFRAME.SGO" ] || "$python" -B "$multislot/tools/make_menu_label.py"
-    [ -f "$multislot/assets/ONLINEHUDTEXTURE.RAB" ] || "$python" -B "$multislot/tools/make_hud_colours.py"
-fi
 
-# Always explicit: CMake keeps cached values, and a later build without -c would stay a placeholder build.
+# Always explicit: CMake keeps cached values.
 cmake -S "$multislot" -B "$build" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" \
-    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMULTISLOT_CI=$([ $ci = 1 ] && echo ON || echo OFF) \
-    -DEDF6_REQUIRE_GAME=$([ $ci = 1 ] && echo OFF || echo ON) \
+    -DCMAKE_BUILD_TYPE=RelWithDebInfo -DEDF6_REQUIRE_GAME=$require \
     -DPython3_EXECUTABLE="$python" ${EDF6_GAME_DIR:+-DEDF6_GAME_DIR="$EDF6_GAME_DIR"}
 cmake --build "$build"
 

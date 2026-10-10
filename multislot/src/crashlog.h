@@ -5,7 +5,7 @@ namespace multislot {
 
 // Records the first few crash-class exceptions (code, faulting address, registers and the
 // unwound call stack as module+offset) in the plugin log. It never handles an exception, so
-// the game behaves exactly as without it; the log is what a 5-player test run leaves behind.
+// the game behaves exactly as without it.
 //
 // `dumpPath` (may be null) is where the first access violation inside EDF.dll or this plugin writes a
 // minidump. The 2026-09-27 host crash (EDF+12B44FC, an empty shared_ptr<eos::Serialize> copied in the host's

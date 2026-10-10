@@ -1,15 +1,8 @@
 # Builds, tests and packages the tagged version and stages the release files:
 #   release.ps1 [-Upload]
-# Release packages need the game's menu asset (multislot\assets\LYT_MAINFRAME.SGO, made from Root.cpk), which
-# cannot be on a build server, so this runs on a machine with the game (EDF6_GAME_DIR). It never signs: the
-# signing key stays in the repository secret, and .github/workflows/release.yml signs and publishes.
-#
+# Runs on a machine with the game (EDF6_GAME_DIR): every test against the game's code must run, not skip.
 # Without -Upload it stops after staging release\upload-<version>\. With -Upload it creates a DRAFT Release
-# for the tag with those files (gh, tag already pushed); players' updaters never see a draft. Then run
-#   gh workflow run release.yml --repo <owner>/<repo> -f tag=v<version>
-# which checks the draft, signs EDF6Coop.dll and its copies, uploads the .sig files and publishes it as latest.
-# One DLL for every room size. It is staged as EDF6Coop.dll (2.3.0's updater) and as each EDF6Coop-<N>p.dll a 2.2
-# room-size build's updater downloads, so every installed copy updates to it.
+# for the tag with those files (gh, tag already pushed); the developer publishes it.
 # Keep this script ASCII: PowerShell 5.1 reads it as ANSI.
 param([switch]$Upload)
 $ErrorActionPreference = 'Stop'
@@ -44,11 +37,6 @@ New-Item -ItemType Directory -Force $stage | Out-Null
 
 & (Join-Path $root 'build.ps1') -Test -RequireGame
 & (Join-Path $root 'package.ps1') | Out-Null
-$dll = Join-Path $multislot 'dist\EDF6Coop.dll'
-# The zip carries the same file.
-foreach ($asset in @('EDF6Coop.dll') + (8, 10, 12, 16, 24, 32 | ForEach-Object { "EDF6Coop-${_}p.dll" })) {
-    Copy-Item -LiteralPath $dll -Destination (Join-Path $stage $asset)
-}
 $zip = Join-Path $root "release\EDF6Coop-$version.zip"
 Copy-Item -LiteralPath $zip, "$zip.sha256" -Destination $stage
 
@@ -61,4 +49,4 @@ if (-not $Upload) {
 
 gh release create $tag @($files.FullName) --repo $repo --draft --verify-tag --title "EDF6Coop $version" --notes-file $notes
 if ($LASTEXITCODE) { throw 'gh release create failed' }
-"Draft Release $tag created in $repo. Sign and publish it with: gh workflow run release.yml --repo $repo -f tag=$tag"
+"Draft Release $tag created in $repo. Check it and publish it on GitHub."

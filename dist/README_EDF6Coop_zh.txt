@@ -1,103 +1,53 @@
-EDF6Coop 2.5.0 - 地球防卫军6 联机扩容 + 稳定插件
+EDF6Coop 2.5.0 - 地球防卫军6 联机稳定插件
 项目主页：https://github.com/hajisensai/edf-coop-stable
 English: README_EDF6Coop.txt / 日本語: README_EDF6Coop_ja.txt
 遇到问题请提 Issue，并附上 Mods\Plugins\EDF6Coop.log。
 
-EDF6Coop 是一个 EDFModLoader 插件（Mods\Plugins\EDF6Coop.dll），把原来的 EDF6DirectNet 和
-EDF6MultiSlot 合成了一个 DLL、一份日志、一个设置文件：
-- 超过 4 人的房间（Player MOD，8 到 1024 人由房主选）和对应的任务；
-- 玩家之间的直连，Epic 服务抽风时房间不散；
-- 丢包自动重发，短时间断线不被踢。
-Player MOD 为 OFF、不配直连时，玩法和原版完全一样，也能和没装 MOD 的人一起玩。
-
-[从 EDF6DirectNet / EDF6MultiSlot 升级]
-什么都不用手动做。INSTALL.bat（或第一次启动游戏时）会把 Mods\Plugins 里的 EDF6DirectNet.dll 和
-EDF6MultiSlot.dll 改名为 .disabled，加载器就不再加载它们。旧的设置文件原样保留；EDF6Coop 第一次启动
-时会写出 Mods\Plugins\EDF6Coop.ini，把你原来的设置值搬过来。已经不存在的设置项会在日志里点名
-（"is no longer a setting"）。
-想退回旧版：删掉 EDF6Coop.dll，再把旧 DLL 名字末尾的 ".disabled" 去掉即可。
-
-[房间人数：房主在游戏里选]
-所有人使用同一个安装包。F2 / 左摇杆按下依次切换 OFF、8、10、12、16、24、32、48、64、128、256、512、1024。
-INI 的 RoomSize 还可设为 2..1024，0 为原版四人模式。
-同一 MOD 房间所有人都需升级到 2.5.0：新槽位布局和网络协议不兼容 2.4.x 的扩容房间。
-1024 是实现上限，不是已证明可实际游玩的房间容量；大房间路径有自动化及原生代码测试，未完成相应人数实战验证。
-超过 16 人的房间无游戏内语音。人数越多，对带宽和 CPU 的要求越高。
+EDF6Coop 是一个 EDFModLoader 插件（Mods\Plugins\EDF6Coop.dll），让联机任务不再不同步、不再因为断线而中断：
+- 丢失的游戏数据包自动重发（防不同步）；
+- 短时间断线时先瞒住游戏，等 EOS 在后台重连（最多 30 秒）；
+- 后进房的人与你的 P2P 握手一直连不上时，你留在房间里；
+- 可选：Epic 中继延迟高或 NAT 穿透失败时，直连房主；
+- 全房间都用这个版本时：由开枪的人判定命中，玩家位置带速度信息。
+它使用游戏原本最多 4 人的房间。2.5.0 及更早版本的大房间（Player MOD）、房间画面、武器页、房间武器文件、
+护甲复制和自动更新都已移除；需要这些功能的人请继续用 2.5.0。同一房间的人应使用同一版本：房主会拒绝联机
+协议版本不同的玩家（[Netcode] RejectMismatched=1）。
 
 [安装 / 卸载]
-解压整个 zip，双击 INSTALL.bat，然后照常从 Steam 启动游戏。（也可以把 zip 里的内容直接拖进游戏文件夹，
-和 EDF6.exe 放在一起：压缩包里的目录结构就是游戏文件夹的结构。）
+Windows：解压整个 zip，双击 INSTALL.bat，然后照常从 Steam 启动游戏。（也可以把 zip 里的内容直接拖进游戏
+文件夹，和 EDF6.exe 放在一起：压缩包里的目录结构就是游戏文件夹的结构。）
+Linux（Steam Proton）：手动把 zip 里的内容复制进游戏文件夹，然后在 Steam 里把游戏的启动选项（属性）设为
+    WINEDLLOVERRIDES="winmm=n,b" %command%
+不设的话 Wine 会加载它自己的 winmm.dll，EDFModLoader 不会运行。
 没有 EDFModLoader（winmm.dll）时会装上自带的：官方 v1.0.10 加多线程问题的修复（见 LOADER_FIX_JA.md）。
 已有的 winmm.dll 一律不覆盖，唯一例外是与官方 v1.0.10 字节完全相同的那个：会换成修复版，原文件保存为
 winmm.dll.bak-official。
-卸载：先在 EDF6Coop.ini 的 [MultiSlot] 段设 Enabled=0 并启动一次游戏（这样会删掉 MOD 写出的文件
-Mods\UI\LYT_MAINFRAME.SGO 和 Mods\HUD\ONLINEHUDTEXTURE.RAB），再双击 UNINSTALL.bat（用管理员身份运行可同时删除防火墙规则）。
-它会删除 EDF6Coop 的文件、设置、日志、自动更新的残留和它建立的 UPnP 映射；EDFModLoader、其他 MOD、
-以及你旧的 EDF6DirectNet / EDF6MultiSlot 设置文件都不会动。
+从 EDF6DirectNet / EDF6MultiSlot 升级：Mods\Plugins 里它们的 DLL 会改名为 .disabled。旧设置文件保留，但不再
+读取。2.5.0 及更早版本在 Mods 下写出的菜单布局和 HUD 文件（UI\LYT_MAINFRAME.SGO、HUD\ONLINEHUDTEXTURE.RAB）
+会在第一次启动时删除；其他 MOD 的同名文件不动。
+升级：用同样的方法安装新版本，设置会保留。
+卸载：双击 UNINSTALL.bat（用管理员身份运行可同时删除防火墙规则）。它会删除 EDF6Coop 的文件、设置、日志和
+它建立的 UPnP 映射；EDFModLoader 和其他 MOD 不会动。Linux 上删除 Mods\Plugins\EDF6Coop.* 即可。
 
-[大房间（Player MOD）]
-- 在房间外的菜单按 F2 或按下左摇杆切换房间人数，依次是 OFF → 8 → 10 → 12 → 16 → 24 → 32 → 48 → 64 → 128 → 256 → 512 → 1024 → OFF，
-  显示在菜单左下角（例如「F2/LS 12Player MOD :ON」）。选择保存在 EDF6Coop.ini 的 [MultiSlot] RoomSize。
-  OFF（默认）：建的是谁都能进的普通 4 人房。
-  ON：建的是你选的人数的房间，只有装了 EDF6Coop 2.5.0的人才能看到。
-  搜房时不管开关如何，普通房和所有人数的大房间都会列出来。
-  房间建好后人数不变；在房间里时菜单显示的是这个房间的人数。
-- 在房间里按 F3 / Tab / 右摇杆按下 切换队员页（每页 4 人）。
-- 在房间里按 F4 / 左摇杆按下 开关「copy armor」：仅在任务中把你的护甲提到房间里其他人中最低的那位
-  （优先同兵种）。给新手用，不写存档。
-- 超过 4 人的任务：多出来的玩家有装备、出生点和道具。敌人数量超过 4 人后每多一人 +0.2 倍：
-  5 人 ×1.2、8 人 ×1.8、12 人 ×2.6、16 人 ×3.4、24 人 ×5.0、32 人 ×6.6
-  （固定物体和大型 BOSS 不增加）。[Mission] ExtraEnemies=0 保持原版数量
-  （房间里所有人要设成一样）。
-- 任务里每个玩家在 HUD 上都有自己的颜色：状态灯、聊天气泡、雷达标记。1-4 号保持游戏原来的黄、绿、蓝、红，
-  5-8 号是橙、粉、紫、青，提供 32 色调色板，更大房间循环使用。为此 MOD 会写出 Mods\HUD\ONLINEHUDTEXTURE.RAB（游戏自己的
-  HUD 贴图加上新的灯和气泡）。如果那里已经有别的 MOD 的文件，则不动它，5 号以后的玩家沿用 1-4 号的颜色。
-- 武器页：把魔改武器文件放在 Mods\Variants\<页名>\WEAPON\*.SGO（载具放在
-  Mods\Variants\<页名>\OBJECT\V*.SGO 或 VEHICLE*.SGO）。每个文件替换游戏里同文件名的武器或载具，所以武器表
-  和存档都不变：不会多出新武器，要装备它得有那把原版武器，名字也还是原版的。文件夹名请用 ASCII。在任意菜单
-  画面按 F6 切换：关 -> 第 1 页 -> 第 2 页 ... -> 关（「F6 Page:<页名>」），从下一个任务起生效，离线也能用。
-- 房间里所有人用同一套文件：房主的 Mods\WEAPON / Mods\OBJECT\V*/VEHICLE*.SGO 和每个成员的页（先房主的
-  Mods，再房主的页，再按加入顺序排其他人的页）。默认下载前询问，同意后使用，菜单显示「ROOM WEAPONS 42%」，之后是
-  「ROOM WEAPONS :ON (2)」。每个文件都对照它的主人发布的 SHA-256 校验，只在任务之间切换，退出房间就回到你
-  自己的文件。只传武器（不含 WEAPONTABLE/WEAPONTEXT）和载具文件，每页最多 128 个、4 MB，绝不传 DLL 或补丁。
-  文件放在 Mods\Plugins\EDF6Coop.hostdata，绝不写进你的 Mods 文件夹。没装插件的人看到的是原版武器。
-  ini 的 [HostData]：Accept=Ask（默认，下载前询问）/ Auto（直接下载并使用）/ Never，WeaponPageKey，Page，Share=0（什么都不提供），
-  Enabled=0（全部关闭）。
-- 按键在 ini 的 [RoomScreen] / [CopyArmor] 里改。F2 专用于 Player MOD。
-
-[直连（可选，只有房主需要设置）]
-进你房间的玩家会直接连到你。ini 里的注释（按 Windows 显示语言：中文 / 日文 / 英文）解释了每个设置。
+[直连（可选，只需房主设置）]
+进你房间的玩家会直接连到你。INI 里的注释（按 Windows 显示语言写成中文 / 日文 / 英文）解释了每一项设置。
 1. 在 EDF6Coop.ini 的 [DirectNet] 段设 Mode=host。
-2. 右键游戏文件夹里的 EDF6Coop_AllowFirewall.bat → 以管理员身份运行（一次；改了 ListenPort 后再运行一次）。
-3. 让别人连得到你：PublicAddress 留空（插件会用 UPnP 映射 UDP 端口，同时公布你的公网 IPv6），
-   或者自己在路由器上转发一个 UDP 端口，然后设 PublicAddress=你的公网IP:端口。
-4. 照常建房。日志里出现 "DIRECT client ... connected" 就是有人直连上了。
-加入的人什么都不用设：房间信息里带着房主地址。连不上也不影响，照常走 Epic 继续玩。
-Key= 是可选的共享密钥：房主设了，所有加入者必须填一样的 Key。
-直连正常时，Epic 自己房间服务的抽风不会让任何人掉线。
-谁在房间里由房主的游戏说了算：房主的成员列表经直连发给每个人，大家的游戏都跟着它走。
-掉出房间后 30 分钟内，如果 Epic 搜房失败（房间服务挂了），搜房列表里会出现你刚才那个房间，选它就直接连
-房主重进，不经过 Epic。Epic 正常时一切照旧。被房主踢出、房间关闭或进了别的房间后就不再显示。房主和你都要是 2.2.0 及以上。
-
-[自动更新]
-游戏启动时 EDF6Coop 会从 GitHub 获取新版本，下次启动生效（2.2.x 的各人数版本也会更新到同一个 2.5.0）。
-结果显示在菜单左下角（房间外）：「EDF6Coop 2.3.2 (latest)」是已最新；
-「EDF6Coop 2.3.1 -> 2.3.2 downloaded, restart the game」是已下载、重启生效；重启后显示
-「EDF6Coop 2.3.2 (updated from 2.3.1)」。失败时显示「update failed, see EDF6Coop.log」。
-发布文件有签名（ECDSA P-256），签名不对的文件绝不安装。新版本如果在进入标题画面后 20 秒内崩溃，会自动回滚。
-关闭下载：在 EDF6Coop.ini 设 [Update] AutoUpdate=0。
+2. Windows：右键游戏文件夹里的 EDF6Coop_AllowFirewall.bat → 以管理员身份运行（只需一次；改了 ListenPort
+   要再运行一次）。
+3. 让外网能连到你：PublicAddress 留空（插件会用 UPnP 映射 UDP 端口，并同时公布你的公网 IPv6），或者自己做
+   UDP 端口转发，再设 PublicAddress=公网 IP:端口。
+4. 照常建房间。日志里出现 "DIRECT client ... connected" 就说明有玩家直连上了。
+加入的人什么都不用做：房间信息里就有房主地址。连不上时照常走 Epic，不影响游戏。Key= 是可选的暗号：
+设了的话每个加入者都要填一样的 Key。
 
 [日志]
-Mods\Plugins\EDF6Coop.log：所有内容一份日志（直连相关的行以 [DN] 开头），会自动保持在 2MB 左右以内。
-正常退出时最后一行是 "SHUTDOWN the game exited"；没有这一行说明游戏崩溃或被强制结束。报问题时请附上。
+Mods\Plugins\EDF6Coop.log：所有内容都在这一份日志里（直连相关的行以 [DN] 开头），大小保持在约 2 MB 以内。
+报告问题时请附上它。
 
-[关闭功能]
-[MultiSlot] Enabled=0：不扩房间，房间画面恢复原版。
-[DirectNet] Enabled=0：不直连，不碰游戏的 Epic 调用。
-两个都是 0：插件自己卸载。
+[关闭]
+EDF6Coop.ini 里设 [DirectNet] Enabled=0：插件自行卸载，游戏就是原版。
 
-[附带内容]
-- EDF6Coop：Mods\Plugins\EDF6Coop.dll（MIT，LICENSE.txt；房间部分为公有领域）。它写出的菜单布局是游戏
-  自己的 UI/LYT_MAINFRAME.SGO 加一个显示栏；HUD 贴图是游戏的 HUD/ONLINEHUDTEXTURE.RAB 加上更多的灯和
-  聊天气泡，数据都在 DLL 里。5-8 号的颜色沿用 FevGrave 做的 8 人 HUD 贴图，要改的 HUD 代码也是 FevGrave 找到的。
-- EDFModLoader（BlueAmulet 作，MIT，EDFModLoader_LICENSE.txt）：winmm.dll，含 LOADER_FIX_JA.md 里的修复。
+[包含的内容]
+- EDF6Coop：Mods\Plugins\EDF6Coop.dll（MIT，见 LICENSE.txt；游戏部分最初由 momotori01 作为 EDF6MultiSlot
+  编写，属于公有领域）。
+- BlueAmulet 的 EDFModLoader（MIT，见 EDFModLoader_LICENSE.txt）：winmm.dll，含 LOADER_FIX_JA.md 所述的修复。

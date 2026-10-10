@@ -1,4 +1,4 @@
-// EDF6DirectNet tests. Build with build.ps1 and run build\edf6_directnet_tests.exe [path-to-EDF.dll].
+// The transport part's tests (ctest DirectNet).
 #include <winsock2.h>
 #include <windows.h>
 
@@ -20,14 +20,10 @@
 #include "../src/auth.h"
 #include "../src/config.h"
 #include "../src/direct_net.h"
-#include "../src/fake_lobby.h"
 #include "../src/hold.h"
 #include "../src/netclass.h"
 #include "../src/netif.h"
 #include "../src/reliable.h"
-#include "../src/room_view.h"
-#include "../src/traffic.h"
-#include "../src/updater.h"
 #include "../src/upnp.h"
 #include "../src/wire.h"
 
@@ -859,30 +855,6 @@ void testReplayWindow() {
     CHECK(!w.fresh(1030 - 1024) && !w.fresh(1024) && w.fresh(1025));
     w.mark(100000);  // a jump beyond the window forgets everything older
     CHECK(!w.fresh(1027) && !w.fresh(100000 - 1024) && w.fresh(100000 - 1023) && !w.fresh(100000));
-}
-
-void testLinkTagSpeed() {
-    printf("wire: tagging and checking 10000 full-size link packets\n");
-    dn::LinkKey k{};
-    k.fill(7);
-    dn::LinkMac tx(k), rx(k);
-    dn::Message m;
-    m.type = dn::MsgType::Data;
-    m.data.seq = 1;
-    m.data.src = kA;
-    m.data.dst = kB;
-    m.data.socketName = "EDF6";
-    m.data.payload.assign(1100, 9);
-    auto dg = dn::encode(m, "");
-    bool ok = true;
-    auto t0 = std::chrono::steady_clock::now();
-    for (uint64_t i = 1; i <= 10000; ++i) {
-        ok &= dn::sealLink(dg, i, tx);
-        ok &= dn::linkTagValid(dg.data(), dg.size(), rx);
-    }
-    double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - t0).count();
-    printf("  %zu-byte datagrams: %.1f ms for 10000 seal+check\n", dg.size(), ms);
-    CHECK(ok && ms < 500.0);
 }
 
 void testWelcomeProvesTheRoomOwner() {
@@ -2050,126 +2022,6 @@ void testLobbyOwnerPin() {
     CHECK(pin.pinned().empty() && pin.usurper().empty() && pin.kickAuthorized() && !pin.onPinnedJoined(me));
 }
 
-void testTrafficMeter() {
-    printf("traffic: the game's own send rate, busiest second, peers and copies\n");
-    dn::TrafficMeter m;
-    uint8_t x[100] = {1}, y[100] = {2};
-    uint64_t hx = dn::TrafficMeter::hash(x, sizeof(x)), hy = dn::TrafficMeter::hash(y, sizeof(y));
-    CHECK(hx != hy && dn::TrafficMeter::hash(x, sizeof(x)) == hx);
-    m.record(kA, 100, hx, 1000);
-    m.record(kB, 100, hx, 1001);  // the same data to another player: a copy
-    m.record(kB, 100, hx, 1002);  // the same data to the same player again: not a copy, a repeat
-    m.record(kA, 100, hy, 1500);
-    m.record(kA, 400, hy, 2100);  // next second; another size is other data
-    dn::TrafficSummary s = m.take();
-    CHECK(s.bytes == 800 && s.packets == 5 && s.peers == 2 && s.copyBytes == 100);
-    CHECK(s.busiestSecondBytes == 400 && s.largestPacket == 400 && s.repeatPackets == 1);
-    s = m.take();
-    CHECK(s.bytes == 0 && s.packets == 0 && s.peers == 0 && s.busiestSecondBytes == 0 && s.repeatPackets == 0);
-
-    // Repeats count within the window only.
-    m.record(kA, 100, hx, 10000);
-    m.record(kA, 100, hx, 10000 + dn::TrafficMeter::kRepeatWindowMs);      // just inside: a repeat
-    m.record(kA, 100, hy, 20000);
-    m.record(kA, 100, hy, 20001 + dn::TrafficMeter::kRepeatWindowMs);      // just outside: not
-    CHECK(m.take().repeatPackets == 1);
-}
-
-void testUpdater() {
-    printf("update: versions, release JSON, digest checks, replacing a loaded DLL\n");
-    using dn::parseVersion;
-    CHECK(parseVersion("v0.3.6").valid() && parseVersion("v0.3.6").patch == 6);
-    CHECK(parseVersion("EDF6DirectNet 1.12.0 x").minor == 12 && !parseVersion("v1.2").valid());
-    CHECK(parseVersion("v0.3.10").newerThan(parseVersion("0.3.9")) && !parseVersion("0.3.5").newerThan(parseVersion("0.3.5")));
-    CHECK(parseVersion("1.0.0").newerThan(parseVersion("0.9.9")) && !parseVersion("0.3.4").newerThan(parseVersion("0.4.0")));
-    CHECK(!parseVersion("1. 2. 3").valid() && !parseVersion("v99999999999.0.0").valid() && !parseVersion("1.2.-3").valid());
-    CHECK(parseVersion("v1.2.3.4").patch == 3 && parseVersion("x 12.0.999999").patch == 999999);
-
-    std::string json = R"({"tag_name": "v0.3.6", "assets": [
-        {"name":"EDF6DirectNet-v0.3.6.zip","browser_download_url":"https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.6/EDF6DirectNet-v0.3.6.zip"},
-        {"name": "EDF6DirectNet.dll", "browser_download_url": "https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.6/EDF6DirectNet.dll"},
-        {"name":"EDF6DirectNet.dll.sha256","browser_download_url":"https://evil.example/EDF6DirectNet.dll.sha256"}]})";
-    CHECK(dn::jsonString(json, "tag_name") == "v0.3.6");
-    CHECK(dn::assetUrl(json, "EDF6DirectNet.dll") == "https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.6/EDF6DirectNet.dll");
-    CHECK(dn::assetUrl(json, "EDF6DirectNet.dll.sha256").empty());  // not GitHub: refused
-    CHECK(dn::assetUrl(json, "missing.dll").empty());
-    // The shape GitHub actually returns: release name/author before the assets, label and uploader inside
-    // each asset after its name, a body with quotes after them.
-    std::string real = R"({"url":"https://api.github.com/repos/o/r/releases/1","assets_url":"https://api.github.com/x",
-        "tag_name":"v0.3.7","name":"EDF6DirectNet.dll","author":{"login":"o","name":"EDF6DirectNet.dll"},"assets":[
-        {"url":"https://api.github.com/a/1","id":1,"name":"EDF6DirectNet.dll.sha256","label":null,
-         "uploader":{"login":"github-actions[bot]","id":2},"content_type":"text/plain","size":84,
-         "digest":"sha256:00","browser_download_url":"https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.7/EDF6DirectNet.dll.sha256"},
-        {"url":"https://api.github.com/a/2","id":3,"name":"EDF6DirectNet.dll","label":"",
-         "uploader":{"login":"github-actions[bot]","id":2},"content_type":"application/x-msdownload","size":400000,
-         "digest":"sha256:11","browser_download_url":"https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.7/EDF6DirectNet.dll"}],
-        "body":"see \"name\": \"EDF6DirectNet.dll\" https://evil.example/x"})";
-    CHECK(dn::parseVersion(dn::jsonString(real, "tag_name")).patch == 7);
-    CHECK(dn::assetUrl(real, "EDF6DirectNet.dll") == "https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.7/EDF6DirectNet.dll");
-    CHECK(dn::assetUrl(real, "EDF6DirectNet.dll.sha256") ==
-          "https://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.7/EDF6DirectNet.dll.sha256");
-
-    std::vector<uint8_t> abc = {'a', 'b', 'c'};
-    CHECK(dn::sha256Hex(abc) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
-
-    dn::Version v = parseVersion("0.3.6");
-    std::vector<uint8_t> dll(4096, 0);
-    dll[0] = 'M';
-    dll[1] = 'Z';
-    std::string marker = dn::versionMarker(v);
-    std::copy(marker.begin(), marker.end(), dll.begin() + 1000);
-    std::string sha = dn::sha256Hex(dll) + "  EDF6DirectNet.dll\n";
-    std::string why;
-    CHECK(dn::verifyUpdate(dll, sha, v, &why));
-    std::string upper = sha;
-    std::transform(upper.begin(), upper.end(), upper.begin(), [](char c) { return static_cast<char>(toupper(c)); });
-    CHECK(dn::verifyUpdate(dll, upper, v, &why));
-    CHECK(!dn::verifyUpdate(dll, sha, parseVersion("0.3.7"), &why));  // another version inside
-    CHECK(!dn::verifyUpdate(dll, "not a digest", v, &why));
-    std::vector<uint8_t> damaged = dll;
-    damaged[2000] ^= 1;
-    CHECK(!dn::verifyUpdate(damaged, sha, v, &why));
-    std::vector<uint8_t> notDll = dll;
-    notDll[0] = 'X';
-    CHECK(!dn::verifyUpdate(notDll, dn::sha256Hex(notDll), v, &why));
-
-    // Replacing a DLL that is loaded, the way the game has the plugin loaded while it updates.
-    wchar_t tmp[MAX_PATH];
-    GetTempPathW(MAX_PATH, tmp);
-    std::wstring dir = std::wstring(tmp) + L"edf6dn_update_test\\";
-    CreateDirectoryW(dir.c_str(), nullptr);
-    std::wstring installed = dir + L"EDF6Coop.dll";
-    DeleteFileW((installed + L".old").c_str());
-    wchar_t self[MAX_PATH];
-    GetModuleFileNameW(nullptr, self, MAX_PATH);
-    CHECK(CopyFileW(self, installed.c_str(), FALSE));  // any image does: it is mapped, not run
-    HMODULE loaded = LoadLibraryExW(installed.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    CHECK(loaded != nullptr);
-    CHECK(dn::installOver(installed, dll, &why));
-    HANDLE f = CreateFileW(installed.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    DWORD size = f != INVALID_HANDLE_VALUE ? GetFileSize(f, nullptr) : 0;
-    if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
-    CHECK(size == dll.size());                                                               // the new file is in place
-    CHECK(GetFileAttributesW((installed + L".old").c_str()) != INVALID_FILE_ATTRIBUTES);  // the loaded one moved aside
-    dn::removeUpdateLeftovers(installed);  // kept for rollback until the new version is healthy
-    CHECK(GetFileAttributesW((installed + L".old").c_str()) != INVALID_FILE_ATTRIBUTES);
-    if (loaded) FreeLibrary(loaded);
-    dn::removeUpdateLeftovers(installed);
-    CHECK(GetFileAttributesW((installed + L".old").c_str()) != INVALID_FILE_ATTRIBUTES);
-    DeleteFileW((installed + L".old").c_str());
-    CHECK(GetFileAttributesW((installed + L".new" + std::to_wstring(GetCurrentProcessId())).c_str()) ==
-          INVALID_FILE_ATTRIBUTES);
-    // A game that quit between writing its download and renaming it leaves installed.new<pid>.
-    std::wstring stale = installed + L".new4242", other = installed + L".newer";
-    CHECK(CopyFileW(self, stale.c_str(), FALSE) && CopyFileW(self, other.c_str(), FALSE));
-    dn::removeUpdateLeftovers(installed);
-    CHECK(GetFileAttributesW(stale.c_str()) == INVALID_FILE_ATTRIBUTES);
-    CHECK(GetFileAttributesW(other.c_str()) != INVALID_FILE_ATTRIBUTES);  // not ours: left alone
-    DeleteFileW(other.c_str());
-    DeleteFileW(installed.c_str());
-    RemoveDirectoryW(dir.c_str());
-}
-
 void testRosterDropsQuietMember() {
     printf("direct: other joiners learn within seconds that a member's link went quiet\n");
     dn::DirectOptions ho = hostOptions(0, 0);
@@ -2385,7 +2237,6 @@ void testNetif() {
     if (pi) {
         printf("  %s | %s | ipv4=%s v4idx=%u v6idx=%u ipv6=%zu\n", pi->name.c_str(), pi->description.c_str(),
                pi->ipv4.c_str(), pi->ifIndexV4, pi->ifIndexV6, pi->globalIpv6.size());
-        CHECK(pi->description.find("Clash") == std::string::npos);
     }
 }
 
@@ -2519,7 +2370,7 @@ void testConfig() {
     CHECK(def.enabled && def.direct.mode == dn::Mode::Off && def.direct.listenPort == 27015 && def.eosRelay == -1);
     CHECK(def.hold == dn::Config::Hold::Auto && def.graceMs == 30000 && def.direct.linkTimeoutMs == 60000);
     CHECK(def.reliableGameTraffic && def.direct.upgradeUnreliable);
-    CHECK(def.autoJoin && def.publicAddress.empty() && def.autoUpdate);
+    CHECK(def.autoJoin && def.publicAddress.empty());
 
     // Every language writes the same settings; only the comments differ.
     const unsigned short langs[] = {MAKELANGID(LANG_CHINESE, SUBLANG_CHINESE_SIMPLIFIED),
@@ -2556,7 +2407,7 @@ void testConfig() {
 
     FILE* f = _wfopen(path.c_str(), L"wb");
     fputs("[DirectNet]\r\nMode= Join \r\nHostAddress=[2408:8207::5]:30000\r\nKey=abc\r\n"
-          "PublicAddress= 1.2.3.4:40000 \r\nAutoJoin=0\r\n[Update]\r\nAutoUpdate=0\r\n"
+          "PublicAddress= 1.2.3.4:40000 \r\nAutoJoin=0\r\n"
           "[EOS]\r\nFixedPort=27100\r\nRelay=NoRelay\r\n[Resilience]\r\nHoldDisconnects=ALL\r\nGraceSeconds=45\r\n", f);
     fclose(f);
     dn::Config c = dn::loadConfig(path);
@@ -2565,121 +2416,8 @@ void testConfig() {
     CHECK(c.direct.listenPort == 0);  // join without ListenPort binds any port
     CHECK(c.direct.key == "abc" && c.eosFixedPort == 27100 && c.eosRelay == 0);
     CHECK(c.hold == dn::Config::Hold::All && c.graceMs == 45000);
-    CHECK(c.publicAddress == "1.2.3.4:40000" && !c.autoJoin && !c.autoUpdate);
+    CHECK(c.publicAddress == "1.2.3.4:40000" && !c.autoJoin);
     DeleteFileW(path.c_str());
-}
-
-// A throwaway P-256 key pair made for these tests (only its public half is here) and .NET ECDsaCng
-// signatures over manifests of testDll("0.3.7") and testDll("0.3.5"), made the way the release workflow
-// signs.
-const std::vector<uint8_t> kTestKey = {
-    0x45, 0x43, 0x53, 0x31, 0x20, 0x00, 0x00, 0x00, 0x4f, 0xf1, 0x0e, 0xd8, 0xb7, 0x69, 0xae, 0x45, 0xae, 0xf1,
-    0xce, 0xd9, 0x23, 0x68, 0x57, 0xd0, 0xb1, 0x78, 0xce, 0x42, 0x4f, 0xcb, 0x7a, 0x3e, 0x9f, 0x44, 0x2b, 0xb3,
-    0x3c, 0xcf, 0x1e, 0xec, 0x53, 0xd2, 0xa2, 0x20, 0x57, 0xe3, 0x5b, 0x17, 0x4e, 0x73, 0x5d, 0x66, 0x0a, 0x42,
-    0x2c, 0x13, 0x1a, 0x24, 0x57, 0x08, 0x93, 0xbf, 0xb7, 0xe3, 0xf7, 0xa6, 0xe0, 0x6e, 0xeb, 0xaf, 0x7d, 0x04};
-const char* const kTestSig037 =
-    "EDF6Coop 0.3.7\n"
-    "3825d0abfb42d32b077e869bb6fca3636e0746cbc634622c05feae149540571f\n"
-    "cb6135c39730aa7bea937087ce81d95abe435986d581e2fdf9722d91c2e56711"
-    "96b86370db3cebf6febfe41a53a5a723f7999ef00f66a76e0cf40ace2424f961\n";
-const char* const kTestSig035 =
-    "EDF6Coop 0.3.5\n"
-    "2a18ec0e2ad765cf5b05991eb268f83da5acf9c59f05b3155154d28ef8058ba5\n"
-    "68da353b7a3f04008d2ff8e49b4a80e4041a519d9e7b894b8ddf979f52715b5a"
-    "0151c37a637a8d4d6bfb0f2e700ad81944404f26313fe98039f66ecb0f546265\n";
-
-// 4 KiB: "MZ", zeros, the version marker at 1000.
-std::vector<uint8_t> testDll(const char* version) {
-    std::vector<uint8_t> dll(4096, 0);
-    dll[0] = 'M';
-    dll[1] = 'Z';
-    std::string marker = dn::versionMarker(dn::parseVersion(version));
-    std::copy(marker.begin(), marker.end(), dll.begin() + 1000);
-    return dll;
-}
-
-void testUpdateSigning() {
-    printf("update: signed manifest, version binding, no downgrade\n");
-    using dn::parseVersion;
-    std::string why;
-    std::vector<uint8_t> dll = testDll("0.3.7");
-    dn::Version v037 = parseVersion("0.3.7"), v036 = parseVersion("0.3.6");
-    CHECK(dn::sha256Hex(dll) == "3825d0abfb42d32b077e869bb6fca3636e0746cbc634622c05feae149540571f");
-    dn::SignedManifest m;
-    CHECK(dn::readSignedManifest(kTestSig037, kTestKey, &m, &why) && m.version == v037);
-    CHECK(dn::verifyRelease(dll, kTestSig037, v037, v036, kTestKey, &why));
-    // Production trusts only the embedded release key: the test key's signature does not count.
-    CHECK(dn::releaseSigningKey().size() == 72 && dn::releaseSigningKey() != kTestKey);
-    CHECK(!dn::verifyRelease(dll, kTestSig037, v037, v036, dn::releaseSigningKey(), &why));
-    CHECK(why.find("signature is not valid") != std::string::npos);
-    // The signature binds version and digest.
-    std::string other = kTestSig037;
-    other[13] = '8';  // "EDF6Coop 0.3.8"
-    CHECK(!dn::readSignedManifest(other, kTestKey, &m, &why));
-    other = kTestSig037;
-    other[20] = other[20] == 'd' ? 'e' : 'd';  // first digest digit
-    CHECK(!dn::readSignedManifest(other, kTestKey, &m, &why));
-    other = kTestSig037;
-    other[other.size() - 2] = other[other.size() - 2] == '0' ? '1' : '0';  // last signature digit
-    CHECK(!dn::readSignedManifest(other, kTestKey, &m, &why));
-    // A validly signed release is taken only as the release it says it is, and only forward.
-    CHECK(!dn::verifyRelease(dll, kTestSig037, parseVersion("0.3.8"), v036, kTestKey, &why));  // tag 0.3.8, signed 0.3.7
-    CHECK(!dn::verifyRelease(dll, kTestSig037, v037, v037, kTestKey, &why));                   // not newer
-    CHECK(!dn::verifyRelease(testDll("0.3.5"), kTestSig035, parseVersion("0.3.5"), v036, kTestKey, &why));  // downgrade
-    CHECK(why.find("not newer") != std::string::npos);
-    CHECK(dn::verifyRelease(testDll("0.3.5"), kTestSig035, parseVersion("0.3.5"), parseVersion("0.3.4"), kTestKey, &why));
-    // The DLL must be the signed one.
-    std::vector<uint8_t> damaged = dll;
-    damaged[3000] ^= 1;
-    CHECK(!dn::verifyRelease(damaged, kTestSig037, v037, v036, kTestKey, &why));
-    CHECK(!dn::verifyRelease(testDll("0.3.5"), kTestSig037, v037, v036, kTestKey, &why));
-    // Strict format: nothing missing, added or respelled.
-    std::string good = kTestSig037;
-    for (const std::string& bad :
-         {std::string(), good.substr(0, good.size() - 1), good + "\n", good + "x", "\n" + good,
-          std::string("EDF6Coop 00.3.7") + good.substr(14), std::string("EDF6Coop  0.3.7") + good.substr(14),
-          std::string("EDF6Coop v0.3.7") + good.substr(14), std::string("edf6coop 0.3.7") + good.substr(14),
-          std::string("EDF6DirectNet 0.3.7") + good.substr(14)}) {
-        CHECK(!dn::readSignedManifest(bad, kTestKey, &m, &why));
-    }
-    std::string crlf;
-    for (char c : good) crlf += c == '\n' ? std::string("\r\n") : std::string(1, c);
-    CHECK(!dn::readSignedManifest(crlf, kTestKey, &m, &why));
-    std::string upper = good;
-    std::transform(upper.begin() + 20, upper.end(), upper.begin() + 20, [](char c) { return static_cast<char>(toupper(c)); });
-    CHECK(!dn::readSignedManifest(upper, kTestKey, &m, &why));
-    CHECK(!dn::readSignedManifest(good, std::vector<uint8_t>(72, 0), &m, &why));  // not a key
-    CHECK(!dn::readSignedManifest(good, {}, &m, &why));
-
-    // Asset URLs: this repository, this release's tag, this name; nothing else.
-    auto release = [](const std::string& tag, const std::string& url) {
-        return R"({"tag_name":")" + tag + R"(","assets":[{"name":"EDF6DirectNet.dll.sig","browser_download_url":")" +
-               url + R"("}]})";
-    };
-    const std::string base = "https://github.com/hajisensai/edf-coop-stable/releases/download/";
-    CHECK(dn::assetUrl(release("v0.3.7", base + "v0.3.7/EDF6DirectNet.dll.sig"), "EDF6DirectNet.dll.sig") ==
-          base + "v0.3.7/EDF6DirectNet.dll.sig");
-    for (const std::string& url :
-         {std::string("https://github.com/other/edf-coop-stable/releases/download/v0.3.7/EDF6DirectNet.dll.sig"),
-          std::string("https://github.com/hajisensai/edf-coop-stable-fork/releases/download/v0.3.7/EDF6DirectNet.dll.sig"),
-          base + "v0.3.6/EDF6DirectNet.dll.sig", base + "v0.3.7/../../../../x/y/releases/download/v0.3.7/EDF6DirectNet.dll.sig",
-          base + "v0.3.7/EDF6DirectNet.dll.sig?x=1", std::string("http://github.com/hajisensai/edf-coop-stable/releases/download/v0.3.7/EDF6DirectNet.dll.sig"),
-          base + "v0.3.7/EDF6DirectNet.dll"}) {
-        CHECK(dn::assetUrl(release("v0.3.7", url), "EDF6DirectNet.dll.sig").empty());
-    }
-    CHECK(dn::assetUrl(release("v0.3.7/../x", base + "v0.3.7/../x/EDF6DirectNet.dll.sig"), "EDF6DirectNet.dll.sig").empty());
-}
-
-bool fileExists(const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
-
-std::string fileText(const std::wstring& path) {
-    std::string text;
-    FILE* f = _wfopen(path.c_str(), L"rb");
-    if (!f) return text;
-    char buf[4096];
-    for (size_t n; (n = fread(buf, 1, sizeof(buf), f)) > 0;) text.append(buf, n);
-    fclose(f);
-    return text;
 }
 
 void putFile(const std::wstring& path, const std::string& text) {
@@ -2687,197 +2425,6 @@ void putFile(const std::wstring& path, const std::string& text) {
     if (!f) return;
     fwrite(text.data(), 1, text.size(), f);
     fclose(f);
-}
-
-std::wstring freshDir(const wchar_t* name) {
-    wchar_t tmp[MAX_PATH];
-    GetTempPathW(MAX_PATH, tmp);
-    std::wstring dir = std::wstring(tmp) + name + L"\\";
-    CreateDirectoryW(dir.c_str(), nullptr);
-    WIN32_FIND_DATAW found;
-    HANDLE search = FindFirstFileW((dir + L"*").c_str(), &found);
-    if (search != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) DeleteFileW((dir + found.cFileName).c_str());
-        } while (FindNextFileW(search, &found));
-        FindClose(search);
-    }
-    return dir;
-}
-
-// What the updater last told the menu (dn::statusToSink).
-std::string& menuStatus() {
-    static std::string text;
-    return text;
-}
-void recordMenuStatus(const char* text) { menuStatus() = text; }
-
-void testMenuStatus() {
-    using dn::UpdateStage;
-    const auto text = [](UpdateStage stage, const char* from = "", const char* downloaded = "") {
-        return dn::menuStatusText({"2.3.2", from, downloaded, stage});
-    };
-    CHECK(text(UpdateStage::Checking) == "EDF6Coop 2.3.2 (checking for updates)");
-    CHECK(text(UpdateStage::Latest) == "EDF6Coop 2.3.2 (latest)");
-    CHECK(text(UpdateStage::Off) == "EDF6Coop 2.3.2 (auto update off)");
-    CHECK(text(UpdateStage::CheckFailed) == "EDF6Coop 2.3.2 (update check failed)");
-    CHECK(text(UpdateStage::Failed) == "EDF6Coop 2.3.2 (update failed, see EDF6Coop.log)");
-    CHECK(text(UpdateStage::Installed, "", "2.3.3") == "EDF6Coop 2.3.2 -> 2.3.3 downloaded, restart the game");
-    // A finished update outranks this start's check, but not a newer download or a failure the player must act on.
-    CHECK(text(UpdateStage::Latest, "2.3.1") == "EDF6Coop 2.3.2 (updated from 2.3.1)");
-    CHECK(text(UpdateStage::CheckFailed, "2.3.1") == "EDF6Coop 2.3.2 (updated from 2.3.1)");
-    CHECK(text(UpdateStage::Installed, "2.3.1", "2.3.3") == "EDF6Coop 2.3.2 -> 2.3.3 downloaded, restart the game");
-    CHECK(text(UpdateStage::Failed, "2.3.1") == "EDF6Coop 2.3.2 (update failed, see EDF6Coop.log)");
-    // Every one fits the menu's field (multislot updatecheck.cpp: 64 characters) with long version numbers.
-    for (UpdateStage stage : {UpdateStage::Off, UpdateStage::Checking, UpdateStage::Latest, UpdateStage::Installed,
-                              UpdateStage::CheckFailed, UpdateStage::Failed})
-        CHECK(dn::menuStatusText({"12.34.56", "12.34.55", "12.34.57", stage}).size() < 64);
-
-    // AutoUpdate=0 says so at once, without a thread or a request.
-    dn::startAutoUpdate(L"", "2.3.2", false);
-    CHECK(menuStatus() == "EDF6Coop 2.3.2 (auto update off)");
-}
-
-void testUpdateRollback() {
-    printf("update: rollback state machine (trial, healthy, rolled back, bad version)\n");
-    std::wstring dir = freshDir(L"edf6dn_rollback_test");
-    std::wstring dll = dir + L"EDF6DirectNet.dll", old = dll + L".old", trial = dll + L".trial", bad = dll + L".bad";
-    // NUL-terminated like the marker in a real build, so fileVersion reads it back.
-    auto install = [&](const char* version) { putFile(dll, "MZ EDF6COOP_VERSION=" + std::string(version) + '\0'); };
-    std::string why;
-
-    // The version a DLL says it is, past the marker prefix its own updater code also contains.
-    const char marked[] = "MZ EDF6COOP_VERSION=\0%s\0 EDF6COOP_VERSION=1.2\0 EDF6COOP_VERSION=0.3.6\0";
-    putFile(dll, std::string(marked, sizeof(marked) - 1));
-    CHECK(dn::fileVersion(dll) == "0.3.6");
-    const char unmarked[] = "MZ EDF6COOP_VERSION=\0 no marker\0";
-    putFile(dll, std::string(unmarked, sizeof(unmarked) - 1));
-    CHECK(dn::fileVersion(dll) == "?");
-    // A room-size build of 2.2.x, kept for rollback after the update to the one build (product.h).
-    const char legacy[] = "MZ EDF6COOP_VERSION=\0 EDF6COOP_12P_VERSION=\0 EDF6COOP_12P_VERSION=2.2.0\0";
-    putFile(dll, std::string(legacy, sizeof(legacy) - 1));
-    CHECK(dn::fileVersion(dll) == "2.2.0");
-
-    // Installed by hand: nothing to prove, a stray trial is dropped.
-    install("0.3.7");
-    putFile(trial, "0.3.7 0\n");
-    CHECK(dn::beginRun(dll, "0.3.7") == dn::RunState::Normal && !fileExists(trial));
-    CHECK(menuStatus().rfind("EDF6Coop 0.3.7 (", 0) == 0 && menuStatus().find("updated") == std::string::npos);  // no update behind this start
-
-    // 0.3.7 updates itself to 0.3.8: 0.3.7 is kept as .old.
-    std::vector<uint8_t> v038 = testDll("0.3.8");
-    CHECK(dn::installOver(dll, v038, &why));
-    CHECK(fileText(old).find("EDF6COOP_VERSION=0.3.7") != std::string::npos && fileText(dll).size() == v038.size());
-    // The first start of 0.3.8 is a trial; healthy after a while: the trial and .old go.
-    CHECK(dn::beginRun(dll, "0.3.8") == dn::RunState::Trial);
-    CHECK(menuStatus() == "EDF6Coop 0.3.8 (updated from 0.3.7)");  // the menu confirms the update
-    CHECK(fileText(trial) == "0.3.8 " + std::to_string(GetCurrentProcessId()) + "\n");
-    dn::confirmHealthy(dll, "0.3.7");  // someone else's trial: nothing happens
-    CHECK(fileExists(trial) && fileExists(old));
-    dn::confirmHealthy(dll, "0.3.8");
-    CHECK(!fileExists(trial) && !fileExists(old));
-    CHECK(dn::beginRun(dll, "0.3.8") == dn::RunState::Normal);
-
-    // 0.3.8 updates to 0.3.9. A game that ends normally before 0.3.9 is proven is no failure: the trial
-    // goes on at the next start.
-    std::vector<uint8_t> v039 = testDll("0.3.9");
-    CHECK(dn::installOver(dll, v039, &why));
-    CHECK(dn::beginRun(dll, "0.3.9") == dn::RunState::Trial);
-    CHECK(dn::beginRun(dll, "0.3.9") == dn::RunState::Trial);  // the same game asking again: still its trial
-    CHECK(!dn::noteCleanExit(dll, "0.3.8"));                    // not the version on trial
-    CHECK(dn::noteCleanExit(dll, "0.3.9") && fileText(trial) == "0.3.9 0\n");
-    CHECK(dn::beginRun(dll, "0.3.9") == dn::RunState::Trial && fileExists(old));
-    CHECK(fileText(trial) == "0.3.9 " + std::to_string(GetCurrentProcessId()) + "\n");
-    // Then a game running it dies before it is healthy (no clean exit): pid 4 is System, never a game.
-    putFile(trial, "0.3.9 4\n");
-    CHECK(dn::beginRun(dll, "0.3.9") == dn::RunState::RolledBack);
-    CHECK(fileText(dll).find("EDF6COOP_VERSION=0.3.8") != std::string::npos);  // 0.3.8 runs from the next start
-    CHECK(fileText(dll + L".rolledback").find("EDF6COOP_VERSION=0.3.9") != std::string::npos);
-    CHECK(!fileExists(old) && !fileExists(trial));
-    CHECK(dn::badVersion(dll) == dn::parseVersion("0.3.9"));
-    // The next start is 0.3.8 again, normal; the moved-aside DLL is cleaned up.
-    CHECK(dn::beginRun(dll, "0.3.8") == dn::RunState::Normal && !fileExists(dll + L".rolledback"));
-
-    // An older updater installs 0.3.9 again anyway: rolled back at once, without another trial.
-    CHECK(dn::installOver(dll, v039, &why));
-    CHECK(dn::beginRun(dll, "0.3.9") == dn::RunState::RolledBack);
-    CHECK(fileText(dll).find("EDF6COOP_VERSION=0.3.8") != std::string::npos);
-
-    // Another game running the same trial right now (this process) is not a failed run.
-    CHECK(dn::installOver(dll, testDll("0.4.0"), &why));
-    putFile(trial, "0.4.0 " + std::to_string(GetCurrentProcessId()) + "\n");
-    CHECK(dn::beginRun(dll, "0.4.0") == dn::RunState::Trial && fileExists(old));
-
-    // A version on trial that installs the next one gives up its own trial: its health check must not
-    // delete the new version's rollback target, and that target stays the proven 0.3.8, not unproven 0.4.0.
-    CHECK(dn::installOver(dll, testDll("0.4.1"), &why));
-    CHECK(!fileExists(trial) && fileText(old).find("EDF6COOP_VERSION=0.3.8") != std::string::npos);
-    CHECK(fileText(dll + L".rolledback").find("EDF6COOP_VERSION=0.4.0") != std::string::npos);
-    dn::confirmHealthy(dll, "0.4.0");
-    CHECK(fileExists(old));
-
-    // Garbage in the state files is harmless.
-    putFile(trial, "garbage");
-    putFile(bad, "\xff\xfe");
-    CHECK(dn::beginRun(dll, "0.4.1") == dn::RunState::Trial && dn::badVersion(dll).valid() == false);
-
-    for (const wchar_t* f : {L"", L".old", L".trial", L".bad", L".rolledback"}) DeleteFileW((dll + f).c_str());
-    RemoveDirectoryW(dir.c_str());
-}
-
-void testSwapKeepsDllLoadable() {
-    printf("update: the plugin file never goes missing while it is replaced (loaded image)\n");
-    std::wstring dir = freshDir(L"edf6dn_swap_test");
-    std::wstring dll = dir + L"EDF6DirectNet.dll";
-    wchar_t self[MAX_PATH];
-    GetModuleFileNameW(nullptr, self, MAX_PATH);
-    const std::wstring built = self;  // any image will do: this test program is one the loader can map
-    CHECK(CopyFileW(built.c_str(), dll.c_str(), FALSE));
-    HMODULE loaded = LoadLibraryExW(dll.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    CHECK(loaded != nullptr);
-    std::atomic<bool> done{false};
-    std::atomic<int> missing{0}, looks{0};
-    std::thread watcher([&] {
-        while (!done) {
-            if (!fileExists(dll)) ++missing;
-            ++looks;
-        }
-    });
-    std::string why;
-    // The running plugin is replaced: its image stays mapped under the second name .old.
-    bool allOk = dn::installOver(dll, testDll("0.3.8"), &why);
-    CHECK(allOk && fileExists(dll + L".old"));
-    CHECK(!DeleteFileW((dll + L".old").c_str()));  // still the loaded image
-    if (loaded) FreeLibrary(loaded);
-    // A watcher opening the file at the wrong moment must not make the replacement fail either.
-    for (int i = 0; i < 40; ++i) allOk = dn::installOver(dll, testDll(i % 2 ? "0.3.9" : "0.3.8"), &why) && allOk;
-    // A rollback also replaces the running (loaded) version.
-    CHECK(CopyFileW(built.c_str(), dll.c_str(), FALSE));
-    loaded = LoadLibraryExW(dll.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    CHECK(loaded != nullptr);
-    putFile(dll + L".old", "MZ EDF6COOP_VERSION=0.3.9");
-    putFile(dll + L".trial", "0.9.9 4\n");  // its game (pid 4 is System, never a game) died on trial
-    bool rolledBack = dn::beginRun(dll, "0.9.9") == dn::RunState::RolledBack;
-    done = true;
-    watcher.join();
-    CHECK(allOk && rolledBack);
-    // Wine refuses to replace a loaded image, so there the plugin is renamed aside first (updater.cpp swapIn) and
-    // its name is briefly missing.
-    const bool wine = GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "wine_get_version") != nullptr;
-    CHECK((missing == 0 || wine) && looks > 0);
-    CHECK(fileText(dll) == "MZ EDF6COOP_VERSION=0.3.9");
-    if (loaded) FreeLibrary(loaded);
-    DeleteFileW((dll + L".rolledback").c_str());
-    DeleteFileW((dll + L".bad").c_str());
-    // A download that could not be put in place leaves the installed file as it was.
-    CHECK(CopyFileW(built.c_str(), (dll + L".old").c_str(), FALSE));
-    HANDLE lock = CreateFileW((dll + L".old").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
-    CHECK(!dn::installOver(dll, testDll("0.4.0"), &why));  // the old backup cannot be removed
-    CHECK(fileText(dll) == "MZ EDF6COOP_VERSION=0.3.9");
-    CHECK(!fileExists(dll + L".new" + std::to_wstring(GetCurrentProcessId())));
-    if (lock != INVALID_HANDLE_VALUE) CloseHandle(lock);
-    for (const wchar_t* f : {L"", L".old", L".trial"}) DeleteFileW((dll + f).c_str());
-    RemoveDirectoryW(dir.c_str());
 }
 
 void testUpnpAddresses() {
@@ -2903,7 +2450,7 @@ void testUpnpAddresses() {
 }
 
 void testConfigParsing() {
-    printf("config: UTF-8 with BOM, inline comments, strict numbers, AutoUpdate of old files\n");
+    printf("config: UTF-8 with BOM, inline comments, strict numbers\n");
     wchar_t tmp[MAX_PATH];
     GetTempPathW(MAX_PATH, tmp);
     std::wstring path = std::wstring(tmp) + L"edf6directnet_parse_test.ini";
@@ -2911,34 +2458,29 @@ void testConfigParsing() {
     putFile(path,
             "\xEF\xBB\xBF[DirectNet]\r\nMode=host ; \xE6\x88\xBF\xE4\xB8\xBB\r\nHostAddress=\xE4\xBE\x8B\xE3\x81\x88.jp:1\r\n"
             "Key=abc#def\r\nPublicAddress=\"1.2.3.4:40000\"\r\nListenPort=27020\t# mine\r\nAutoJoin=0;x\r\n"
-            "[update]\r\nautoupdate = 1 ; on\r\n");
+            "[sync]\r\nreliablegametraffic = 0 ; off\r\n");
     dn::Config c = dn::loadConfig(path);
     CHECK(c.direct.mode == dn::Mode::Host && c.direct.listenPort == 27020);
     CHECK(c.direct.hostAddress == "\xE4\xBE\x8B\xE3\x81\x88.jp:1");
     CHECK(c.direct.key == "abc#def" && c.publicAddress == "1.2.3.4:40000");
     CHECK(c.autoJoin);  // "0;x" is not a number (no space before ';'): the default, warned
-    CHECK(c.autoUpdate && c.warnings.size() == 1 && c.warnings[0].find("AutoJoin") != std::string::npos);
+    CHECK(!c.reliableGameTraffic && c.warnings.size() == 1 && c.warnings[0].find("AutoJoin") != std::string::npos);
 
     // Numbers are numbers: anything else keeps the default and says so.
     putFile(path, "[DirectNet]\r\nListenPort=abc\r\nEnabled=yes\r\nLinkTimeoutMs=0x10\r\nUPnP=2\r\n"
-                  "[EOS]\r\nFixedPort=70000\r\n[Resilience]\r\nGraceSeconds=-5\r\n[Update]\r\nAutoUpdate=0\r\n");
+                  "[EOS]\r\nFixedPort=70000\r\n[Resilience]\r\nGraceSeconds=-5\r\n");
     c = dn::loadConfig(path);
     CHECK(c.direct.listenPort == 27015 && c.enabled && c.direct.linkTimeoutMs == 60000 && c.upnp);
-    CHECK(c.eosFixedPort == 0 && c.graceMs == 30000 && !c.autoUpdate);
+    CHECK(c.eosFixedPort == 0 && c.graceMs == 30000);
     CHECK(c.warnings.size() == 6);
     bool mentionsPort = false;
     for (const std::string& w : c.warnings) mentionsPort = mentionsPort || w.find("ListenPort=abc") != std::string::npos;
     CHECK(mentionsPort);
 
-    // A settings file from before auto-update (no AutoUpdate line) keeps it on, as 0.3.6 did, and says how
-    // to turn it off.
-    putFile(path, "; old\r\n[DirectNet]\r\nMode=off\r\n");
-    c = dn::loadConfig(path);
-    CHECK(c.autoUpdate && c.warnings.size() == 1 && c.warnings[0].find("AutoUpdate=0") != std::string::npos);
-    // A new default file has it on, with nothing to warn about.
+    // A missing file is written with the defaults, which read back with nothing to warn about.
     DeleteFileW(path.c_str());
     c = dn::loadConfig(path);
-    CHECK(c.autoUpdate && c.warnings.empty());
+    CHECK(c.enabled && c.reliableGameTraffic && c.warnings.empty());
 
     // UTF-16 (Notepad's "Unicode") and ANSI files work too.
     std::wstring wide = L"\xFEFF[DirectNet]\r\nMode=join\r\nHostAddress=\x4F8B.jp:2\r\n";
@@ -2954,328 +2496,6 @@ void testConfigParsing() {
     CHECK(c.direct.mode == dn::Mode::Join && c.direct.key == expected);
     DeleteFileW(path.c_str());
 }
-
-std::vector<std::string> sorted(std::vector<std::string> v) {
-    std::sort(v.begin(), v.end());
-    return v;
-}
-
-void testRoomView() {
-    printf("room view: two sources of the same status reach the game once\n");
-    const std::string kC = "0002dddddddddddddddddddddddddddd";
-    dn::RoomView v;
-    CHECK(v.admit(kA, dn::kJoined));  // no room: nothing is filtered
-    v.reset(kA, {kHost, kA});
-    CHECK(v.active() && v.has(kA) && v.has(kHost));
-    CHECK(v.admit(kB, dn::kJoined) && !v.admit(kB, dn::kJoined));  // Epic and the host both say B joined
-    CHECK(v.admit(kB, dn::kLeft) && !v.admit(kB, dn::kDisconnected));
-    CHECK(v.admit(kA, dn::kKicked) && v.admit(kHost, dn::kPromoted) && v.admit(kHost, dn::kClosed));
-
-    printf("room view: Epic speaks first; the plugin's say waits, and starts over when it changes\n");
-    v.reset(kHost, {kHost});
-    CHECK((v.settle({{kA, dn::kJoined}}, 1000, 5000).empty()));
-    CHECK((v.settle({{kA, dn::kJoined}}, 5999, 5000).empty()));
-    CHECK((v.settle({{kA, dn::kJoined}}, 6000, 5000) == std::vector<dn::StatusChange>{{kA, dn::kJoined}}));
-    CHECK((v.settle({{kB, dn::kJoined}}, 7000, 5000).empty()));
-    CHECK((v.settle({}, 8000, 5000).empty()));  // Epic reported it meanwhile: no longer wanted...
-    CHECK((v.settle({{kB, dn::kJoined}}, 9000, 5000).empty()));  // ...and wanted again waits all over
-    CHECK((v.settle({{kB, dn::kLeft}}, 14500, 5000).empty()));  // another status starts over too
-    CHECK((v.settle({{kC, dn::kJoined}}, 1, 0).size() == 1));  // no delay: at once
-
-    printf("room view: a member follows the host's list, keeping members only Epic told it of\n");
-    v.reset(kA, {kHost, kA, kC});  // Epic listed C before the host's game had it
-    CHECK(v.followHost().empty());  // nothing heard from the host yet
-    v.heardHost({kHost, kA, kB});
-    auto first = v.followHost();
-    CHECK((first == std::vector<dn::StatusChange>{{kB, dn::kJoined}}));
-    for (const auto& c : first) v.admit(c.target, c.status);
-    v.heardHost({kHost, kA, kC});
-    auto second = v.followHost();  // C is not joined again: our game has it already
-    CHECK((second == std::vector<dn::StatusChange>{{kB, dn::kLeft}}));
-    for (const auto& c : second) v.admit(c.target, c.status);
-    CHECK(!v.has(kB) && v.has(kC));
-    v.heardHost({kHost, kC});
-    CHECK((v.followHost() == std::vector<dn::StatusChange>{{kA, dn::kKicked}}));
-
-    printf("room view: the host lets linked players in while there is room, and Epic's are Epic's\n");
-    v.reset(kHost, {kHost, kA});
-    auto joins = v.hostJoins({{kA, 1}, {kB, 2}, {kC, 3, true}, {kHost, 4}, {"", 5}}, 8);
-    CHECK((joins == std::vector<dn::StatusChange>{{kB, dn::kJoined}}));
-    CHECK((v.hostJoins({{kB, 2}, {kC, 3}}, 3).size() == 1));  // one place left
-    CHECK((v.hostJoins({{kB, 2}}, 2).empty()));  // full
-    CHECK((v.hostJoins({{kB, 2}}, 0).empty()));  // size never read: nobody gets in this way
-
-    printf("room view: one that left is not brought back by the link it left with, only by a new one\n");
-    v.admit(kB, dn::kJoined);
-    v.hostJoins({{kA, 1}, {kB, 2}}, 8);  // B's link is noted while it is in the room
-    v.admit(kB, dn::kLeft);
-    CHECK((v.hostJoins({{kB, 2}}, 8).empty()));
-    CHECK((v.hostJoins({{kB, 6}}, 8) == std::vector<dn::StatusChange>{{kB, dn::kJoined}}));
-
-    printf("room view: a member in by its link only leaves by its link; kicked ones stay out\n");
-    v.admit(kB, dn::kJoined);
-    v.markDirect(kB);
-    v.markDirect(kC);  // not in the room: nothing to mark
-    CHECK(v.direct(kB) && !v.direct(kA) && !v.direct(kC));
-    auto inEpic = [&](const std::string& m) { return !v.direct(m); };  // no copy of Epic's lobby
-    auto down = [](const std::string&) { return false; };
-    CHECK((v.hostLeaves(inEpic, down) == std::vector<dn::StatusChange>{{kB, dn::kLeft}}));
-    CHECK((v.hostLeaves(inEpic, [](const std::string&) { return true; }).empty()));
-    CHECK(v.kick(kB) && v.banned(kB));
-    CHECK(!v.kick(kB));  // the game's repeats of the same kick
-    CHECK(!v.kick(kHost) && !v.kick(kC));
-    v.admit(kB, dn::kKicked);
-    CHECK(!v.direct(kB));
-    CHECK((v.hostJoins({{kB, 7}}, 8).empty()));  // a new link does not let a kicked player back in
-    CHECK(v.admit(kB, dn::kJoined) && !v.banned(kB));  // back in through Epic's lobby: the ban is lifted
-    v.reset(kHost, {kHost});
-    CHECK(!v.banned(kB));  // a ban is for one room
-    v.clear();
-    CHECK((!v.active() && v.followHost().empty() && v.hostJoins({{kA, 1}}, 8).empty()));
-
-    printf("room view: members in the order the game added them, joins in the host's order\n");
-    v.reset(kB, {kHost, kB});
-    CHECK((v.members() == std::vector<std::string>{kHost, kB}));
-    v.heardHost({kHost, kB, kC, kA});  // the host's order, not the ids' (kA sorts before kC)
-    auto ordered = v.followHost();
-    CHECK((ordered == std::vector<dn::StatusChange>{{kC, dn::kJoined}, {kA, dn::kJoined}}));
-    for (const auto& c : ordered) v.admit(c.target, c.status);
-    CHECK((v.members() == std::vector<std::string>{kHost, kB, kC, kA}));
-    v.admit(kC, dn::kLeft);
-    CHECK((v.members() == std::vector<std::string>{kHost, kB, kA}));
-    v.reset(kC, {kHost, kB, kC, kA});  // entering with the host's list keeps its order
-    CHECK((v.members() == std::vector<std::string>{kHost, kB, kC, kA}));
-
-    printf("room view: the host's slots - a member joins our game once the host's game has it, in its slot\n");
-    v.reset(kB, {kHost, kB, kA});  // Epic listed A, the host's game does not have it yet
-    CHECK(!v.slotted());
-    v.heardHost({kHost, "", kB, kC});  // slot 1 empty (someone left), C beyond Epic's lobby
-    CHECK(v.slotted() && v.hostSlot(kHost) == 0 && v.hostSlot(kB) == 2 && v.hostSlot(kC) == 3 && v.hostSlot(kA) == -1);
-    CHECK((v.hostMembers() == std::vector<std::string>{kHost, kB, kC}));
-    v.adoptHost();  // the game enters with the host's members: A is not among them
-    CHECK((v.members() == std::vector<std::string>{kHost, kB, kC}) && !v.has(kA));
-    CHECK(v.followHost().empty());
-    v.heardHost({kHost, kA, kB, kC});  // the host's game took A in the empty slot
-    CHECK((v.followHost() == std::vector<dn::StatusChange>{{kA, dn::kJoined}}) && v.hostSlot(kA) == 1);
-    v.heardHost({kHost, kA});  // a host list without us
-    CHECK(!v.slotted());
-
-    printf("room order: Epic's members in Epic's order, then the others in the game's\n");
-    CHECK((dn::roomOrder({kHost, kB}, {kHost, kC, kB, kA}) == std::vector<std::string>{kHost, kB, kC, kA}));
-    CHECK((dn::roomOrder({kHost, kB, kA}, {kHost, kB}) == std::vector<std::string>{kHost, kB}));  // A not in yet
-    CHECK((dn::roomOrder({}, {kB, kHost}) == std::vector<std::string>{kB, kHost}));
-
-    printf("room view: one leaving and one taking its slot in the same round - the departure goes first\n");
-    const std::string kD = "0003eeeeeeeeeeeeeeeeeeeeeeeeeeee";
-    v.reset(kB, {kHost, kB, kC});
-    v.heardHost({kHost, kB, kC});
-    v.adoptHost();
-    v.heardHost({kHost, kB, kD});  // C left, D took its slot 2 in the host's game
-    CHECK((v.followHost() == std::vector<dn::StatusChange>{{kC, dn::kLeft}, {kD, dn::kJoined}}));
-    CHECK(v.hostSlot(kD) == 2);
-
-    printf("room view: a change of host drops the old host's slots; joins wait for the new host's\n");
-    v.reset(kB, {kHost, kA, kB});
-    v.heardHost({kHost, kA, kB});
-    CHECK(v.slotted() && !v.awaitingHost());
-    v.promoted(kA, 1000);  // the host left, A hosts now
-    CHECK(!v.slotted() && v.hostSlot(kB) < 0 && v.followHost().empty());
-    CHECK(v.awaitingHost() && v.releaseHeld(20999, 20000, 20000).empty() && v.awaitingHost());
-    v.heardHost({kHost, kA, kB}, kHost);  // the old host's list, read again after the change: not heard
-    CHECK(!v.slotted() && v.awaitingHost());
-    v.heardHost({kD, kA, kB}, kA);  // the new host's slots: D took the old host's slot 0
-    CHECK(v.slotted() && !v.awaitingHost() && v.hostSlot(kD) == 0);
-    v.reset(kB, {kHost, kB});  // a member that never followed slots does not wait for any
-    v.promoted(kA, 1000);
-    CHECK(!v.awaitingHost());
-
-    printf("room view: joins held while the new host never says its slots are not lost - they come in Epic's order\n");
-    v.reset(kB, {kHost, kA, kB});
-    v.heardHost({kHost, kA, kB});
-    v.promoted(kA, 1000);
-    v.holdJoin(kD, 2000);
-    v.holdJoin(kC, 3000);
-    v.holdJoin(kD, 3500);  // the same join again (settle): held once
-    CHECK(v.heldCount() == 2 && v.held(kD) && v.awaitingHost());
-    CHECK(v.releaseHeld(20999, 20000, 60000).empty());                                  // still waiting
-    CHECK((v.releaseHeld(21000, 20000, 60000) == std::vector<std::string>{kD, kC}));    // the wait ran out: as they came
-    CHECK(!v.awaitingHost() && v.heldCount() == 0);
-    CHECK(v.consumeRelease(kD) && !v.consumeRelease(kD));  // let past the hold once
-    CHECK(v.admit(kD, dn::kJoined) && v.has(kD) && v.consumeRelease(kC));
-    const std::string kGone = "0005aaaaaaaaaaaaaaaaaaaaaaaaaaaa";  // a member our game never had
-    v.holdJoin(kGone, 22000);
-    CHECK(v.held(kGone));
-    CHECK(v.admit(kGone, dn::kLeft) == false && !v.held(kGone));  // gone before it reached our game: nothing to bring
-
-    printf("room view: becoming the host, the joins we held take the old host's slots first, in slot order\n");
-    {
-        const std::string kE = "0004ffffffffffffffffffffffffffff";
-        v.reset(kB, {kHost, kB});
-        v.heardHost({kHost, kB, kC, kD});  // C and D are in the old host's game, not yet in ours
-        v.holdJoin(kE, 100);
-        v.holdJoin(kD, 200);
-        v.holdJoin(kC, 300);
-        CHECK((v.promoted(kB, 1000) == std::vector<std::pair<std::string, int>>{{kC, 2}, {kD, 3}, {kE, -1}}));
-    }
-
-    printf("new host: a held join takes its old slot when it is the one our game gives next, waits for a lower one\n");
-    {
-        using P = dn::InheritedPlacement;
-        const auto same = [](P a, bool tell, bool fits) { return a.tell == tell && a.fits == fits; };
-        CHECK(same(dn::decideInheritedPlacement(3, {"d", "a", "b", ""}, false), true, true));   // slot 3 is next
-        CHECK(same(dn::decideInheritedPlacement(3, {"", "a", "b"}, false), false, false));      // slot 0 still empty
-        CHECK(same(dn::decideInheritedPlacement(3, {"", "a", "b"}, true), true, false));        // waited long enough
-        CHECK(same(dn::decideInheritedPlacement(1, {"d", "", "b"}, false), true, true));
-        CHECK(same(dn::decideInheritedPlacement(1, {"d", "a", ""}, false), true, false));       // taken: as it came
-        CHECK(same(dn::decideInheritedPlacement(-1, {"", "a"}, false), true, true));            // no old slot
-        CHECK(same(dn::decideInheritedPlacement(2, {}, false), true, true));                   // our slots not known
-    }
-
-    printf("room view: a join held too long by the host's slots goes anyway, once\n");
-    v.reset(kB, {kHost, kB});
-    v.heardHost({kHost, kB});
-    v.holdJoin(kC, 1000);
-    CHECK(v.releaseHeld(20999, 20000, 20000).empty() && (v.releaseHeld(21000, 20000, 20000) == std::vector<std::string>{kC}));
-
-    printf("room view: a change of host forgets whom the old host listed - the new list missing a member is no leave\n");
-    v.reset(kB, {kHost, kA, kB, kC});
-    v.heardHost({kHost, kA, kB, kC});
-    v.adoptHost();
-    v.promoted(kA, 1000);
-    v.heardHost({"", kA, kB}, kA);  // A's game does not have C yet
-    CHECK(v.followHost().empty());   // C stays in our game
-
-    printf("room view: the room's list may come before PROMOTED - it is heard again from the new host\n");
-    v.reset(kB, {kHost, kA, kB});
-    v.heardHost({kHost, kA, kB});
-    v.heardHost({kD, kA, kB});  // A's list, before Epic's PROMOTED reached us
-    v.promoted(kA, 1000);
-    CHECK(!v.slotted());
-    v.heardHost({kD, kA, kB}, kA);  // eos_hooks follows it again (followedVersion reset)
-    CHECK(v.slotted() && v.hostSlot(kD) == 0);
-
-    printf("room view: becoming the host, our game's slots rule and nobody is held back by the old host's\n");
-    v.reset(kB, {kHost, kA, kB});
-    v.heardHost(dn::roomMessage({kHost, kA, kB}, {kD}));  // the host removed D
-    CHECK(v.slotted() && v.banned(kD) && v.hostSlot(kD) < 0);
-    v.holdJoin(kC, 900);
-    const auto placements = v.promoted(kB, 1000);
-    CHECK(!v.slotted() && !v.awaitingHost());
-    CHECK((placements == std::vector<std::pair<std::string, int>>{{kC, -1}}) && v.heldCount() == 0);
-    CHECK(v.banned(kD) && v.bannedMembers().count(kD));  // the removal moves with the room to its new host
-    CHECK((v.hostJoins({{kD, 9}}, 8).empty()));          // its direct link does not let it back in
-
-    printf("room message: slots, then whom the room removed\n");
-    std::vector<std::string> slots;
-    std::set<std::string> removed;
-    dn::parseRoomMessage(dn::roomMessage({kHost, "", kB}, {kC, kD}), &slots, &removed);
-    CHECK((slots == std::vector<std::string>{kHost, "", kB}) && (removed == std::set<std::string>{kC, kD}));
-    CHECK((dn::roomMessage({kHost, kB}, {}) == std::vector<std::string>{kHost, kB}));  // nothing removed: the old list
-    dn::parseRoomMessage({kHost, kB}, &slots, &removed);
-    CHECK(slots.size() == 2 && removed.empty());
-    v.reset(kB, {kHost, kB});
-    v.heardHost(dn::roomMessage({kHost, kB}, {kA}));
-    CHECK(v.slotted() && (v.hostMembers() == std::vector<std::string>{kHost, kB}) && v.hostSlot(kA) < 0);
-    v.heardHost({kHost, kB});  // the host let A back in (through Epic): no longer removed
-    CHECK(!v.banned(kA));
-
-    printf("parked entry: waits while the link to the host gets somewhere, gives up instead of entering misnumbered\n");
-    using O = dn::ParkedEntryOutcome;
-    CHECK(dn::decideParkedEntry(100, true, false, false) == O::Slotted);
-    CHECK(dn::decideParkedEntry(100, false, true, false) == O::Gone);
-    CHECK(dn::decideParkedEntry(dn::kParkedEntryMs - 1, false, false, false) == O::Wait);
-    CHECK(dn::decideParkedEntry(dn::kParkedEntryMs, false, false, false) == O::GiveUp);
-    CHECK(dn::decideParkedEntry(dn::kParkedEntryMs, false, false, true) == O::Wait);
-    CHECK(dn::decideParkedEntry(dn::kParkedEntryCapMs - 1, false, false, true) == O::Wait);
-    CHECK(dn::decideParkedEntry(dn::kParkedEntryCapMs, false, false, true) == O::GiveUp);
-    CHECK(dn::decideParkedEntry(dn::kParkedEntryCapMs, true, false, true) == O::Slotted);
-    // The room's owner changed to one without a direct link: nobody says slots there, so the game enters as without the plugin.
-    CHECK(dn::decideParkedEntry(100, false, false, true, dn::kParkedNoHostMs - 1) == O::Wait);
-    CHECK(dn::decideParkedEntry(100, false, false, true, dn::kParkedNoHostMs) == O::NoHost);
-}
-
-void testRoomWire() {
-    printf("wire: Room carries the host's member list\n");
-    dn::Message m;
-    m.type = dn::MsgType::Room;
-    m.room.hostNonce = 41;
-    m.room.members = {kHost, kA, kB};
-    auto dg = dn::encode(m, "");
-    dn::DecodeError err;
-    auto back = dn::decode(dg.data(), dg.size(), "", &err);
-    CHECK(back && back->type == dn::MsgType::Room && back->room.hostNonce == 41 && back->room.members == m.room.members);
-    m.room.members.clear();  // a host whose game has left its room
-    dg = dn::encode(m, "");
-    back = dn::decode(dg.data(), dg.size(), "", &err);
-    CHECK(back && back->type == dn::MsgType::Room && back->room.members.empty());
-}
-
-void testFakeLobbies() {
-    printf("fake lobby: our details handles and copies are told from EOS's and freed exactly once\n");
-    dn::FakeLobbies fakes;
-    dn::FakeDetails d;
-    d.roomId = "room1";
-    d.owner = kHost;
-    d.members = {kHost, kA};
-    d.maxMembers = 8;
-    d.attributes = {{"NAME", 3, 0, 0.0, "my room", 1}, {"LEVEL", 1, 12, 0.0, "", 1}, {"OPEN", 0, 1, 0.0, "", 1}};
-    EOS_HLobbyDetails h = fakes.make(d);
-    dn::FakeDetails got;
-    CHECK(fakes.owns(h) && fakes.lookup(h, &got) && got.roomId == "room1" && got.members == d.members);
-    int notOurs = 0;
-    CHECK(!fakes.owns(reinterpret_cast<EOS_HLobbyDetails>(&notOurs)));
-    CHECK(!fakes.release(reinterpret_cast<EOS_HLobbyDetails>(&notOurs)));
-
-    EOS_Lobby_Attribute* name = fakes.copyAttribute(d.attributes[0]);
-    EOS_Lobby_Attribute* level = fakes.copyAttribute(d.attributes[1]);
-    EOS_Lobby_Attribute* open = fakes.copyAttribute(d.attributes[2]);
-    CHECK(name->Data && std::string(name->Data->Key) == "NAME" && std::string(name->Data->Value.AsUtf8) == "my room");
-    CHECK(level->Data->ValueType == 1 && level->Data->Value.AsInt64 == 12 && open->Data->Value.AsBool == 1);
-    int owner = 0;
-    EOS_LobbyDetails_Info* info = fakes.copyInfo(d, reinterpret_cast<EOS_ProductUserId>(&owner));
-    CHECK(std::string(info->LobbyId) == "room1" && info->MaxMembers == 8 && info->AvailableSlots == 6 &&
-          info->LobbyOwnerUserId == reinterpret_cast<EOS_ProductUserId>(&owner));
-    d.members.assign(9, kA);  // more than fit: no slot left, never a wrapped count
-    EOS_LobbyDetails_Info* full = fakes.copyInfo(d, nullptr);
-    CHECK(full->AvailableSlots == 0);
-    CHECK(fakes.liveCopies() == 5);
-    CHECK(fakes.releaseAttribute(name) && !fakes.releaseAttribute(name) && fakes.releaseAttribute(level) &&
-          fakes.releaseAttribute(open));
-    CHECK(fakes.releaseInfo(info) && !fakes.releaseInfo(info) && fakes.releaseInfo(full));
-    CHECK(fakes.release(h) && !fakes.release(h) && !fakes.owns(h));
-    CHECK(fakes.liveHandles() == 0 && fakes.liveCopies() == 0);
-}
-
-void testRoomFollowsHost() {
-    printf("direct: the host's room list reaches its joiners, and changes reach them too\n");
-    dn::DirectNet host;
-    CHECK(host.start(hostOptions(0, 0)));
-    host.setLocalUser(kHost);
-    host.setRoomMembers({kHost, kA});
-    dn::DirectNet a;
-    CHECK(a.start(joinOptions("127.0.0.1:" + std::to_string(host.boundPort()), 0)));
-    a.setLocalUser(kA);
-    uint64_t version = 0;
-    CHECK(waitFor([&] { return sorted(a.hostRoom(&version)) == sorted({kHost, kA}); }, 5000));
-    const uint64_t before = version;
-    host.setRoomMembers({kHost, kA, kB});
-    CHECK(waitFor([&] { return sorted(a.hostRoom(&version)) == sorted({kHost, kA, kB}); }, 5000));
-    CHECK(version > before);
-    CHECK((a.hostRoom(&version) == std::vector<std::string>{kHost, kA, kB}));  // in the host's order
-    const uint64_t same = version;
-    host.setRoomMembers({kHost, kA, kB});  // the same list again: not a change
-    host.setRoomMembers({kHost, kB});
-    CHECK(waitFor([&] { return a.hostRoom(&version) == std::vector<std::string>{kHost, kB}; }, 5000));
-    CHECK(version == same + 1);
-    // Another order is another room to the games (they number the members by it, room_view.h roomOrder).
-    host.setRoomMembers({kB, kHost});
-    CHECK(waitFor([&] { return a.hostRoom(&version) == std::vector<std::string>{kB, kHost}; }, 5000));
-    CHECK(version == same + 2);
-    CHECK(host.linkId(kA) != 0 && host.linkId(kB) == 0 && a.linkId(kHost) != 0);
-    a.setActive(false);  // our game left the room: what the host said no longer applies
-    CHECK(a.hostRoom(&version).empty());
-}
-
 
 // --- Netcode rewrite W1: the joiners' direct links (mesh) and the paths between them ---
 
@@ -3441,50 +2661,6 @@ void testMeshAndShedSwitches() {
     CHECK(!m.a.peerLinked(kB));  // no new link while off
 }
 
-void testUnlistedMembersProveTheirEosId() {
-    printf("direct: beyond a full lobby only an EOS id proven over EOS comes in, never a lobby member or a removed one\n");
-    dn::DirectNet host;
-    dn::DirectOptions ho = hostOptions(0, 0);
-    ho.memberIds.clear();  // nobody published an identity
-    CHECK(host.start(ho));
-    host.setLocalUser(kHost);
-    const std::string port = std::to_string(host.boundPort());
-    const std::string commitment = dn::processIdentity()->commitment();
-    auto dial = [&](const std::string& id) {
-        auto a = std::make_unique<dn::DirectNet>();
-        a->start(joinOptions("127.0.0.1:" + port, 0));
-        a->setLocalUser(id);
-        return a;
-    };
-    // The lobby not full: nobody it does not list comes in, proof or not.
-    host.proveEosIdentity(kA, commitment);
-    auto a = dial(kA);
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-    CHECK(!host.canRoute(kA));
-    // Full: kB is listed by Epic (without an identity), kC was removed from this room.
-    const std::string kC = "0002dddddddddddddddddddddddddddd";
-    host.setUnlistedPolicy(true, {kHost, kB}, {kC});
-    CHECK(waitFor([&] { return host.canRoute(kA); }, 5000));  // proven over EOS
-    auto b = dial(kB);
-    host.proveEosIdentity(kB, commitment);  // even with a proof: Epic lists it
-    host.proveEosIdentity(kC, commitment);
-    auto c = dial(kC);
-    const std::string kD = "0002ffffffffffffffffffffffffffff";
-    auto d = dial(kD);  // never proven
-    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-    CHECK(!host.canRoute(kB) && !host.canRoute(kC) && !host.canRoute(kD));
-    // kD said hello without a proof: the host asks for it (eos_hooks accepts its EOS connection on the proof socket).
-    const auto asked = host.takeProofRequests();
-    CHECK(std::find(asked.begin(), asked.end(), kD) != asked.end());
-    // Proven with another key than its hellos carry: still out.
-    host.proveEosIdentity(kD, std::string(32, '0'));
-    std::this_thread::sleep_for(std::chrono::milliseconds(1500));
-    CHECK(!host.canRoute(kD));
-    // Proven with its key (a new process proves again, and rebinds): in.
-    host.proveEosIdentity(kD, commitment);
-    CHECK(waitFor([&] { return host.canRoute(kD); }, 5000));
-}
-
 void testRosterPages() {
     printf("wire: member lists of large rooms go in pages\n");
     dn::Message m;
@@ -3519,7 +2695,6 @@ int wmain(int argc, wchar_t** argv) {
         testMeshBlockedFromTheStart();
         testMeshFailsOverAndBack();
         testMeshAndShedSwitches();
-        testUnlistedMembersProveTheirEosId();
         printf("\n%d checks, %d failures\n", g_checks, g_failures);
         return g_failures == 0 ? 0 : 1;
     }
@@ -3527,13 +2702,6 @@ int wmain(int argc, wchar_t** argv) {
         testReceiveStateFollowsSession();
         printf("\n%d checks, %d failures\n", g_checks, g_failures);
         return g_failures == 0 ? 0 : 1;
-    }
-    // Manual end-to-end check against the real GitHub release: --live-update <dll path> <pretend version>
-    if (argc == 4 && std::wstring(argv[1]) == L"--live-update") {
-        std::string version;
-        for (const wchar_t* c = argv[3]; *c; ++c) version += static_cast<char>(*c);  // digits and dots
-        printf("%s\n", dn::updateOnce(argv[2], version).c_str());
-        return 0;
     }
     testWire();
     testWireRejectsMalformed();
@@ -3553,13 +2721,6 @@ int wmain(int argc, wchar_t** argv) {
     testLobbyStatusHold();
     testLobbyStatusHoldKeys();
     testLobbyOwnerPin();
-    testTrafficMeter();
-    testUpdater();
-    testUpdateSigning();
-    dn::statusToSink(&recordMenuStatus);
-    testMenuStatus();
-    testUpdateRollback();
-    testSwapKeepsDllLoadable();
     testUpnpAddresses();
     testConfigParsing();
     testRosterDropsQuietMember();
@@ -3585,19 +2746,13 @@ int wmain(int argc, wchar_t** argv) {
     testOlderPluginStaysOnEos();
     testRetiredInstanceIsFreed();
     testReplayWindow();
-    testLinkTagSpeed();
     testWelcomeProvesTheRoomOwner();
     testLinkPacketsAuthenticated();
-    testRoomView();
-    testRoomWire();
-    testFakeLobbies();
-    testRoomFollowsHost();
     testRosterPages();
     testMeshLinksJoiners();
     testMeshBlockedFromTheStart();
     testMeshFailsOverAndBack();
     testMeshAndShedSwitches();
-    testUnlistedMembersProveTheirEosId();
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

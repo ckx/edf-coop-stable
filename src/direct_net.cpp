@@ -340,8 +340,6 @@ void DirectNet::stop() {
         dials_.clear();
         intros_.clear();
         inbox_.clear();
-        resetExtensionLocked();
-        extensionRoom_.clear();
         lastDataMs_.clear();
         closesocket(sock_);
         sock_ = INVALID_SOCKET;
@@ -353,8 +351,6 @@ void DirectNet::stop() {
 void DirectNet::setLocalUser(const std::string& puid) {
     std::lock_guard<std::mutex> lock(mu_);
     if (puid == localPuid_) return;
-    extensionRoom_.clear();
-    resetExtensionLocked();
     if (!localPuid_.empty()) {
         // Signed in as a different EOS user: every link was bound to the old identity.
         logf("DIRECT local user changed %s -> %s, resetting links", shortId(localPuid_).c_str(),
@@ -367,7 +363,6 @@ void DirectNet::setLocalUser(const std::string& puid) {
         dials_.clear();
         intros_.clear();
         inbox_.clear();
-        resetExtensionLocked();
         lastDataMs_.clear();
         newLocalSession();
     }
@@ -377,14 +372,6 @@ void DirectNet::setLocalUser(const std::string& puid) {
 
 void DirectNet::setMemberIdentities(std::map<std::string, std::string> commitments) {
     std::lock_guard<std::mutex> lock(mu_);
-    for (const auto& peer : extensionPeers_) {
-        const auto old = memberIds_.find(peer), next = commitments.find(peer);
-        if ((old == memberIds_.end()) != (next == commitments.end()) ||
-            (old != memberIds_.end() && next != commitments.end() && old->second != next->second)) {
-            resetExtensionLocked();
-            break;
-        }
-    }
     memberIds_ = std::move(commitments);
     for (auto it = seen_.begin(); it != seen_.end();)  // bounded by the room, not by what anyone claims
         it = memberIds_.count(it->first) ? std::next(it) : seen_.erase(it);
@@ -393,7 +380,6 @@ void DirectNet::setMemberIdentities(std::map<std::string, std::string> commitmen
 void DirectNet::setRoomOwner(const std::string& puid, const std::string& commitment) {
     std::lock_guard<std::mutex> lock(mu_);
     if (roomOwner_ != puid || roomOwnerId_ != commitment) {
-        resetExtensionLocked();
         if (hostLink_) dropHostLink("room owner/identity changed; discard its old admission and authenticate again");
         hostRoom_.clear();
         hostRoomFrom_.clear();
@@ -404,7 +390,6 @@ void DirectNet::setRoomOwner(const std::string& puid, const std::string& commitm
 }
 
 void DirectNet::newLocalSession() {
-    resetExtensionLocked();
     localNonce_ = randomNonce();
     localSession_ = identity_ ? identity_->nextSession() : 0;
     cookie_.reset();
@@ -740,8 +725,6 @@ void DirectNet::setActive(bool active) {
     roomPages_ = {};
     // Unread game packets and their diagnostics belong to the room just left, not the next one.
     inbox_.clear();
-    resetExtensionLocked();
-    extensionRoom_.clear();
     lastDataMs_.clear();
     // The room's member lists belong to the room: the next one starts with nothing said.
     roomMembers_.clear();
@@ -940,7 +923,6 @@ void DirectNet::deliverLocal(DataMsg msg) {
 }
 
 void DirectNet::routeData(DataMsg msg) {
-    if (extensionPacket(msg)) return;
     if (msg.dst == localPuid_) {
         deliverLocal(std::move(msg));
         return;
@@ -1949,8 +1931,6 @@ bool DirectNet::onPeerDatagram(const Received& r, const sockaddr_storage& from, 
         return true;
     }
     if (m.type == MsgType::Data && (m.data.src != puid || m.data.dst != localPuid_)) return true;
-    // Extensions have one ordered path, through the authenticated room host.
-    if (m.type == MsgType::Data && (m.data.socketName == kExtensionSocket || m.data.channel == kExtensionChannel)) return true;
     if (!isLinkScoped(m.type) || m.type == MsgType::Roster || m.type == MsgType::Room || m.type == MsgType::PeerQuery ||
         m.type == MsgType::PeerInfo)
         return true;  // the host's business, not a joiner's

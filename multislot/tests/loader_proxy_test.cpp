@@ -6,11 +6,25 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <thread>
 #include <vector>
-#include "../src/loaderproxy.h"
+
+namespace multislot {
+// What a winmm export of the loader does: the official v1.0.10 reloads one shared dispatch variable (the race), the
+// fixed one jumps through a register loaded from its own slot.
+const char* LoaderProxyStyle(const void* function) {
+    if (!function) return "unavailable";
+    const auto p = static_cast<const std::uint8_t*>(function);
+    if (!std::memcmp(p, "\x48\x8b\x05", 3)) {
+        if (p[7] == 0xff && p[8] == 0xe0) return "direct-register";
+        if (!std::memcmp(p + 7, "\x48\x89\x05", 3) && p[14] == 0xe9) return "shared-dispatch (legacy)";
+    }
+    return "other";
+}
+}  // namespace multislot
 
 namespace {
 int failures = 0;
@@ -36,7 +50,7 @@ struct Image {
     std::vector<DWORD> slots;
     ~Image() { if (base) VirtualFree(base, 0, MEM_RELEASE); }
     bool Load(const wchar_t* path) {
-        std::ifstream input(path, std::ios::binary);
+        std::ifstream input(std::filesystem::path(path), std::ios::binary);
         std::vector<char> file{std::istreambuf_iterator<char>(input), {}};
         if (file.size() < sizeof(IMAGE_DOS_HEADER)) return false;
         const auto dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(file.data());

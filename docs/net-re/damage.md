@@ -2,7 +2,7 @@
 
 EDF.dll TimeDateStamp `0x678CCB46`，地址都是 RVA。纯静态分析（capstone，all-forces 的 `tools/edfre.py`），没有起游戏，没有两机实测。
 置信度：**H** = 指令里直接读到；**M** = 有代码证据的推断；**L** = 推测。
-相关：`docs/netcode-rewrite-plan.md`（W3），all-forces `docs/bullet-pass-re.md`、`decoy-blast-re.md`、`swarm-team-re.md`、`online-re.md` §10。
+W3 = 开枪方判定（`multislot/src/hitauth*`），W1 = 联机协议版本门（`multislot/src/netfeature*`）。相关：all-forces `docs/bullet-pass-re.md`、`decoy-blast-re.md`、`swarm-team-re.md`、`online-re.md` §10。
 
 一句话：**原版对敌人、NPC、物件已经是开枪方判定，对玩家和载具是被打方判定**；W3 把后者也改成开枪方判定，并把所有「打到别人
 机器上的对象」的伤害作为事件送到对象的拥有者那里结算。
@@ -142,7 +142,7 @@ GDI 的 `+0x20 种类、+0x24 队伍、+0x30 命中点、+0x40 冲量、+0x50 �
 - 去重：每组一个序号窗口（最新序号往前 64），同一序号只收一次，超出窗口的旧序号拒绝；序号回绕按有符号差处理；30 秒没消息的组重新开始。
 - 射速上限：每组令牌桶，750 个/秒，桶 1500（贯通机枪扫一群蚂蚁、大爆炸一次几十个目标）。被速率拒绝的事件不记为已见。
 - 「活着」= `+0x2E8` 为 0。依据（H）：`0x547C30` 在 HP ≤ 0 时置它为 1（`0x548419..0x548429`，`+0x2E9` = 这一下刚死），置位后不再改 HP
-  （`0x548156`）；每帧更新对它不发目标消息（`0x54C183`，`networld.h` 的 `kObjectNoTargetSync` 读的就是这个字节，是死亡的结果）。
+  （`0x548156`）；每帧更新对它不发目标消息（`0x54C183`，是死亡的结果）。
 
 ### 6.5 拥有者结算
 

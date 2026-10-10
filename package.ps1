@@ -1,12 +1,11 @@
 # Builds the release package: release\EDF6Coop-<version>\ and its .zip (+ .sha256).
 #   package.ps1      (after build.ps1)
-# One package for every room size: the host picks the size in the game (F2).
 # The layout mirrors the game folder: dropping the contents next to EDF6.exe is the whole install, and
 # INSTALL.bat does the same for players who would rather not look for the folder (it finds it via Steam).
 #
 # No INI files are shipped, so an update never overwrites anyone's settings:
 # - ModLoader.ini: EDFModLoader turns every option on when it is missing; a player who has one keeps it.
-# - EDF6Coop.ini: the plugin writes it on first start, carrying over EDF6DirectNet.ini / EDF6MultiSlot.ini.
+# - EDF6Coop.ini: the plugin writes it on first start.
 # winmm.dll is EDFModLoader with the shared-dispatch race fixed (packaging\LOADER_FIX_JA.md); bundling only
 # the plugin DLL leaves the loader defect active.
 # Reads only; writes nothing outside release\. Keep this script ASCII: PowerShell 5.1 reads it as ANSI.
@@ -14,7 +13,7 @@ $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
 $multislot = Join-Path $root 'multislot'
 
-# One version: project(EDF6Coop VERSION x.y.z) in multislot\CMakeLists.txt. The plugin, its update marker
+# One version: project(EDF6Coop VERSION x.y.z) in multislot\CMakeLists.txt. The plugin, its version marker
 # and its log banner all take it from there.
 $cmake = Get-Content -LiteralPath (Join-Path $multislot 'CMakeLists.txt') -Raw
 if ($cmake -notmatch 'project\(EDF6Coop VERSION (\d+\.\d+\.\d+)[\s)]') { throw 'project(EDF6Coop VERSION x.y.z) not found in multislot\CMakeLists.txt' }
@@ -33,7 +32,6 @@ $sources = [ordered]@{
     'EDFModLoader_LICENSE.txt'        = Join-Path $multislot 'third_party\EDFModLoader\LICENSE.txt'
     'loader-fix.json'                 = Join-Path $multislot 'build\loader-fix.json'
     'LOADER_FIX_JA.md'                = Join-Path $multislot 'packaging\LOADER_FIX_JA.md'
-    'HANDSHAKE_RECOVERY_JA.md'        = Join-Path $multislot 'packaging\HANDSHAKE_RECOVERY_JA.md'
     'INSTALL.bat'                     = Join-Path $root 'dist\INSTALL.bat'
     'UNINSTALL.bat'                   = Join-Path $root 'dist\UNINSTALL.bat'
     'install.ps1'                     = Join-Path $root 'dist\install.ps1'
@@ -52,16 +50,9 @@ $loaderHash = (Get-FileHash -LiteralPath $sources['winmm.dll'] -Algorithm SHA256
 if ($loaderHash -ne 'BE94E1FAC0CA12C41B6924E2EB168851641C999CE951D2A5A9FAEA5161B0F9A3') {
     throw "winmm.dll is not the verified race-fixed EDFModLoader ($loaderHash); build.ps1 makes it with tools\fix_winmm_proxy.py"
 }
-# The DLL must be this version: the auto-updater of every installed copy trusts its marker - 2.3.0's own, and
-# the six of the 2.2 room-size builds, whose updaters take this DLL under their own asset names.
+# The DLL must be this version.
 $pluginText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($sources['Mods\Plugins\EDF6Coop.dll']))
-if ($pluginText.Contains('MULTISLOT CI PLACEHOLDER')) {
-    throw 'EDF6Coop.dll is a CI build with placeholder menu and HUD assets; build with assets\LYT_MAINFRAME.SGO and assets\ONLINEHUDTEXTURE.RAB (build.ps1 without -CI) to package'
-}
-$markers = @("EDF6COOP_VERSION=$version") + (8, 10, 12, 16, 24, 32 | ForEach-Object { "EDF6COOP_${_}P_VERSION=$version" })
-foreach ($marker in $markers) {
-    if ($pluginText.IndexOf("$marker`0") -lt 0) { throw "EDF6Coop.dll does not carry $marker; rebuild with build.ps1" }
-}
+if ($pluginText.IndexOf("EDF6COOP_VERSION=$version`0") -lt 0) { throw "EDF6Coop.dll is not version $version; rebuild with build.ps1" }
 # A DLL older than its sources would ship something else than the tag says.
 $newestSource = Get-ChildItem (Join-Path $root 'src'), (Join-Path $multislot 'src') -File |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1

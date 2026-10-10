@@ -1,11 +1,10 @@
 #pragma once
 #include <array>
-
-#include "patches.h"
+#include <cstddef>
 
 namespace multislot {
 
-// One track for every supported player. An inactive object yields its slot first when a new player arrives.
+// One track for every player of a room of four. An inactive object yields its slot first when a new player arrives.
 template <typename Track>
 class PlayerTracks {
 public:
@@ -29,7 +28,8 @@ private:
         double touched = -1.0;
         Track track{};
     };
-    std::array<Entry, kMaxPlayers> entries_{};
+    static constexpr std::size_t kPlayers = 4;
+    std::array<Entry, kPlayers> entries_{};
 };
 
 }  // namespace multislot

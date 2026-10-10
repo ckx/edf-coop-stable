@@ -1,4 +1,4 @@
-#include "syncmarker.h"
+#include "lobbytexts.h"
 
 #include <algorithm>
 #include <cstring>
@@ -158,10 +158,9 @@ struct Local {
     bool dirty = false;  // our marker is not (known to be) published in this lobby
     std::int64_t seq = 0;
     // Everything we do in the lobby - observing, publishing, publishing again after a failure - happens on one beat,
-    // once a second and never on the frame we enter: EDF6DirectNet publishes its own marker on that frame.
+    // once a second and never on the frame we enter: the transport part publishes its own marker on that frame.
     ULONGLONG nextBeat = 0;
     bool failureLogged = false;  // in this lobby
-    bool splitReader = false;  // kSplitSyncKey is ours to publish
     bool owner = false;        // we own this lobby (the beat read it): lobbyTexts are ours to publish
     std::map<std::string, std::string, std::less<>> lobbyTexts;  // PublishLobbyText
     std::vector<std::string> lobbyWatched;                         // WatchLobbyTexts
@@ -169,11 +168,12 @@ struct Local {
     std::vector<std::string> watched;                       // WatchMemberTexts: every watcher's keys
     // The watched texts each member of this lobby has shown. Our copy of the lobby drops a member's attributes when
     // that member's game updates the lobby (EOS logs "Lobby backend has attributes missing from client"): a text
-    // once seen stays until its member publishes another value or leaves, like the split marker.
+    // once seen stays until its member publishes another value or leaves.
     std::map<std::string, std::map<std::string, std::string, std::less<>>, std::less<>> seen;
     // Every watcher and tick listener (host data, the netcode version gate): each registration adds one.
     std::vector<LobbyObserver> observers;
     std::vector<std::function<void(void*)>> tickListeners;
+    std::vector<std::string> members;  // everyone listed since we entered (a newcomer gets our texts again)
 } local;
 
 // A pending CreateLobby / JoinLobby of the game; EOS runs its completion until the result is final.
@@ -184,25 +184,17 @@ struct LobbyCall {
     const void* user;
 };
 
-// The marker did not get in: it is still owed, and goes out again on the next beat. Caller holds local.lock.
+// Our texts did not get in: they are still owed, and go out again on the next beat. Caller holds local.lock.
 void PublishFailedLocked(EosResult result) {
     local.dirty = true;
     if (local.failureLogged) return;
     local.failureLogged = true;
-    Log("MISSION sync: publishing our split marker failed (EOS result %d); trying again every second while we are "
-        "in this room", result);
+    Log("LOBBY publishing our netcode attributes failed (EOS result %d); trying again every second while we are in "
+        "this room", result);
 }
 
 void Published(const LobbyIdCallbackInfo* info) {
-    if (info->ResultCode == kEosSuccess) {
-        AcquireSRWLockShared(&local.lock);
-        const bool split = local.splitReader;
-        ReleaseSRWLockShared(&local.lock);
-        if (split)
-            Log("MISSION sync: published that this machine reads a split start message (lobby member attribute %s)",
-                kSplitSyncKey);
-        return;
-    }
+    if (info->ResultCode == kEosSuccess) return;
     if (api.isComplete && !api.isComplete(info->ResultCode)) return;  // EOS retries by itself
     AcquireSRWLockExclusive(&local.lock);
     if (info->LobbyId && local.lobbyId == info->LobbyId) PublishFailedLocked(info->ResultCode);
@@ -219,13 +211,6 @@ void PublishLocked() {
         return;
     }
     std::vector<AttributeData> attributes;
-    if (local.splitReader) {
-        AttributeData& marker = attributes.emplace_back();
-        marker.ApiVersion = 1;
-        marker.Key = kSplitSyncKey;
-        marker.Value.AsInt64 = kSplitSyncFormat;
-        marker.ValueType = kInt64;
-    }
     for (const auto& [key, value] : local.texts) {
         AttributeData& text = attributes.emplace_back();
         text.ApiVersion = 1;
@@ -235,7 +220,7 @@ void PublishLocked() {
     }
     AttributeData& seq = attributes.emplace_back();
     seq.ApiVersion = 1;
-    seq.Key = kSplitSyncSeqKey;
+    seq.Key = kSeqKey;
     seq.Value.AsInt64 = ++local.seq;
     seq.ValueType = kInt64;
     for (const AttributeData& attribute : attributes) {
@@ -266,16 +251,6 @@ void PublishLocked() {
     api.releaseModification(modification);
 }
 
-bool ReadMarker(void* details, const void* member) {
-    const CopyMemberAttributeOptions options{1, member, kSplitSyncKey};
-    Attribute* attribute = nullptr;
-    const bool marked = api.copyMemberAttribute(details, &options, &attribute) == kEosSuccess && attribute &&
-                        attribute->Data && attribute->Data->ValueType == kInt64 &&
-                        attribute->Data->Value.AsInt64 >= kSplitSyncFormat;
-    if (attribute) api.releaseAttribute(attribute);
-    return marked;
-}
-
 // A text attribute of `member`, or nothing.
 void ReadText(void* details, const void* member, const std::string& key,
               std::map<std::string, std::string, std::less<>>& texts) {
@@ -292,9 +267,9 @@ std::string UserText(const void* user) {
     return user ? std::string(ProductUserIdText(user, id, sizeof(id))) : std::string();
 }
 
-// The members our copy of the lobby lists, and the view of it the observer gets. False when there is no copy
-// (then nothing is learnt). Caller holds local.lock.
-bool ReadMembersLocked(std::vector<LobbyMember>& members, LobbyView& view) {
+// The view of our copy of the lobby the observers get. False when there is no copy (then nothing is learnt). Caller
+// holds local.lock.
+bool ReadMembersLocked(LobbyView& view) {
     const CopyDetailsOptions options{1, local.lobbyId.c_str(), local.user};
     void* details = nullptr;
     if (api.copyDetails(local.lobby, &options, &details) != kEosSuccess || !details) return false;
@@ -318,7 +293,6 @@ bool ReadMembersLocked(std::vector<LobbyMember>& members, LobbyView& view) {
         const void* member = api.memberByIndex(details, &memberOptions);
         const std::string id = UserText(member);
         if (id.empty()) continue;
-        members.push_back({id, ReadMarker(details, member)});
         LobbyView::Member& seen = view.members.emplace_back();
         seen.id = id;
         for (const std::string& key : local.watched) ReadText(details, member, key, seen.texts);
@@ -335,15 +309,17 @@ bool ReadMembersLocked(std::vector<LobbyMember>& members, LobbyView& view) {
 // One beat: read who is in the lobby, then publish our attributes if they are owed. True when `view` was read.
 // Caller holds local.lock.
 bool BeatLocked(LobbyView& view) {
-    std::vector<LobbyMember> members;
-    const bool read = ReadMembersLocked(members, view);
-    if (read) {
-        const bool owner = !view.owner.empty() && view.owner == view.self;
-        if (owner && !local.owner && !local.lobbyTexts.empty()) local.dirty = true;  // ours to publish now
-        local.owner = owner;
-    }
-    if (read && SplitSync().Observe(members)) local.dirty = true;  // a newcomer needs them again
-    return read;
+    if (!ReadMembersLocked(view)) return false;
+    const bool owner = !view.owner.empty() && view.owner == view.self;
+    if (owner && !local.owner && !local.lobbyTexts.empty()) local.dirty = true;  // ours to publish now
+    local.owner = owner;
+    // A member does not get attributes set before it joined until they change: a newcomer needs ours again.
+    for (const LobbyView::Member& member : view.members)
+        if (!Contains(local.members, member.id)) {
+            local.members.push_back(member.id);
+            local.dirty = true;
+        }
+    return true;
 }
 
 void TickHook(void* platform) {
@@ -376,11 +352,11 @@ void Entered(const LobbyCall& call, const char* lobbyId) {
     local.user = call.user;
     local.lobbyId = lobbyId;
     local.seen.clear();
+    local.members.clear();
     local.dirty = true;
     local.nextBeat = GetTickCount64() + kObserveIntervalMs;
     local.failureLogged = false;
     ReleaseSRWLockExclusive(&local.lock);
-    SplitSync().Entered(lobbyId);
 }
 
 void LobbyEntered(const LobbyIdCallbackInfo* info) {
@@ -408,11 +384,10 @@ void LeftLobby() {
     AcquireSRWLockExclusive(&local.lock);
     local.lobbyId.clear();
     local.seen.clear();
+    local.members.clear();
     local.dirty = false;
     const std::vector<LobbyObserver> observers = local.observers;
     ReleaseSRWLockExclusive(&local.lock);
-    SplitSync().Left();
-    ClearRecords();
     for (const LobbyObserver& observer : observers) observer(LobbyView{});
 }
 
@@ -429,7 +404,7 @@ void DestroyLobbyHook(void* lobby, const void* options, void* clientData, void* 
 template <typename T>
 bool Resolve(HMODULE eos, const char* name, T& out) {
     out = reinterpret_cast<T>(reinterpret_cast<void*>(GetProcAddress(eos, name)));
-    if (!out) Log("MISSION sync: EOS export %s not found", name);
+    if (!out) Log("LOBBY EOS export %s not found; the netcode version gate is off", name);
     return out != nullptr;
 }
 
@@ -437,94 +412,11 @@ template <typename T>
 bool Redirect(HMODULE game, ImportRedirect redirect, const char* name, T replacement, T& original) {
     const bool ok = redirect(game, "EOSSDK-Win64-Shipping.dll", name, reinterpret_cast<void*>(replacement),
                              reinterpret_cast<void**>(&original));
-    if (!ok) Log("MISSION sync: EDF.dll import %s could not be redirected", name);
+    if (!ok) Log("LOBBY EDF.dll import %s could not be redirected; the netcode version gate is off", name);
     return ok;
 }
 
 }  // namespace
-
-void SplitSyncRoom::Entered(const std::string& lobbyId) {
-    AcquireSRWLockExclusive(&lock_);
-    lobby_ = lobbyId;
-    members_.clear();
-    marked_.clear();
-    refused_.clear();
-    ReleaseSRWLockExclusive(&lock_);
-}
-
-void SplitSyncRoom::Left() { Entered(std::string()); }
-
-bool SplitSyncRoom::Observe(const std::vector<LobbyMember>& members) {
-    AcquireSRWLockExclusive(&lock_);
-    bool newcomer = false;
-    std::vector<std::string> late;  // refused a split message before their marker showed up
-    for (const LobbyMember& member : lobby_.empty() ? std::vector<LobbyMember>() : members) {
-        if (!Contains(members_, member.id)) {
-            members_.push_back(member.id);
-            newcomer = true;
-        }
-        if (!member.marked || Contains(marked_, member.id)) continue;
-        marked_.push_back(member.id);
-        if (Contains(refused_, member.id)) late.push_back(member.id);
-    }
-    ReleaseSRWLockExclusive(&lock_);
-    for (const std::string& id : late)
-        Log("MISSION sync: EOS %s now shows that it reads a split start message", id.c_str());
-    return newcomer;
-}
-
-bool SplitSyncRoom::InLobby() const {
-    AcquireSRWLockShared(&lock_);
-    const bool in = !lobby_.empty();
-    ReleaseSRWLockShared(&lock_);
-    return in;
-}
-
-std::string SplitSyncRoom::LobbyId() const {
-    AcquireSRWLockShared(&lock_);
-    std::string id = lobby_;
-    ReleaseSRWLockShared(&lock_);
-    return id;
-}
-
-bool SplitSyncRoom::Marked(const std::string& id) const {
-    AcquireSRWLockShared(&lock_);
-    const bool marked = Contains(marked_, id);
-    ReleaseSRWLockShared(&lock_);
-    return marked;
-}
-
-std::vector<std::string> SplitSyncRoom::Unmarked() const {
-    AcquireSRWLockShared(&lock_);
-    std::vector<std::string> unmarked;
-    for (const std::string& id : members_)
-        if (!Contains(marked_, id)) unmarked.push_back(id);
-    ReleaseSRWLockShared(&lock_);
-    return unmarked;
-}
-
-SplitSyncRoom& SplitSync() {
-    static SplitSyncRoom room;
-    return room;
-}
-
-bool PeerReadsSplitSync(const void* remote) {
-    char id[40]{};
-    if (!remote || !*ProductUserIdText(remote, id, sizeof(id))) return false;
-    SplitSyncRoom& room = SplitSync();
-    AcquireSRWLockExclusive(&room.lock_);
-    const bool marked = Contains(room.marked_, id);
-    const bool first = !marked && !Contains(room.refused_, id);
-    if (first) room.refused_.push_back(id);
-    ReleaseSRWLockExclusive(&room.lock_);
-    if (first)
-        Log("MISSION sync: no marker seen yet from EOS %s that it reads a split start message; its loadout records go "
-            "to it all the same. If it joined in the last few seconds its marker may still be on its way (a line "
-            "follows when it shows up); otherwise it runs no MultiSlot 1.5.15 or later, cannot read this start "
-            "message and starts the mission without the other players' loadouts",
-            id);
-    return marked;
-}
 
 void WatchMemberTexts(std::vector<std::string> keys, LobbyObserver observer) {
     AcquireSRWLockExclusive(&local.lock);
@@ -537,7 +429,7 @@ void WatchMemberTexts(std::vector<std::string> keys, LobbyObserver observer) {
 
 void PublishMemberText(const std::string& key, const std::string& value) {
     if (value.empty()) {
-        Log("MISSION sync: not publishing an empty %s (EOS would refuse our whole lobby member update)", key.c_str());
+        Log("LOBBY not publishing an empty %s (EOS would refuse our whole lobby member update)", key.c_str());
         return;
     }
     const std::string text = value.substr(0, kMaxTextLength);
@@ -594,12 +486,9 @@ bool KickLobbyMember(const std::string& id) {
     return true;
 }
 
-bool InstallSyncMarker(HMODULE game, ImportRedirect redirect, bool splitReader) {
+bool InstallLobbyTexts(HMODULE game, ImportRedirect redirect) {
     const HMODULE eos = GetModuleHandleA("EOSSDK-Win64-Shipping.dll");
-    if (!eos) {
-        Log("MISSION sync: EOSSDK-Win64-Shipping.dll is not loaded");
-        return false;
-    }
+    if (!eos) return false;
     bool ok = Resolve(eos, "EOS_Lobby_UpdateLobbyModification", api.updateModification);
     ok &= Resolve(eos, "EOS_LobbyModification_AddMemberAttribute", api.addMemberAttribute);
     ok &= Resolve(eos, "EOS_LobbyModification_Release", api.releaseModification);
@@ -621,9 +510,6 @@ bool InstallSyncMarker(HMODULE game, ImportRedirect redirect, bool splitReader) 
         reinterpret_cast<void*>(GetProcAddress(eos, "EOS_LobbyDetails_CopyAttributeByKey")));
     api.idFromString =
         reinterpret_cast<IdFromStringFn>(reinterpret_cast<void*>(GetProcAddress(eos, "EOS_ProductUserId_FromString")));
-    AcquireSRWLockExclusive(&local.lock);
-    local.splitReader = splitReader;
-    ReleaseSRWLockExclusive(&local.lock);
     // Leaving first, entering last: a lobby entered can always be left again. The tick goes in before the lobby
     // completions, which EOS runs inside it.
     ok = Redirect(game, redirect, "EOS_Lobby_LeaveLobby", &LeaveLobbyHook, api.leaveLobby);

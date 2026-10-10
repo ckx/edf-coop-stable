@@ -1,112 +1,57 @@
-EDF6Coop 2.5.0 - 地球防衛軍6 のオンライン協力プレイを大人数・安定にするプラグイン
+EDF6Coop 2.5.0 - 地球防衛軍6 のオンライン協力プレイを安定させるプラグイン
 プロジェクトページ：https://github.com/hajisensai/edf-coop-stable
 English: README_EDF6Coop.txt / 中文: README_EDF6Coop_zh.txt
 問題があれば Issue を作り、Mods\Plugins\EDF6Coop.log を添付してください。
 
-EDF6Coop は EDFModLoader のプラグイン1つ（Mods\Plugins\EDF6Coop.dll）です。これまでの EDF6DirectNet と
-EDF6MultiSlot がしていたことを、DLL 1つ・ログ1つ・設定ファイル1つにまとめました：
-- 5人以上の部屋（Player MOD、8～1024人をホストが選ぶ）と、その人数でのミッション
-- プレイヤー同士の直接接続（Epic のサービスが不安定でも部屋が崩れない）
-- 失われたパケットの再送と、短い回線切れで落とされないこと
-Player MOD を OFF にして直接接続も設定しなければ、ゲーム本来と同じように遊べ、MOD を入れていない人とも遊べます。
-
-■ EDF6DirectNet / EDF6MultiSlot からの更新
-手作業は不要です。INSTALL.bat（または初回起動）が Mods\Plugins の EDF6DirectNet.dll と EDF6MultiSlot.dll を
-.disabled に改名し、ローダーが読み込まないようにします。古い設定ファイルはそのまま残り、EDF6Coop は初回起動時に
-Mods\Plugins\EDF6Coop.ini を作って、これまでの設定値を引き継ぎます。なくなった設定はログに名前が出ます
-（"is no longer a setting"）。
-元に戻すとき：EDF6Coop.dll を消し、古い DLL の名前の ".disabled" を外してください。
-
-■ 部屋の人数：ホストがゲーム内で選ぶ
-パッケージは全人数共通です。F2 / 左スティック押し込みで OFF、8、10、12、16、24、32、48、64、128、256、512、1024。
-INI の RoomSize は 2..1024 も指定でき、0 は通常の4人モードです。
-MOD 部屋の全員を 2.5.0 に更新してください。新しいスロット配置と通信方式は 2.4.x の拡張部屋と互換ではありません。
-1024 は実装上限であり、その人数での実プレイを保証する数値ではありません。大人数向け経路は自動・ネイティブコード
-テスト済みですが、該当人数での実戦確認は未実施です。16人超の部屋にはゲーム内音声がなく、通信量と CPU 負荷も増えます。
+EDF6Coop は EDFModLoader のプラグイン1つ（Mods\Plugins\EDF6Coop.dll）で、オンラインのミッションが同期ズレを
+起こしたり、回線切れで終わったりしないようにします：
+- 失われたゲームのパケットを再送します（同期ズレ対策）。
+- 短い回線切れはゲームに知らせず、その間に EOS が裏で再接続します（最大 30 秒）。
+- 後から入った人との P2P ハンドシェイクが完了しなくても、部屋に残ります。
+- 任意で、Epic のリレーが遅いときや NAT 越えに失敗するときにホストへ直接接続します。
+- 部屋の全員がこの版のとき：撃った側が命中を判定し、プレイヤーの位置に速度が付きます。
+ゲーム本来の最大4人の部屋で遊びます。2.5.0 までの大きな部屋（Player MOD）、部屋画面、武器ページ、部屋の
+武器ファイル、アーマーコピー、自動更新はなくなりました。必要な人は 2.5.0 のままにしてください。部屋の全員が
+同じ版を使ってください。ホストはネットコードのプロトコルが違うプレイヤーを入れません
+（[Netcode] RejectMismatched=1）。
 
 ■ 導入・削除
-ZIP を全部展開して INSTALL.bat をダブルクリックし、いつも通り Steam から起動します。（ZIP の中身を
+Windows：ZIP を全部展開して INSTALL.bat をダブルクリックし、いつも通り Steam から起動します。（ZIP の中身を
 EDF6.exe のあるゲームフォルダにそのままドロップしても同じです。中身の配置はゲームフォルダと同じです。）
+Linux（Steam Proton）：ZIP の中身を手でゲームフォルダにコピーし、Steam でゲームの起動オプション（プロパティ）を
+    WINEDLLOVERRIDES="winmm=n,b" %command%
+にします。これがないと Wine が自前の winmm.dll を読み込み、EDFModLoader が動きません。
 EDFModLoader（winmm.dll）がなければ同梱のものを入れます：公式 v1.0.10 にマルチスレッドの不具合修正を
 加えたものです（LOADER_FIX_JA.md）。既存の winmm.dll は上書きしません。ただし公式 v1.0.10 とバイト単位で
 同じものだけは修正版に置き換え、元のファイルを winmm.dll.bak-official に保存します。
-削除：まず EDF6Coop.ini の [MultiSlot] を Enabled=0 にして一度ゲームを起動し（MOD が書いた
-Mods\UI\LYT_MAINFRAME.SGO と Mods\HUD\ONLINEHUDTEXTURE.RAB が消えます）、次に UNINSTALL.bat をダブルクリックします（管理者として実行すると
-ファイアウォールの規則も消します）。EDF6Coop のファイル・設定・ログ・自動更新の残り・UPnP の設定を消します。
-EDFModLoader、ほかの MOD、古い EDF6DirectNet / EDF6MultiSlot の設定ファイルはそのままです。
-
-■ 大きな部屋（Player MOD）
-・部屋の外のメニューで F2 か左スティック押し込みで部屋の人数を OFF → 8 → 10 → 12 → 16 → 24 → 32 → 48 → 64 → 128 → 256 → 512 → 1024 → OFF の順に
-  切り替えます（メニュー左下に「F2/LS 12Player MOD :ON」のように表示。EDF6Coop.ini の [MultiSlot] RoomSize に保存）。
-  OFF（最初の設定）：誰でも入れる、いつもの4人部屋を作ります。
-  ON：選んだ人数の部屋を作ります。EDF6Coop 2.5.0を入れた人にしか見えません。
-  部屋検索には、設定にかかわらず、いつもの部屋と全人数の大きな部屋が両方出ます。
-  部屋の人数は作ったときのまま変わりません。部屋の中ではメニューにその部屋の人数が出ます。
-・部屋の中で F3 / Tab / 右スティック押し込みで隊員欄のページを切り替えます（1ページ4人）。
-・部屋の中で F4 / 左スティック押し込みで「copy armor」を ON/OFF。ミッションの中だけ、自分のアーマーを
-  部屋の他の人の中で一番低い人（同じ兵科を優先）まで上げます。初心者向けで、セーブデータには書きません。
-・5人以上のミッション：増えた人の装備・出現位置・アイテムに対応しています。敵の数は 4人を超える1人ごとに
-  0.2倍ずつ増えます（5人 1.2倍、8人 1.8倍、12人 2.6倍、16人 3.4倍、24人 5.0倍、32人 6.6倍。
-  位置が決まった物と大型ボスは増えません）。[Mission] ExtraEnemies=0 で元の数
-  （部屋の全員が同じ設定にしてください）。
-・ミッションでは全員が HUD 上で自分の色を持ちます：状態ランプ、チャットの吹き出し、レーダーのマーカー。
-  1～4人目はゲーム本来の黄・緑・青・赤、5～8人目は橙・ピンク・紫・水色で、32色のパレットを人数に応じて繰り返します。このために
-  Mods\HUD\ONLINEHUDTEXTURE.RAB（ゲームの HUD テクスチャに新しいランプと吹き出しを足したもの）を書きます。
-  そこに別の MOD のファイルがあるときは触らず、5人目以降は 1～4人目の色を使います。
-・武器ページ：改造武器のファイルを Mods\Variants\<ページ名>\WEAPON\*.SGO に（ビークルは
-  Mods\Variants\<ページ名>\OBJECT\V*.SGO か VEHICLE*.SGO に）置きます。各ファイルはゲームの同じファイル名の
-  武器やビークルの代わりになるので、武器表もセーブも変わりません：新しい武器は増えず、装備するには元の武器が
-  必要で、名前も元の武器のままです。フォルダ名は ASCII にしてください。どのメニュー画面でも F6 で
-  オフ -> 1 ページ目 -> 2 ページ目 ... -> オフ と切り替わり（「F6 Page:<名前>」）、次のミッションから有効です。
-  オフラインでも使えます。
-・部屋では全員が同じファイルを使います：ホストの Mods\WEAPON / Mods\OBJECT\V*/VEHICLE*.SGO と、各メンバーの
-  ページ（まずホストの Mods、次にホストのページ、その後は参加順に他の人のページ）。既定ではダウンロード前に確認し、同意後にメニューに
-  「ROOM WEAPONS 42%」、その後「ROOM WEAPONS :ON (2)」と出ます。各ファイルは持ち主が公開した SHA-256 と照合され、
-  切り替えはミッションの間だけで、部屋を出ると自分のファイルに戻ります。送られるのは武器
-  （WEAPONTABLE/WEAPONTEXT は除く）とビークルのファイルだけ、1 ページ最大 128 個・4 MB で、DLL やパッチは
-  決して送りません。ファイルは Mods\Plugins\EDF6Coop.hostdata に置かれ、Mods フォルダには書き込みません。
-  プラグインのない人にはオリジナルの武器が見えます。ini の [HostData]：Accept=Ask（既定、取得前に確認）/ Auto（確認なし）
-  / Never、WeaponPageKey、Page、Share=0（何も提供しない）、Enabled=0（すべて無効）。
-・キーとボタンは ini の [RoomScreen] / [CopyArmor] で変えられます。F2 は Player MOD 専用です。
+EDF6DirectNet / EDF6MultiSlot からの更新：Mods\Plugins にあるそれらの DLL は .disabled に改名されます。古い設定
+ファイルは残りますが読み込まれません。2.5.0 までが Mods に書いたメニューレイアウトと HUD のファイル
+（UI\LYT_MAINFRAME.SGO、HUD\ONLINEHUDTEXTURE.RAB）は初回起動時に消えます。ほかの MOD の同名ファイルはそのままです。
+更新：新しい版を同じ方法で入れてください。設定は残ります。
+削除：UNINSTALL.bat をダブルクリックします（管理者として実行するとファイアウォールの規則も消します）。
+EDF6Coop のファイル・設定・ログ・UPnP の設定を消します。EDFModLoader とほかの MOD はそのままです。Linux では
+Mods\Plugins\EDF6Coop.* を消してください。
 
 ■ 直接接続（任意、ホストだけ）
-部屋に入る人がホストに直接つながります。ini のコメント（Windows の表示言語で中国語 / 日本語 / 英語）に
-すべての設定の説明があります。
-1. EDF6Coop.ini の [DirectNet] で Mode=host にします。
-2. ゲームフォルダの EDF6Coop_AllowFirewall.bat を右クリック → 管理者として実行（1回だけ。ListenPort を変えたらもう一度）。
-3. つながるようにする：PublicAddress を空にしておく（UPnP で UDP ポートを開け、公開 IPv6 も知らせます）か、
-   ルーターで UDP ポートを自分で転送して PublicAddress=公開IP:ポート を設定します。
-4. いつも通り部屋を作ります。ログに "DIRECT client ... connected" が出れば直接つながっています。
-参加する人は何も設定しません（部屋の情報にホストの住所が入っています）。つながらなくても、いつも通り Epic 経由で遊べます。
-Key= は任意の共通の合言葉です。ホストが設定したら、参加者全員が同じ Key を入れてください。
-直接接続が生きている間は、Epic 側の部屋サービスの不調で誰かが落ちることはありません。
-部屋に誰がいるかはホストのゲームが決めます。ホストのメンバー一覧が直接接続で全員に届き、全員のゲームがそれに従います。
-部屋から落ちてから 30 分間、Epic の部屋検索が失敗したとき（部屋サービスの停止中）は、一覧にその部屋が出ます。
-選ぶと Epic を通さずホストに直接つないで戻れます。Epic が動いている間は何も変わりません。ホストにキックされた、部屋が閉じた、別の部屋に入った、
-のどれかの後は出ません。ホストと自分の両方が 2.2.0 以降である必要があります。
-
-■ 自動更新
-起動時に GitHub から新しい版を取得し、次の起動から使います（2.2.x のどの人数の版も同じ 2.5.0 に更新されます）。
-結果はメニュー左下（部屋の外）に出ます：「EDF6Coop 2.3.2 (latest)」は最新、
-「EDF6Coop 2.3.1 -> 2.3.2 downloaded, restart the game」はダウンロード済み（再起動で有効）、再起動後は
-「EDF6Coop 2.3.2 (updated from 2.3.1)」。失敗すると「update failed, see EDF6Coop.log」。
-リリースは署名付き（ECDSA P-256）で、正しい署名のないファイルは入れません。新しい版がタイトル画面から
-20 秒たつ前に落ちた場合は自動で元に戻します。
-ダウンロードを止めるには EDF6Coop.ini で [Update] AutoUpdate=0。
+あなたの部屋に入った人があなたへ直接つなぎます。INI のコメント（Windows の表示言語に合わせて中国語・日本語・
+英語）がすべての設定を説明しています。
+1. EDF6Coop.ini の [DirectNet] セクションで Mode=host にします。
+2. Windows：ゲームフォルダの EDF6Coop_AllowFirewall.bat を右クリック → 管理者として実行（一度だけ。ListenPort を
+   変えたらもう一度）。
+3. 外から届くようにします：PublicAddress を空のままにする（プラグインが UPnP で UDP ポートを開け、グローバル
+   IPv6 も知らせます）か、自分で UDP ポートを開けて PublicAddress=グローバル IP:ポート にします。
+4. いつも通り部屋を作ります。ログに "DIRECT client ... connected" と出ればプレイヤーが直接つながっています。
+参加する側は何もしなくて構いません。部屋の情報にホストのアドレスがあります。つながらないときはいつも通り
+Epic 経由で遊べます。Key= は任意の合言葉です。設定したら参加者全員が同じ Key を入れてください。
 
 ■ ログ
-Mods\Plugins\EDF6Coop.log：すべてを1つのログに書きます（直接接続の行は [DN] で始まります）。約 2MB を
-超えないように自分で整理します。普通に終了すると最後に "SHUTDOWN the game exited" と書きます。この行がなければ、
-落ちたか強制終了されたということです。不具合の報告に添付してください。
+Mods\Plugins\EDF6Coop.log：すべてを1つのログに書きます（直接接続の行は [DN] で始まります）。約 2 MB 以下に
+保たれます。不具合の報告に添付してください。
 
-■ 機能を切る
-[MultiSlot] Enabled=0：部屋を大きくせず、部屋画面もゲーム本来のまま。
-[DirectNet] Enabled=0：直接接続せず、ゲームの Epic 呼び出しにも触りません。
-両方 0：プラグインは自分から外れます。
+■ 無効にする
+EDF6Coop.ini の [DirectNet] Enabled=0：プラグインは自分で外れ、ゲームは元のままです。
 
 ■ 同梱物
-・EDF6Coop：Mods\Plugins\EDF6Coop.dll（MIT、LICENSE.txt。部屋の部分はパブリックドメイン）。書き出すメニューの
-  枠のデータは、ゲームの UI/LYT_MAINFRAME.SGO に表示欄を1つ足したもの、HUD テクスチャはゲームの
-  HUD/ONLINEHUDTEXTURE.RAB にランプと吹き出しを足したもので、どちらも DLL の中に入っています。5～8人目の色は
-  FevGrave さんが作った8人用 HUD テクスチャに合わせました。変更する HUD のコードも FevGrave さんが見つけたものです。
-・EDFModLoader（BlueAmulet 作、MIT、EDFModLoader_LICENSE.txt）：winmm.dll（LOADER_FIX_JA.md の修正入り）。
+- EDF6Coop：Mods\Plugins\EDF6Coop.dll（MIT、LICENSE.txt。ゲーム部分は momotori01 さんが EDF6MultiSlot として
+  書いたもので、パブリックドメインです）。
+- BlueAmulet さんの EDFModLoader（MIT、EDFModLoader_LICENSE.txt）：winmm.dll。LOADER_FIX_JA.md の修正入り。

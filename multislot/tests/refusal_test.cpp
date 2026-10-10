@@ -110,11 +110,6 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& path : {log, log + multislot::kLogQueueSuffix, ini, replaced, replaced + L".disabled"})
             DeleteFileW(path.c_str());
         std::ofstream(std::filesystem::path(replaced), std::ios::binary | std::ios::trunc) << "MZ not loaded";
-        // A clean run of an earlier start before this one: the log has seen a SHUTDOWN, so a run without one
-        // after its banner would be called cut.
-        const char* seed = "[2026-09-20 00:00:00.000] ==== EDF6Coop 2.0.0 ====\r\n"
-                           "[2026-09-20 00:09:00.000] SHUTDOWN the game exited\r\n";
-        std::ofstream(std::filesystem::path(log), std::ios::binary | std::ios::trunc) << seed;
         const char* mode = "without EDF.dll the plugin refuses";
 
         LoadAndRefuse(dll, mode);
@@ -122,17 +117,10 @@ int wmain(int argc, wchar_t** argv) {
         Check(Contains(text, "REFUSED: EDF.dll is not loaded"), "the reason is logged");
         Check(GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES, "outside the game no settings file is written");
         Check(GetFileAttributesW(replaced.c_str()) != INVALID_FILE_ATTRIBUTES, "and no replaced plugin is renamed");
-        Check(Contains(text, "] UNLOADED the plugin was unloaded"), "the unload is logged as an unload");
-        Check(text.find("SHUTDOWN", std::strlen(seed)) == std::string::npos, "and not as the game exiting, which it did not");
         const HANDLE queue = CreateFileW((log + multislot::kLogQueueSuffix).c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr,
                                          OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
         Check(queue != INVALID_HANDLE_VALUE, "the unloaded plugin holds nothing open (its .queue file is free)");
         if (queue != INVALID_HANDLE_VALUE) CloseHandle(queue);
-
-        // The next start: the unloaded run is not reported as cut.
-        LoadAndRefuse(dll, mode);
-        text = ReadText(log);
-        Check(!Contains(text, "PREVIOUS RUN ended without a shutdown line"), "a run whose plugin was unloaded is not called cut");
     }
     if (failures) {
         std::printf("%d check(s) failed\n", failures);

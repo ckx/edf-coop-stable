@@ -1,13 +1,11 @@
 #include "netfeature.h"
 
 #include <algorithm>
-#include <map>
 #include <atomic>
 #include <cstdio>
 #include <cstdlib>
 
 #include "log.h"
-#include "netcompress.h"
 
 namespace multislot {
 namespace {
@@ -34,26 +32,7 @@ const NetRoom::Member* Find(const std::vector<NetRoom::Member>& members, const s
 }
 
 // The lobby beat: what everyone publishes. The owner refuses a member of another netcode protocol.
-void Observe(const LobbyView& seen) {
-    // A room host also counts the members beyond Epic's lobby, by what their direct-link hellos said.
-    LobbyView view = seen;
-    if (!view.lobbyId.empty() && !view.owner.empty() && view.owner == view.self) {
-        for (const auto& [id, netcode] : dn::directMemberNetcode()) {
-            bool listed = false;
-            for (const auto& m : view.members) listed = listed || m.id == id;
-            if (listed) continue;
-            LobbyView::Member m;
-            m.id = id;
-            if (netcode.first) {
-                m.texts[kNetSeenKey] = "hello";  // it said its protocol to us itself: the host refuses at the hello
-                m.texts[kNetProtocolKey] = std::to_string(netcode.first);
-                char caps[16];
-                std::snprintf(caps, sizeof(caps), "%X", netcode.second);
-                m.texts[kNetCapsKey] = caps;
-            }
-            view.members.push_back(std::move(m));
-        }
-    }
+void Observe(const LobbyView& view) {
     const std::vector<NetRoom::Member> mismatched = NetGate().Observe(view);
     if (view.lobbyId.empty()) return;
     const bool owner = !view.owner.empty() && view.owner == view.self;
@@ -101,17 +80,6 @@ void Observe(const LobbyView& seen) {
                 settings.rejectMismatched ? " (it could not be removed)" : " (RejectMismatched=0)");
         }
     }
-    // What packing did (netcompress.h), every StatsSeconds while it does anything.
-    static ULONGLONG lastPackLog = 0;
-    const ULONGLONG tick = GetTickCount64();
-    if (tick - lastPackLog >= dn::netcodeOptions().statsIntervalMs) {
-        lastPackLog = tick;
-        std::uint64_t packed = 0, saved = 0, unpacked = 0;
-        TakePackStats(packed, saved, unpacked);
-        if (packed || unpacked)
-            Log("NETCODE XPRESS: %llu datagrams packed (%llu bytes saved), %llu unpacked", static_cast<unsigned long long>(packed),
-                static_cast<unsigned long long>(saved), static_cast<unsigned long long>(unpacked));
-    }
     // Once per change of the room's answer, what runs.
     static std::string said;
     const std::string why = NetGate().WhyOff(settings.caps);
@@ -123,19 +91,6 @@ void Observe(const LobbyView& seen) {
 }
 
 bool RoomCap(std::uint32_t cap) { return NetFeatureActive(static_cast<NetFeature>(cap)); }
-
-// Bulk messages by tag (SetBulkHandlerForTag); a tag nobody handles is logged with [Test] BulkEcho=1.
-SRWLOCK bulkLock = SRWLOCK_INIT;
-std::map<std::uint16_t, dn::BulkHandler> bulkHandlers;
-bool bulkEcho = false;
-
-// [Test] BulkEcho=1: what arrives in bulk is logged (GameNet_bulk).
-void LogBulk(const std::string& src, std::uint16_t tag, const std::uint8_t* data, std::size_t size) {
-    std::uint64_t hash = 14695981039346656037ull;
-    for (std::size_t i = 0; i < size; ++i) hash = (hash ^ data[i]) * 1099511628211ull;
-    Log("NETCODE bulk message from %s: tag %u, %zu bytes, fnv %016llx", src.c_str(), tag, size,
-        static_cast<unsigned long long>(hash));
-}
 
 }  // namespace
 
@@ -221,13 +176,6 @@ bool NetRoom::Owner() const {
     return owner;
 }
 
-std::vector<NetRoom::Member> NetRoom::Members() const {
-    AcquireSRWLockShared(&lock_);
-    std::vector<Member> members = members_;
-    ReleaseSRWLockShared(&lock_);
-    return members;
-}
-
 NetRoom& NetGate() {
     static NetRoom room;
     return room;
@@ -243,11 +191,9 @@ std::string FormatCaps(std::uint32_t caps) {
     static const struct {
         NetFeature feature;
         const char* name;
-    } names[] = {{NetFeature::TrafficClasses, "TrafficClasses"}, {NetFeature::Mesh, "Mesh"},
-                 {NetFeature::Fragments, "Fragments"},           {NetFeature::Compression, "Compression"},
+    } names[] = {{NetFeature::Fragments, "Fragments"},
                  {NetFeature::PlayerSync, "PlayerSync"},
-                 {NetFeature::HitAuthority, "HitAuthority"},     {NetFeature::WorldAuthority, "WorldAuthority"},
-                 {NetFeature::PluginObjects, "PluginObjects"}};
+                 {NetFeature::HitAuthority, "HitAuthority"}};
     std::string out;
     std::uint32_t named = 0;
     for (const auto& n : names) {
@@ -289,51 +235,14 @@ void ClearNetFeatureForTest() {
     forcedOn = 0;
 }
 
-std::uint32_t LinkBudgetBytesPerSec(const std::string& peer) { return dn::linkBudgetBytesPerSec(peer); }
-void SetStateSendFilter(dn::StateSendFilter filter) { dn::setStateSendFilter(filter); }
-bool SendBulk(const std::string& remote, std::uint16_t tag, const void* data, std::size_t size) {
-    return dn::sendBulk(remote, tag, static_cast<const std::uint8_t*>(data), size);
-}
-void SetBulkHandler(dn::BulkHandler handler) { dn::setBulkHandler(handler); }
-
-namespace {
-void DispatchBulk(const std::string& src, std::uint16_t tag, const std::uint8_t* data, std::size_t size) {
-    AcquireSRWLockShared(&bulkLock);
-    const auto it = bulkHandlers.find(tag);
-    const dn::BulkHandler handler = it == bulkHandlers.end() ? nullptr : it->second;
-    ReleaseSRWLockShared(&bulkLock);
-    if (handler) handler(src, tag, data, size);
-    else if (bulkEcho) LogBulk(src, tag, data, size);
-}
-}  // namespace
-
-void SetBulkHandlerForTag(std::uint16_t tag, dn::BulkHandler handler) {
-    AcquireSRWLockExclusive(&bulkLock);
-    bulkHandlers[tag] = handler;
-    ReleaseSRWLockExclusive(&bulkLock);
-    dn::setBulkHandler(&DispatchBulk);
-}
-
 void InitNetFeature(const wchar_t* iniPath) {
     const auto flag = [&](const wchar_t* key, int fallback) {
         return GetPrivateProfileIntW(L"Netcode", key, fallback, iniPath) != 0;
     };
     std::uint32_t caps = 0;
-    if (flag(L"TrafficClasses", 1)) caps |= static_cast<std::uint32_t>(NetFeature::TrafficClasses);
-    if (flag(L"Mesh", 1)) caps |= static_cast<std::uint32_t>(NetFeature::Mesh);
     if (flag(L"Fragments", 1)) caps |= static_cast<std::uint32_t>(NetFeature::Fragments);
-    // Only claimed where ntdll can unpack XPRESS (Wine's cannot): a member that claims it is sent packed datagrams.
-    if (flag(L"Compression", 1)) {
-        if (PackingAvailable())
-            caps |= static_cast<std::uint32_t>(NetFeature::Compression);
-        else
-            Log("NETCODE Compression: XPRESS (ntdll) is not available; this machine neither packs nor is sent packed "
-                "datagrams");
-    }
-    // The later workstreams' parts (W2-W4), read here so that every part of the netcode has its key in [Netcode].
     if (flag(L"PlayerSync", 1)) caps |= static_cast<std::uint32_t>(NetFeature::PlayerSync);
     if (flag(L"HitAuthority", 1)) caps |= static_cast<std::uint32_t>(NetFeature::HitAuthority);
-    if (flag(L"WorldAuthority", 1)) caps |= static_cast<std::uint32_t>(NetFeature::WorldAuthority);
     settings.caps = caps;
     settings.rejectMismatched = flag(L"RejectMismatched", 1);
     if (const int test = static_cast<int>(GetPrivateProfileIntW(L"Test", L"NetProtocol", 0, iniPath)); test > 0) {
@@ -341,33 +250,15 @@ void InitNetFeature(const wchar_t* iniPath) {
         Log("TEST NetProtocol=%d: this machine publishes and expects netcode protocol %d (another version's)", test, test);
     }
     dn::NetcodeOptions options;
-    options.trafficClasses = (caps & dn::kCapTrafficClasses) != 0;
-    options.mesh = (caps & dn::kCapMesh) != 0;
     options.fragments = (caps & dn::kCapFragments) != 0;
-    options.shedState = flag(L"ShedState", 1);
     options.statsIntervalMs = 1000u * GetPrivateProfileIntW(L"Netcode", L"StatsSeconds", 60, iniPath);
     dn::setNetcodeOptions(options);
-    bulkEcho = GetPrivateProfileIntW(L"Test", L"BulkEcho", 0, iniPath) != 0;
     if (GetPrivateProfileIntW(L"Test", L"LoopbackHosts", 0, iniPath)) {
         dn::setTestLoopbackHosts(true);
         Log("TEST LoopbackHosts=1: a room host may advertise a loopback address");
     }
-    dn::setBulkHandler(&DispatchBulk);
-    const UINT blockAfter = GetPrivateProfileIntW(L"Test", L"PeerBlockAfterMs", UINT_MAX, iniPath);
-    if (blockAfter != UINT_MAX) {
-        const UINT blockFor = GetPrivateProfileIntW(L"Test", L"PeerBlockForMs", UINT_MAX, iniPath);
-        dn::setTestPeerBlock(blockAfter, blockFor);
-        Log("TEST PeerBlockAfterMs=%u PeerBlockForMs=%u: direct links to other joiners lose everything then", blockAfter,
-            blockFor);
-    }
-    const UINT bulkCut = GetPrivateProfileIntW(L"Test", L"BulkFragmentsSent", 0, iniPath);
-    if (bulkCut) {
-        dn::setTestBulkFragmentsSent(bulkCut);
-        Log("TEST BulkFragmentsSent=%u: of every bulk message (and every resend of it) only that many fragments go out",
-            bulkCut);
-    }
-    Log("NETCODE protocol %lld, features on in the INI: %s; RejectMismatched=%d, ShedState=%d", static_cast<long long>(settings.protocol),
-        FormatCaps(caps).c_str(), settings.rejectMismatched ? 1 : 0, options.shedState ? 1 : 0);
+    Log("NETCODE protocol %lld, features on in the INI: %s; RejectMismatched=%d", static_cast<long long>(settings.protocol),
+        FormatCaps(caps).c_str(), settings.rejectMismatched ? 1 : 0);
 }
 
 bool StartNetFeature(bool lobbyGlue) {
@@ -382,18 +273,8 @@ bool StartNetFeature(bool lobbyGlue) {
     PublishMemberText(kNetCapsKey, caps);
     WatchMemberTexts({kNetProtocolKey, kNetCapsKey, kNetSeenKey}, &Observe);
     WatchLobbyTexts({kNetRoomCapsKey});
-    // The direct link says the same in every hello; a host refuses another protocol there too (members beyond
-    // Epic's lobby, whose lobby entry nobody can read).
+    // The direct link says the same in every hello; a host refuses another protocol there too.
     dn::setNetcodeIdentity(static_cast<std::uint32_t>(settings.protocol), settings.caps, settings.rejectMismatched);
-    // Rooms above Epic's 64: the host puts its direct-link address and identity on the lobby, where a player Epic
-    // turns away finds them (src/netcode.h kHostAddressKey).
-    ListenToTicks([](void*) {
-        std::string address, identity;
-        if (dn::hostAdvertisement(address, identity)) {
-            PublishLobbyText(dn::kHostAddressKey, address);
-            PublishLobbyText(dn::kHostIdentityKey, identity);
-        }
-    });
     dn::setRoomCapQuery(&RoomCap);
     started = true;
     return true;

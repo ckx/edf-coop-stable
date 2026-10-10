@@ -144,7 +144,7 @@ Decoded Decode(const std::uint8_t* at, std::size_t available) {
                 modrm = true;
                 immediate = 1;
                 break;
-            case 0x81: case 0xC7:
+            case 0x69: case 0x81: case 0xC7:  // imul reg, r/m, imm; op r/m, imm
                 modrm = true;
                 immediate = operand16 ? 2 : 4;
                 break;
@@ -322,13 +322,8 @@ int main() {
               Decode(frameLoad, sizeof(frameLoad)).length == sizeof(frameLoad) && !Decode(frameLoad, sizeof(frameLoad)).ripRelative,
           "and tells rsp- and rbp-relative ones from it");
     Check(!Decode(relativeCall, sizeof(relativeCall)).known, "and refuses a relative call");
-    CheckDisplaced(HostModeHooks(), "HostModeHooks");
-    CheckDisplaced(MissionHooks(), "MissionHooks");
-    CheckDisplaced(SpawnHooks(), "SpawnHooks");
-    CheckDisplaced(ArmorHooks(), "ArmorHooks");
-    CheckDisplaced(DiagnosticHooks(), "DiagnosticHooks");
-    CheckDisplaced(GhostHooks(), "GhostHooks");
-    CheckDisplaced(HostDataHooks(), "HostDataHooks");
+    CheckDisplaced(WeaponGuardHooks(), "WeaponGuardHooks");
+    CheckDisplaced(PeerTimeoutHooks(), "PeerTimeoutHooks");
 
     page.Release();
     Check(RtlLookupFunctionEntry(static_cast<DWORD64>(reinterpret_cast<std::uintptr_t>(pThunk)), &imageBase, nullptr) == nullptr,

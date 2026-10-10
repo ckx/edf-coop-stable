@@ -84,11 +84,6 @@ const IniEntry kIniEntries[] = {
      {"防不同步：联机数据丢包自动重发。1 开 / 0 原版",
       "同期ズレ対策：取りこぼした通信を自動で再送。1 オン / 0 元の動作",
       "Desync fix: lost online packets are resent automatically. 1 on / 0 original"}},
-    {"[Update]", {}},
-    {"AutoUpdate=1",
-     {"自动更新：启动游戏时检查 GitHub 上的新版本，自动下载，下次启动游戏生效。1 开 / 0 关",
-      "自動アップデート：起動時に GitHub の新しい版を確認して自動でダウンロードし、次回の起動から有効。1 オン / 0 オフ",
-      "Auto-update: at startup, check GitHub for a newer version and download it; it runs from the next game start. 1 on / 0 off"}},
     {"[Resilience]", {}},
     {"HoldDisconnects=auto",
      {"掉线不重来：网络抖动断开时先不让游戏踢人，后台自动重连\n"
@@ -101,6 +96,40 @@ const IniEntry kIniEntries[] = {
      {"最多等多少秒，等不回来就按原版处理",
       "最大何秒待つか。戻らなければ元のゲームどおりに処理",
       "Wait at most this many seconds, then handle it like the original game"}},
+    {"KeepRoomOnPeerTimeout=1",
+     {"有人进房后与你的 P2P 握手一直没连上时，你留在房间里（原版会让房主以外的人全部退出）。1 开 / 0 原版",
+      "後から入った人との P2P ハンドシェイクが完了しないとき、部屋に残る（元のゲームはホスト以外を全員退出させる）。1 オン / 0 元の動作",
+      "Stay in the room when the P2P handshake with someone who joined after you never completes (the original game\n"
+      "  makes everyone but the host leave). 1 on / 0 original"}},
+    {"[Netcode]", {}},
+    {"Fragments=1",
+     {"超过 EOS 单包上限（1170 字节）的数据拆成小块发送。全房间都开才生效。1 开 / 0 关",
+      "EOS の 1 パケット上限（1170 バイト）を超えるデータを分割して送る。部屋の全員がオンのときだけ有効。1 オン / 0 オフ",
+      "Split data above EOS's 1170-byte packet limit into fragments. Only used while everyone in the room has it on. 1 on / 0 off"}},
+    {"PlayerSync=1",
+     {"其他玩家的位置按速度外推，移动更平滑、更准。全房间都开才生效。1 开 / 0 原版",
+      "他のプレイヤーの位置を速度から先読みして、動きをなめらかで正確にする。部屋の全員がオンのときだけ有効。1 オン / 0 元の動作",
+      "Extrapolate other players' positions from their velocity, so they move smoother and truer. Only used while\n"
+      "  everyone in the room has it on. 1 on / 0 original"}},
+    {"HitAuthority=1",
+     {"开枪的人判定命中（原版由被打的一方判定，常出现「打中了对方却没掉血」）。全房间都开才生效。1 开 / 0 原版",
+      "撃った側が命中を判定する（元のゲームは撃たれた側が判定し「当たったのにダメージがない」が起きる）。部屋の全員がオンのときだけ有効。1 オン / 0 元の動作",
+      "The shooter decides hits (the original game lets the target decide, so a hit you saw can do nothing). Only\n"
+      "  used while everyone in the room has it on. 1 on / 0 original"}},
+    {"RejectMismatched=1",
+     {"房主拒绝联机协议版本不同的玩家（避免规则不一致导致不同步）。1 开 / 0 关",
+      "ホストはネットコードのバージョンが違うプレイヤーを入れない（ルールの食い違いによる同期ズレを防ぐ）。1 オン / 0 オフ",
+      "As host, refuse players whose netcode protocol differs (different rules would desync). 1 on / 0 off"}},
+    {"[Log]", {}},
+    {"CrashLog=1",
+     {"崩溃时把地址和调用栈写进 EDF6Coop.log",
+      "クラッシュ時にアドレスと呼び出し履歴を EDF6Coop.log に書く",
+      "Write crash details (address and call stack) to EDF6Coop.log"}},
+    {"CrashDump=0",
+     {"游戏或本插件的代码第一次访问违规时另写 EDF6Coop-crash.dmp（每次启动一个）。里面有游戏内存（房间名、聊天），只在被要求时开",
+      "ゲームかこのプラグインのコードで最初のアクセス違反が起きたとき EDF6Coop-crash.dmp も書く（起動ごとに 1 つ）。ゲームのメモリ（部屋名、チャット）を含むので頼まれたときだけオンに",
+      "Also write EDF6Coop-crash.dmp for the first access violation in the game's or this plugin's code (one per\n"
+      "  launch). It holds game memory (room name, chat), so only turn it on when asked for one"}},
 };
 
 int iniLanguage(unsigned short langId) {
@@ -124,7 +153,7 @@ class Ini {
 public:
     explicit Ini(const std::wstring& path) {
         std::wstring text = decode(readAll(path));
-        std::wstring section, writtenSection;
+        std::wstring section;
         for (size_t at = 0; at < text.size();) {
             size_t end = text.find(L'\n', at);
             if (end == std::wstring::npos) end = text.size();
@@ -133,26 +162,17 @@ public:
             if (line.empty() || line[0] == L';' || line[0] == L'#') continue;
             if (line[0] == L'[') {
                 size_t close = line.find(L']');
-                writtenSection = trim(line.substr(1, close == std::wstring::npos ? std::wstring::npos : close - 1));
-                section = lower(writtenSection);
+                section = lower(trim(line.substr(1, close == std::wstring::npos ? std::wstring::npos : close - 1)));
                 continue;
             }
             size_t eq = line.find(L'=');
             if (eq == std::wstring::npos) continue;
             std::wstring key = trim(line.substr(0, eq));
-            entries_.push_back({section, lower(key), value(line.substr(eq + 1)), writtenSection, key});
+            entries_.push_back({section, lower(key), value(line.substr(eq + 1))});
         }
     }
 
-    // Every entry as written, in file order.
-    std::vector<IniValue> values() const {
-        std::vector<IniValue> out;
-        for (const Entry& e : entries_) out.push_back({e.writtenSection, e.writtenKey, e.value});
-        return out;
-    }
-
     static std::wstring decodeText(const std::string& bytes) { return decode(bytes); }
-    static std::wstring trimmed(const std::wstring& s) { return trim(s); }
 
     // The first value of `key` in `section` (both case-insensitive, like Windows); nullptr when absent.
     const std::wstring* find(const wchar_t* section, const wchar_t* key) const {
@@ -165,7 +185,6 @@ public:
 private:
     struct Entry {
         std::wstring section, key, value;  // section and key in lower case
-        std::wstring writtenSection, writtenKey;
     };
     std::vector<Entry> entries_;
 
@@ -272,107 +291,6 @@ std::string defaultIni(unsigned short langId) {
     return s;
 }
 
-std::vector<IniValue> readIniValues(const std::wstring& path) { return Ini(path).values(); }
-
-namespace {
-
-// An INI text cut into the lines before its first section and one block per section (header line first).
-struct IniBlocks {
-    std::vector<std::string> preamble;
-    struct Section {
-        std::wstring name;  // lower case
-        std::vector<std::string> lines;
-    };
-    std::vector<Section> sections;
-};
-
-std::wstring sectionName(const std::string& line) {
-    std::wstring w = lower(Ini::trimmed(Ini::decodeText(line)));
-    if (w.empty() || w[0] != L'[') return {};
-    size_t close = w.find(L']');
-    return Ini::trimmed(w.substr(1, close == std::wstring::npos ? std::wstring::npos : close - 1));
-}
-
-IniBlocks cutIni(const std::string& text) {
-    IniBlocks blocks;
-    size_t at = text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
-    while (at < text.size()) {
-        size_t end = text.find('\n', at);
-        if (end == std::string::npos) end = text.size();
-        std::string line = text.substr(at, end - at);
-        at = end + 1;
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        std::wstring name = sectionName(line);
-        if (!name.empty()) blocks.sections.push_back({name, {}});
-        (blocks.sections.empty() ? blocks.preamble : blocks.sections.back().lines).push_back(line);
-    }
-    return blocks;
-}
-
-void appendLines(std::vector<std::string>& out, const std::vector<std::string>& lines, size_t from) {
-    if (from >= lines.size()) return;
-    if (!out.empty() && !out.back().empty()) out.push_back({});
-    out.insert(out.end(), lines.begin() + static_cast<std::ptrdiff_t>(from), lines.end());
-}
-
-}  // namespace
-
-std::string mergeIniTexts(const std::string& base, const std::string& extra) {
-    IniBlocks b = cutIni(base), e = cutIni(extra);
-    std::vector<std::string> out = b.preamble;
-    std::vector<bool> taken(e.sections.size(), false);
-    for (const IniBlocks::Section& section : b.sections) {
-        appendLines(out, section.lines, 0);
-        for (size_t i = 0; i < e.sections.size(); ++i) {
-            if (taken[i] || e.sections[i].name != section.name) continue;
-            appendLines(out, e.sections[i].lines, 1);  // without its header: it continues this section
-            taken[i] = true;
-        }
-    }
-    appendLines(out, e.preamble, 0);
-    for (size_t i = 0; i < e.sections.size(); ++i)
-        if (!taken[i]) appendLines(out, e.sections[i].lines, 0);
-    while (!out.empty() && out.back().empty()) out.pop_back();
-    std::string text = base.compare(0, 3, "\xEF\xBB\xBF") == 0 ? "\xEF\xBB\xBF" : "";
-    for (const std::string& line : out) text += line + "\r\n";
-    return text;
-}
-
-std::string applyIniValues(const std::string& text, const std::vector<IniValue>& values,
-                           std::vector<std::string>* dropped) {
-    IniBlocks blocks = cutIni(text);
-    std::vector<bool> used(values.size(), false);
-    // The first value of each [section] key wins, as when the file is read; later ones are not written.
-    auto firstOf = [&](size_t i) {
-        for (size_t j = 0; j < i; ++j)
-            if (lower(values[j].section) == lower(values[i].section) && lower(values[j].key) == lower(values[i].key))
-                return false;
-        return true;
-    };
-    for (IniBlocks::Section& section : blocks.sections) {
-        for (std::string& line : section.lines) {
-            std::wstring w = Ini::trimmed(Ini::decodeText(line));
-            size_t eq = w.find(L'=');
-            if (w.empty() || w[0] == L';' || w[0] == L'#' || w[0] == L'[' || eq == std::wstring::npos) continue;
-            std::wstring key = Ini::trimmed(w.substr(0, eq));
-            for (size_t i = 0; i < values.size(); ++i) {
-                if (used[i] || lower(values[i].section) != section.name || lower(values[i].key) != lower(key)) continue;
-                used[i] = true;
-                if (firstOf(i)) line = toUtf8(key) + "=" + toUtf8(values[i].value);
-            }
-        }
-    }
-    for (size_t i = 0; i < values.size(); ++i)
-        if (!used[i] && dropped)
-            dropped->push_back("[" + toUtf8(values[i].section) + "] " + toUtf8(values[i].key) + "=" +
-                               toUtf8(values[i].value));
-    std::string out;
-    for (const std::string& line : blocks.preamble) out += line + "\r\n";
-    for (const IniBlocks::Section& section : blocks.sections)
-        for (const std::string& line : section.lines) out += line + "\r\n";
-    return (text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? "\xEF\xBB\xBF" : "") + out;
-}
-
 bool writeNewIniUtf16(const std::wstring& path, const std::string& utf8) {
     std::wstring text = Ini::decodeText(utf8);  // drops a UTF-8 BOM
     HANDLE file = CreateFileW(path.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -388,17 +306,12 @@ bool writeNewIniUtf16(const std::wstring& path, const std::string& utf8) {
 }
 
 Config loadConfig(const std::wstring& iniPath) {
-    if (GetFileAttributesW(iniPath.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        FILE* f = _wfopen(iniPath.c_str(), L"wb");
-        if (f) {
-            std::string text = defaultIni(GetUserDefaultUILanguage());
-            fwrite(text.data(), 1, text.size(), f);
-            fclose(f);
-        }
-    }
-    Ini ini(iniPath);
     Config c;
     std::vector<std::string>& w = c.warnings;
+    if (GetFileAttributesW(iniPath.c_str()) == INVALID_FILE_ATTRIBUTES &&
+        !writeNewIniUtf16(iniPath, defaultIni(GetUserDefaultUILanguage())))
+        w.push_back("CONFIG could not write the settings file with the defaults; running on them");
+    Ini ini(iniPath);
     const wchar_t* s = L"DirectNet";
     c.enabled = readBool(ini, s, L"Enabled", true, w);
     std::wstring mode = lower(readString(ini, s, L"Mode", L"off"));
@@ -423,13 +336,6 @@ Config loadConfig(const std::wstring& iniPath) {
     c.hold = hold == L"all" ? Config::Hold::All : (hold == L"off" || hold == L"0") ? Config::Hold::Off : Config::Hold::Auto;
     c.reliableGameTraffic = readBool(ini, L"Sync", L"ReliableGameTraffic", true, w);
     c.direct.upgradeUnreliable = c.reliableGameTraffic;
-    // A settings file from before auto-update has no such line; 0.3.6 already updated those players, so it
-    // stays on (see Config), and the log says how to turn it off.
-    bool autoUpdateWritten = ini.find(L"Update", L"AutoUpdate") != nullptr;
-    c.autoUpdate = readBool(ini, L"Update", L"AutoUpdate", true, w);
-    if (!autoUpdateWritten)
-        w.push_back("UPDATE automatic updates are on (the settings file has no AutoUpdate line, written by an older "
-                    "version). To turn them off, add the two lines [Update] and AutoUpdate=0 at its end");
     c.graceMs =
         static_cast<uint32_t>(std::clamp(readInt(ini, L"Resilience", L"GraceSeconds", 30, 0, 999999999, w), 1, 600)) * 1000u;
     return c;

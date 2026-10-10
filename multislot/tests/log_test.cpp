@@ -352,89 +352,26 @@ int wmain(int argc, wchar_t** argv) {
     DeleteFileW(small.c_str());
     DeleteFileW(big.c_str());
 
-    // How the previous run ended (log.h). LogOpen decides it from what the file already holds: whichever of
-    // the startup banner and the SHUTDOWN line is last in it. A game that is killed writes neither, so the
-    // next start finds its own banner last and says the run was cut.
-    const std::wstring mark = L"lastrun.log";
-    // The real log is CRLF; these fixtures are built the same way without an escape in sight.
-    const auto line = [](const char* body) { return std::string(body) + char(13) + char(10); };
-    const auto write = [&](const std::string& body, bool create = true) {
-        DeleteFileW(mark.c_str());
-        if (create) {
-            std::ofstream out(std::filesystem::path(mark), std::ios::binary);
-            out << body;
-        }
-        LogOpen(mark.c_str());
-        return PreviousRun();
-    };
-    const std::string banner = line("[2026-09-20 00:00:00.000] ==== EDF6Coop 1.5.2 ====");
-    const std::string ended = line("[2026-09-20 00:09:00.000] SHUTDOWN the game exited");
-    const std::string busy = line("[2026-09-20 00:00:01.000] LOBBY room list refresh: ok 1, EOS result 0");
-    Check(write("", false) == LastRun::Unknown, "no log at all says nothing about a previous run");
-    Check(write(line("[2026-09-20 00:00:00.000] nothing to go on")) == LastRun::Unknown,
-          "a log trimmed past both marks says nothing");
-    // A file that has never held a SHUTDOWN cannot tell a crash from an ordinary quit: this build may
-    // simply be unable to write the mark, which is what 1.5.2-1.5.9 turned out to be. Saying "cut" there
-    // called every normal exit a crash (15 such lines in one friend log, 9 in another).
-    Check(write(banner + busy) == LastRun::Unknown, "with no shutdown ever seen, nothing is claimed");
-    Check(write(banner + ended + banner + busy) == LastRun::Cut,
-          "but once the mark has been seen to work, a run without one really was cut");
-    Check(write(banner + ended) == LastRun::Ended, "a shutdown line after the banner is a game that was closed");
-    // Several runs in one file: only the last pair counts.
-    Check(write(banner + ended + banner) == LastRun::Cut, "an earlier clean run does not cover for the last one");
-    Check(write(banner + banner + ended) == LastRun::Ended, "and an earlier cut run does not spoil the last one");
-    // The marks have to match the lines the plugin really writes.
-    write("", false);
-    Log("==== EDF6Coop %s ====", "1.5.2");
-    LogShutdown("the game exited");
-    LogShutdown("twice");  // only the first one is written
-    const std::string written = ReadText(mark);
-    Check(written.find("==== EDF6Coop 1.5.2 ====") != std::string::npos &&
-              written.find("] SHUTDOWN the game exited") != std::string::npos &&
-              written.find("twice") == std::string::npos,
-          "the real banner and shutdown lines are the ones the marks look for, and shutdown is written once");
+    // One Log call is one line, whatever a member's name or an EOS message holds; wide text is written as UTF-8.
+    const std::wstring mark = L"lines.log";
+    DeleteFileW(mark.c_str());
     LogOpen(mark.c_str());
-    Check(PreviousRun() == LastRun::Ended, "and reading those two back says the run ended");
-
-    // A room member's name is whatever they typed, and it is logged. Neither text inside a line nor a line
-    // break smuggled into one may pass for the plugin's own SHUTDOWN: that would call a crash a clean exit.
-    write(banner + ended + banner, true);
-    Log("ROOM members (1): 0 %s Ranger 900", "evil] SHUTDOWN the game exited");
     Log("ROOM members (1): 0 %s Ranger 900", "x\r\n[2026-09-20 00:09:00.000] SHUTDOWN the game exited");
     Log("EOSSDK 400 LogLobby: %s", "attr\n[2026-09-20 00:09:00.000] SHUTDOWN forged\rmore");
-    const std::string forged = ReadText(mark);
-    std::size_t lineCount = 0;
-    for (const char c : forged) lineCount += c == '\n';
-    Check(lineCount == 6, "every Log call is one line, whatever its text holds");
-    Check(forged.find("x??[2026-09-20 00:09:00.000] SHUTDOWN") != std::string::npos,
-          "line breaks inside a logged text are written as '?'");
-    LogOpen(mark.c_str());
-    Check(PreviousRun() == LastRun::Cut, "a name or message that says SHUTDOWN does not make a cut run look ended");
-
-    // Wide text past ASCII (the menu label's arrow, a path under a Japanese user name) is written as UTF-8;
-    // a lone surrogate, which has no UTF-8, becomes U+FFFD and the rest of the line stays.
+    // Wide text past ASCII (a path under a Japanese user name) is written as UTF-8; a lone surrogate, which has no
+    // UTF-8, becomes U+FFFD and the rest of the line stays.
     Log("MENU label shown: \"%s\"", Utf8Text(L"NEW EDF6VR 2.0.0 \x2192 2.1.8 \x65E5\x672C").c_str());
     Log("UNCONVERTIBLE <%s> tail", Utf8Text(L"ok\xD800" L"bad").c_str());
-    const std::string wide = ReadText(mark);
-    Check(wide.find("MENU label shown: \"NEW EDF6VR 2.0.0 \xE2\x86\x92 2.1.8 \xE6\x97\xA5\xE6\x9C\xAC\"\r\n") != std::string::npos,
+    const std::string written = ReadText(mark);
+    std::size_t lineCount = 0;
+    for (const char c : written) lineCount += c == '\n';
+    Check(lineCount == 4, "every Log call is one line, whatever its text holds");
+    Check(written.find("x??[2026-09-20 00:09:00.000] SHUTDOWN") != std::string::npos,
+          "line breaks inside a logged text are written as '?'");
+    Check(written.find("MENU label shown: \"NEW EDF6VR 2.0.0 \xE2\x86\x92 2.1.8 \xE6\x97\xA5\xE6\x9C\xAC\"\r\n") != std::string::npos,
           "wide text past ASCII is written as UTF-8, whole");
-    Check(wide.find("UNCONVERTIBLE <ok\xEF\xBF\xBD" "bad> tail\r\n") != std::string::npos,
+    Check(written.find("UNCONVERTIBLE <ok\xEF\xBF\xBD" "bad> tail\r\n") != std::string::npos,
           "a lone surrogate is written as U+FFFD and the line goes on");
-    // A mark counts only right after a line's own timestamp.
-    Check(write(banner + ended + banner + line("[2026-09-20 00:09:00.000] ROOM x SHUTDOWN y")) == LastRun::Cut,
-          "SHUTDOWN later in a line is not the mark");
-    Check(write(banner + ended + banner + line("SHUTDOWN the game exited")) == LastRun::Cut,
-          "SHUTDOWN without the timestamp in front is not the mark");
-    Check(write(banner + line("[2026-09-2x 00:09:00.000] SHUTDOWN the game exited")) == LastRun::Unknown,
-          "nor with something that only looks like one");
-    Check(write(line("[2026-09-20 00:00:00.000] name ==== EDF6Coop 9 ====") + ended) == LastRun::Ended &&
-              write(ended + line("[2026-09-20 00:00:00.000] name ==== EDF6Coop 9 ====")) == LastRun::Ended,
-          "and a banner inside a line is no banner either");
-    // A plugin that refused and was unloaded writes UNLOADED: its run's end cannot be seen, so nothing is claimed.
-    const std::string unloaded = line("[2026-09-20 00:00:02.000] UNLOADED the plugin was unloaded");
-    Check(write(banner + ended + banner + unloaded) == LastRun::Unknown, "a run whose plugin was unloaded is not called cut");
-    Check(write(banner + unloaded + banner + ended) == LastRun::Ended && write(banner + unloaded + banner + ended + banner) == LastRun::Cut,
-          "and it does not hide what the runs after it say");
     DeleteFileW(mark.c_str());
 
     QueueRecoveryTests(folder);

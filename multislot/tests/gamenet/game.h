@@ -1,9 +1,9 @@
 #pragma once
 // The game's own network objects, built in a test process by the game's own constructors (EDF.dll RVAs below,
 // v1.0 of the Steam release that EDF6Coop supports). Only what the game would get from the rest of the game is
-// stood in for: the EOS core (eos::internal_Core, a stub with the real observables) and, for the mission start
-// message, the few objects listed in mission.cpp. Everything that encrypts, frames, sends, receives, decrypts,
-// dispatches, writes and reads a message is the game's code, with EDF6Coop's patches and hooks in it.
+// stood in for: the EOS core (eos::internal_Core, a stub with the real observables). Everything that encrypts,
+// frames, sends, receives, decrypts, dispatches, writes and reads a message is the game's code, with EDF6Coop's
+// patches and hooks in it.
 //
 // The library types handed to the game (std::string, std::wstring, std::vector, std::function, shared_ptr) are
 // laid out by hand as the game's (msvc_abi.h, Shared below), so the harness builds with MSVC and MinGW alike.

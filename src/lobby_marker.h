@@ -72,12 +72,6 @@ public:
     // kept like hasMarker() for as long as the member is in the room. Members without the plugin (or
     // with 0.3.6 and older) are absent. EOS calls: run on the EOS tick only.
     std::map<std::string, std::string> memberIdentities();
-    // The members our copy of the lobby lists now (EOS ids), or nothing when we have no copy (`known` false).
-    // EOS calls: run on the EOS tick only.
-    std::vector<std::string> members(bool* known);
-    // No caching: every listed member must currently advertise the exact extension
-    // profile. An older Coop build must never receive our reserved-channel data.
-    bool extensionCompatible(const std::vector<std::string>& participants = {});
 
 private:
     // Copies member attribute `key` of `member` as a string ("" when absent). Caller holds mu_.

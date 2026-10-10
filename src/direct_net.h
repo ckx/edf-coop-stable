@@ -42,7 +42,6 @@
 #include "congestion.h"
 #include "reliable.h"
 #include "wire.h"
-#include "extension_api.h"
 
 namespace dn {
 
@@ -212,18 +211,6 @@ public:
     // Pops the next packet for the local player; `channel` filters like EOS RequestedChannel.
     bool pop(const uint8_t* channel, uint32_t maxSize, Delivered& out);
 
-    // Dedicated extension inbox: never visible through the game's pop(), including
-    // wildcard channel reads. Room facts are refreshed on the EOS tick only.
-    static constexpr const char* kExtensionSocket = "EDF6CoopExt1";
-    static constexpr uint8_t kExtensionChannel = 0xAF;
-    void setExtensionRoom(std::string room, std::string host, std::vector<std::string> members, uint64_t worldEpoch = 1);
-    void clearExtensionRoom();
-    bool extensionParticipant(const std::string& peer);
-    void extensionSnapshot(EDF6CoopSnapshot& out);
-    bool extensionPeer(uint64_t generation, uint32_t index, EDF6CoopPeer& out);
-    bool extensionSend(uint64_t generation, const std::string& peer, const uint8_t* data, uint32_t bytes);
-    bool extensionPoll(uint64_t generation, uint32_t capacity, Delivered& out);
-
     // True when a game packet from `remote` arrived over the direct link within `windowMs`.
     bool heardFromRecently(const std::string& remote, uint64_t windowMs);
     // True when the direct link that carries `remote`'s traffic answered within `windowMs` (links
@@ -263,10 +250,10 @@ private:
         sockaddr_storage addr{};
         int addrLen = 0;
         std::string puid;
-        std::string identityCommitment; // authenticated handshake identity, for extension revalidation
         uint32_t peerNonce = 0;
         uint64_t session = 0;  // host: the client's HelloMsg::session
         uint32_t epoch = 0;  // linkEpoch(client nonce, host nonce)
+        std::string identityCommitment;  // the identity its handshake proved
         // A joiner's link is up once the host's welcome verified. A host's link is up once the client
         // sent a datagram with the link keys (proof it got the welcome): until then data sent to it
         // would be dropped unread.
@@ -407,16 +394,6 @@ private:
     uint32_t localNonce_ = 0;
     std::shared_ptr<const Identity> identity_;
     std::deque<Delivered> inbox_;
-    std::deque<Delivered> extensionInbox_;
-    std::string extensionRoom_, extensionHost_;
-    std::vector<std::string> extensionMembers_, extensionPeers_;
-    std::vector<uint64_t> extensionLinks_;
-    uint64_t extensionGeneration_ = 0, extensionUpdatedMs_ = 0;
-    uint64_t extensionWorldEpoch_ = 0;
-    bool extensionReady_ = false, extensionFault_ = false;
-    void resetExtensionLocked();
-    bool refreshExtensionLocked();
-    bool extensionPacket(const DataMsg& msg);
     std::map<std::string, uint64_t> lastDataMs_;  // per source: last game packet received
 
     // Host mode.

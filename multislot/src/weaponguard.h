@@ -15,9 +15,8 @@ namespace multislot {
 // They are replaced where other players' ids come in, before anything looks them up:
 //   - a member's room info (744AB0, parsed from its lobby attributes): an unknown id becomes an empty slot, which
 //     the game draws as one;
-//   - the mission start message (790600, every player's loadout record, the sidecars and EDF6Coop's own split
-//     records included): an unknown id becomes this machine's own weapon of that class and slot, which the game
-//     can build, with this machine's level of it.
+//   - the mission start message (790600, every player's loadout record): an unknown id becomes this machine's own
+//     weapon of that class and slot, which the game can build, with this machine's level of it.
 // Every replacement is logged once per id.
 
 constexpr int kWeaponClasses = 4;

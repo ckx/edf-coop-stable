@@ -1,10 +1,9 @@
 #pragma once
-// The netcode version gate (docs/netcode-rewrite-plan.md §2.1): which parts of the netcode rewrite are on in this
-// room. A part that changes what goes over the network, or a rule of the game, may only run when every member of
-// the room runs it the same way; otherwise one machine would play by other rules than the rest without anyone
-// seeing why.
+// The netcode version gate: which parts of the netcode are on in this room. A part that changes what goes over the
+// network, or a rule of the game, may only run when every member of the room runs it the same way; otherwise one
+// machine would play by other rules than the rest without anyone seeing why.
 //
-// Every machine publishes, on its own lobby member (syncmarker.h, where EDF.dll never looks):
+// Every machine publishes, on its own lobby member (lobbytexts.h, where EDF.dll never looks):
 //   EDF6NET_PROTO  kNetProtocol, as decimal text
 //   EDF6NET_CAPS   the NetFeature bits this machine has on ([Netcode] in the INI), as hex text
 // and reads everyone else's on the lobby beat (once a second).
@@ -19,17 +18,16 @@
 // where the owner keeps it (RejectMismatched=0) runs with every feature off. Either way nobody plays by rules the
 // others do not have.
 //
-// Usage (W2-W4 and the transport):
+// Usage (player sync, hit authority, the transport):
 //     if (multislot::NetFeatureActive(multislot::NetFeature::HitAuthority)) { ...new rule... } else { ...game's... }
 // Cheap (a shared lock and a few compares): call it where the decision is made, every time. Any thread.
-#include <cstddef>
 #include <atomic>
 #include <cstdint>
 #include <string>
 #include <vector>
 
 #include "netprotocol.h"
-#include "syncmarker.h"
+#include "lobbytexts.h"
 #include "src/netcode.h"
 
 namespace multislot {
@@ -41,22 +39,14 @@ constexpr const char* kNetCapsKey = "EDF6NET_CAPS";
 // member of another protocol only once it shows this: the refused member has said why on its own side first (both
 // beat once a second, and without this the host could remove it before it ever read the host's entry).
 constexpr const char* kNetSeenKey = "EDF6NET_SEEN";
-// The room's host publishes on the lobby itself what the whole room runs (hex, the features every member has on, the
-// members beyond Epic's lobby included - only the host knows those, by their hellos). Everyone else's gate is its own
-// reading of the lobby AND this: every machine decides on the same set of members.
+// The room's host publishes on the lobby itself what the whole room runs (hex, the features every member has on).
+// Everyone else's gate is its own reading of the lobby AND this: every machine decides on the same set of members.
 constexpr const char* kNetRoomCapsKey = "EDF6NET_ROOMCAPS";
 
 enum class NetFeature : std::uint32_t {
-    // W1, the transport (src/netcode.h).
-    TrafficClasses = dn::kCapTrafficClasses,
-    Mesh = dn::kCapMesh,
-    Fragments = dn::kCapFragments,
-    Compression = dn::kCapCompression,  // XPRESS of the game's plaintext (netcompress.h)
-    // Reserved for the later workstreams; each gets its [Netcode] key when it lands.
-    PlayerSync = 1u << 8,      // W2: player pose replication with velocity and extrapolation
-    HitAuthority = 1u << 9,    // W3: the shooter decides hits
-    WorldAuthority = 1u << 10, // W4: enemies, bullets and mission events from the host
-    PluginObjects = 1u << 11,  // W5: all-forces objects
+    Fragments = dn::kCapFragments,  // the transport (src/netcode.h)
+    PlayerSync = 1u << 8,           // player pose replication with velocity and extrapolation (netplayer.h)
+    HitAuthority = 1u << 9,         // the shooter decides hits (hitauth.h)
 };
 
 bool NetFeatureActive(NetFeature feature);
@@ -84,7 +74,6 @@ public:
     std::uint32_t ActiveMask() const { return active_.load(); }
     bool InRoom() const;
     bool Owner() const;  // we own the room
-    std::vector<Member> Members() const;
     // Why Active is false for `caps` ("" when it is not), for the log: the first member that keeps it off.
     std::string WhyOff(std::uint32_t caps) const;
 
@@ -105,26 +94,10 @@ NetRoom& NetGate();
 std::uint32_t ParseCaps(const std::string& hex);
 std::string FormatCaps(std::uint32_t caps);
 
-// --- What the transport offers the other workstreams (src/netcode.h) ---
-// Bytes per second the path to `peer` (EOS_ProductUserId text) carries now, from its congestion controller: the
-// budget interest management (W6) schedules state by. The game's own budget (40 KB/s) for a member reached over
-// EOS only; 0 for no member.
-std::uint32_t LinkBudgetBytesPerSec(const std::string& peer);
-// Interest management decides per (observer, subject) whether a state datagram goes now (src/netcode.h
-// StateSendFilter). Unset (the default): always.
-void SetStateSendFilter(dn::StateSendFilter filter);
-// A message of up to dn::kMaxBulkBytes (about 1 MB) to `remote`, reliably in fragments; the receiver's handler
-// for `tag` gets it whole (SetBulkHandler). False when the room does not read fragments (NetFeature::Fragments)
-// or there is no path yet. Call it on the game's thread (it sends through EOS).
-bool SendBulk(const std::string& remote, std::uint16_t tag, const void* data, std::size_t size);
-void SetBulkHandler(dn::BulkHandler handler);
-// The handler of one tag (several parts receive bulk messages; the one dn handler dispatches by tag).
-void SetBulkHandlerForTag(std::uint16_t tag, dn::BulkHandler handler);
-
 // Reads [Netcode] (the features this machine has on, RejectMismatched, StatsSeconds, ...) and hands the
 // transport its options (src/netcode.h). Before StartNetFeature.
 void InitNetFeature(const wchar_t* iniPath);
-// Publishes our protocol and features and watches everyone's, once the lobby glue (InstallSyncMarker) is in. False
+// Publishes our protocol and features and watches everyone's, once the lobby glue (InstallLobbyTexts) is in. False
 // without it: then no feature is ever active (we cannot tell what the room runs).
 bool StartNetFeature(bool lobbyGlue);
 

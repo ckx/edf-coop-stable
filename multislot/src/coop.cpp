@@ -2,29 +2,17 @@
 
 #include "coop.h"
 
-#include <cstdlib>
-#include <cwchar>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include "log.h"
-#include "src/config.h"
 #include "src/product.h"
 
 namespace multislot {
 namespace {
 
 bool Exists(const std::wstring& path) { return GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; }
-
-// EDF6MultiSlot's EightPlayerRooms is RoomSize since 2.3.0 (hostmode.h); its ON was eight-player rooms.
-void RenameOldSettings(std::vector<dn::IniValue>& values) {
-    for (dn::IniValue& value : values) {
-        if (_wcsicmp(value.section.c_str(), L"MultiSlot") != 0 || _wcsicmp(value.key.c_str(), L"EightPlayerRooms") != 0)
-            continue;
-        value.key = L"RoomSize";
-        value.value = _wtoi(value.value.c_str()) ? L"8" : L"0";
-    }
-}
 
 }  // namespace
 
@@ -60,27 +48,34 @@ bool RetireReplacedPlugins(const std::wstring& dir) {
     return clear;
 }
 
-void PrepareSettings(const std::wstring& dir, const std::wstring& iniPath, const char* roomDefaults) {
-    const std::wstring oldUpnp = dir + L"EDF6DirectNet.upnp", newUpnp = dir + coop::kNameW + L".upnp";
-    if (Exists(oldUpnp) && !Exists(newUpnp)) MoveFileExW(oldUpnp.c_str(), newUpnp.c_str(), 0);
-    if (Exists(iniPath)) return;
-
-    std::string text = dn::mergeIniTexts(dn::defaultIni(GetUserDefaultUILanguage()), roomDefaults);
-    std::vector<dn::IniValue> carried;
-    for (const wchar_t* name : coop::kReplacedSettings) {
-        std::vector<dn::IniValue> values = dn::readIniValues(dir + name);
-        if (!values.empty()) Log("Settings: carrying %zu values over from %s", values.size(), Utf8Text(name).c_str());
-        carried.insert(carried.end(), values.begin(), values.end());
+void RemoveOldModFiles(const std::wstring& dir) {
+    static const struct {
+        const wchar_t* path;  // under Mods
+        std::uint64_t size, fnv1a;
+    } kOld[] = {{L"UI\\LYT_MAINFRAME.SGO", 7098, 0xDA755A27A8E88468ull}, {L"HUD\\ONLINEHUDTEXTURE.RAB", 205334, 0x1CD5561D661F20BBull}};
+    for (const auto& old : kOld) {
+        const std::wstring path = dir + L"..\\" + old.path;
+        WIN32_FILE_ATTRIBUTE_DATA about{};
+        if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &about) || about.nFileSizeHigh ||
+            about.nFileSizeLow != old.size)
+            continue;
+        const HANDLE file = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
+        if (file == INVALID_HANDLE_VALUE) continue;
+        std::vector<unsigned char> bytes(static_cast<std::size_t>(old.size));
+        DWORD read = 0;
+        const bool ok = ReadFile(file, bytes.data(), static_cast<DWORD>(bytes.size()), &read, nullptr) && read == bytes.size();
+        CloseHandle(file);
+        std::uint64_t hash = 0xCBF29CE484222325ull;
+        for (unsigned char b : bytes) hash = (hash ^ b) * 0x100000001B3ull;
+        if (!ok || hash != old.fnv1a) continue;
+        if (DeleteFileW(path.c_str())) {
+            RemoveDirectoryW(path.substr(0, path.find_last_of(L'\\')).c_str());  // only when that leaves it empty
+            Log("Removed Mods\\%s, which an earlier EDF6Coop wrote for its bigger rooms", Utf8Text(old.path).c_str());
+        } else {
+            Log("Mods\\%s, which an earlier EDF6Coop wrote for its bigger rooms, could not be deleted (error %lu)",
+                Utf8Text(old.path).c_str(), GetLastError());
+        }
     }
-    RenameOldSettings(carried);
-    std::vector<std::string> dropped;
-    text = dn::applyIniValues(text, carried, &dropped);
-    for (const std::string& line : dropped) Log("Settings: %s is no longer a setting; not carried over", line.c_str());
-    if (dn::writeNewIniUtf16(iniPath, text))
-        Log("Settings: wrote %s%s", Utf8Text(coop::kNameW).c_str(), Utf8Text(carried.empty() ? L".ini with the defaults"
-                                                                     : L".ini (the old settings files are no longer read)").c_str());
-    else
-        Log("Settings: could not write %s.ini (error %lu); running on the defaults", Utf8Text(coop::kNameW).c_str(), GetLastError());
 }
 
 void ForwardDirectNetLine(const char* line) { Log("[DN] %s", line); }

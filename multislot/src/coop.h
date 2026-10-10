@@ -1,5 +1,5 @@
 // What EDF6Coop does as one plugin before either part starts: it takes over from EDF6DirectNet.dll and
-// EDF6MultiSlot.dll, and it keeps one settings file and one log for both parts.
+// EDF6MultiSlot.dll, and it keeps one log for both parts.
 #pragma once
 
 #include <string>
@@ -13,10 +13,10 @@ namespace multislot {
 // then stay off (the log says what to do).
 bool RetireReplacedPlugins(const std::wstring& dir);
 
-// Writes EDF6Coop.ini (`iniPath`) when there is none: the documented defaults of both parts as one file
-// (`roomDefaults` is the room part's), with every setting found in the old EDF6DirectNet.ini and
-// EDF6MultiSlot.ini carried over. The old files are only read. Also moves the old UPnP record to its new name.
-void PrepareSettings(const std::wstring& dir, const std::wstring& iniPath, const char* roomDefaults);
+// Deletes the menu layout and HUD textures that 2.5.0 and earlier wrote under Mods (Mods\UI\LYT_MAINFRAME.SGO,
+// Mods\HUD\ONLINEHUDTEXTURE.RAB) for the bigger rooms, which EDFModLoader would otherwise keep loading. Only a file
+// whose size and FNV-1a are one an earlier release wrote: another mod's file of the same name stays. `dir` as above.
+void RemoveOldModFiles(const std::wstring& dir);
 
 // The direct-link part's log lines go into this log (dn::logToSink), marked "[DN] ".
 void ForwardDirectNetLine(const char* line);

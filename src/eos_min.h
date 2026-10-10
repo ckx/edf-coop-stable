@@ -163,11 +163,13 @@ struct EOS_Lobby_AddNotifyLobbyMemberStatusReceivedOptions {  // ApiVersion 1
     int32_t ApiVersion;
 };
 
+// EOS_ELobbyMemberStatus.
+enum : int32_t { kJoined = 0, kLeft = 1, kDisconnected = 2, kKicked = 3, kPromoted = 4, kClosed = 5 };
 struct EOS_Lobby_LobbyMemberStatusReceivedCallbackInfo {
     void* ClientData;
     const char* LobbyId;
     EOS_ProductUserId TargetUserId;
-    int32_t CurrentStatus;  // 0 joined, 1 left, 2 disconnected, 3 kicked, 4 promoted, 5 closed
+    int32_t CurrentStatus;  // EOS_ELobbyMemberStatus: kJoined ... kClosed below
 };
 
 // Lobby member attributes (eos_lobby_types.h). EDF.dll imports none of the member-attribute

@@ -37,7 +37,7 @@ constexpr std::size_t kPosition = 0x90;      // float[4] (54A6F2)
 constexpr std::size_t kNetworkObject = 0x120;
 constexpr std::size_t kNetworkFlags = 0x128;  // NetworkObject+8
 // Dead: 547C30 sets it when the HP reaches 0 (548419..548429, +0x2E9 = "just died") and leaves the HP alone while
-// it is set (548156); the per-frame update sends no target message for it (54C183, networld.h's kObjectNoTargetSync).
+// it is set (548156); the per-frame update sends no target message for it (54C183).
 constexpr std::size_t kDead = 0x2E8;
 constexpr std::size_t kHealth = 0x2F8;
 constexpr std::size_t kHealthDelta = 0x5B4;  // what 54CBE0 broadcasts (type 2), summed by slot 11 (54A9F6)

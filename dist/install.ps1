@@ -1,7 +1,7 @@
 ﻿param([switch]$Uninstall, [string]$GameDir = '')
 # EDF6Coop installer: finds the EARTH DEFENSE FORCE 6 folder via Steam and copies the plugin in.
 # EDF6Coop replaces EDF6DirectNet and EDF6MultiSlot: their DLLs are renamed to .disabled (never deleted), and
-# their settings files stay where they are; the plugin carries them into EDF6Coop.ini on its first start.
+# their settings files stay where they are.
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $gameFolder = 'EARTH DEFENSE FORCE 6'
@@ -175,8 +175,8 @@ if ($Uninstall) {
     $port = Get-MappedPort $plugins
     if ($port -ne 0) { Remove-OurUpnpMapping $port }
     foreach ($f in $files) { Remove-Item -LiteralPath (Join-Path $game $f) -ErrorAction SilentlyContinue }
-    # Settings, logs, the crash dump, the UPnP records, and what the auto-updater keeps next to the DLL
-    # (.old/.trial/.bad/.rolledback/.new<pid>). EDF6DirectNet.ini / EDF6MultiSlot.ini are the player's
+    # Settings, logs, the crash dump, the UPnP records, and what the auto-updater of 2.5.0 and older left next to
+    # the DLL (.old/.trial/.bad/.rolledback/.new<pid>). EDF6DirectNet.ini / EDF6MultiSlot.ini are the player's
     # old settings and stay; so do the .disabled old plugins.
     foreach ($f in 'EDF6Coop.ini', 'EDF6Coop.log', 'EDF6Coop.log.1', 'EDF6Coop.log.queue', 'EDF6Coop-crash.dmp',
                    'EDF6Coop.upnp', 'EDF6DirectNet.upnp', 'EDF6Coop.dll.old', 'EDF6Coop.dll.trial', 'EDF6Coop.dll.bad',
@@ -205,7 +205,7 @@ function Copy-Into([string]$from, [string]$to) {
 
 foreach ($f in $files) { Copy-Into (Join-Path $here $f) (Join-Path $game $f) }
 # The plugins EDF6Coop replaces: both would hook the same game code. Renamed, not deleted, so going back
-# is a rename; their .ini files stay for EDF6Coop to carry over.
+# is a rename; their .ini files stay.
 foreach ($old in 'EDF6DirectNet.dll', 'EDF6MultiSlot.dll') {
     $path = Join-Path $plugins $old
     if (-not (Test-Path -LiteralPath $path)) { continue }
@@ -244,6 +244,6 @@ if (-not (Test-Path -LiteralPath $loaderDst)) {
 }
 Write-Host ''
 Write-Host (T '完成！直接从 Steam 启动游戏即可。' '完了！Steam からそのままゲームを起動してください。' 'Done! Start the game from Steam as usual.')
-Write-Host ((T '第一次启动后会生成 Mods\Plugins\EDF6Coop.ini（设置，旧设置会自动搬过来）和 .log（日志），说明见 ' `
-    '初回起動時に Mods\Plugins\EDF6Coop.ini（設定。古い設定は自動で引き継がれます）と .log（ログ）が作成されます。説明は ' `
-    'The first start creates Mods\Plugins\EDF6Coop.ini (settings; your old settings are carried over) and .log (log); see ') + $readme)
+Write-Host ((T '第一次启动后会生成 Mods\Plugins\EDF6Coop.ini（设置）和 .log（日志），说明见 ' `
+    '初回起動時に Mods\Plugins\EDF6Coop.ini（設定）と .log（ログ）が作成されます。説明は ' `
+    'The first start creates Mods\Plugins\EDF6Coop.ini (settings) and .log (log); see ') + $readme)

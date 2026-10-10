@@ -73,27 +73,4 @@ constexpr long long kLogKeepBytes = 1536LL * 1024;
 // true when it did.
 bool TrimLogFile(const wchar_t* path, long long cap, long long keep);
 
-// How the run before this one ended, worked out in LogOpen by looking at what the file already holds:
-// whichever of the startup banner and the SHUTDOWN line comes last in it. Two machines died mid-mission on
-// 2026-09-19 with no exception and no shutdown, and nothing in the file could say whether they had crashed
-// or simply been closed - this is what answers that next time.
-enum class LastRun {
-    Unknown,   // no log yet, it was trimmed past both marks, or the plugin was unloaded in that run: say nothing
-    Ended,     // a SHUTDOWN line after the last banner: the game was closed normally
-    Cut,       // a banner with no SHUTDOWN after it: killed, hung, or died without reaching the handler
-};
-LastRun PreviousRun();
-// Written from DLL_PROCESS_DETACH when the process ends, or from the TerminateProcess wrapper. Raw Win32, no
-// heap and no CRT, so it is safe that late.
-void LogShutdown(const char* why);
-// Written from DLL_PROCESS_DETACH when the plugin is unloaded while the game goes on (it refused, or it is
-// disabled): the UNLOADED line. Nothing of this run's end is seen after it, so the next start says nothing
-// about it rather than calling it cut - and SHUTDOWN, which 1.5.13 wrote here, would claim the game had exited.
-void LogUnloaded(const char* why);
-
-// Research lines that repeat during play (lobby and P2P events, room capacity checks, enemy count scaling) are
-// written only with [MultiSlot] NetLog=1 (the default since 1.2.2); startup, menu and crash lines always are.
-void SetDetailLog(bool on);
-bool DetailLog();
-
 }  // namespace multislot

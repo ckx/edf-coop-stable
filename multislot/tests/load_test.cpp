@@ -1,14 +1,10 @@
-// Loads the built plugin the way EDFModLoader does, against the real EDF.dll mapped without running
-// its initialisation, then calls the patched SEARCH_TYPE functions (all leaf code) to check what
-// they now return, compared with what the same functions returned before the plugin loaded.
-// The plugin sits in <work-folder>\<mode>\Mods\Plugins, as in a game folder.
-//   MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder off|host4|host8|fresh|upgrade|nomission
+// Loads the built plugin the way EDFModLoader does, against the real EDF.dll mapped without running its
+// initialisation, and checks which of the game's sites it took over. The plugin sits in <work-folder>\<mode>\Mods\Plugins,
+// as in a game folder.
+//   MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced
 #include <windows.h>
-#include "native_runtime.h"
 #include "late_fault.h"
 
-#include <climits>
-#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -24,12 +20,9 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 
-#include "../src/hostmode.h"
+#include "../src/hitauthgame.h"
 #include "../src/midhook.h"
 #include "../src/patches.h"
-#include "../src/smoothing.h"
-#include "../src/widecmp.h"
-#include "mod_assets.h"
 
 using namespace multislot;
 
@@ -63,49 +56,6 @@ std::string ReadIniText(const std::wstring& path) {
 bool Contains(const std::string& text, const char* needle) { return text.find(needle) != std::string::npos; }
 
 using Load = bool(EDFMLAPI*)(PluginInfo*);
-using FamilyFn = bool(*)(int);        // EDF+749AC0 SEARCH_TYPE join check
-using DecodeFn = int(*)(int);         // EDF+74AC20 SEARCH_TYPE -> room kind
-using RangeFn = std::uint64_t(*)(int);  // EDF+74AC50 room kind -> searched range, (high << 32) | low
-using MapFn = int(*)(int);            // EDF+74ACA0 room kind -> SEARCH_TYPE
-
-struct Behaviour {
-    std::vector<int> values;
-    std::vector<bool> family;
-    std::vector<int> decode;
-    std::vector<std::uint64_t> range;
-    std::vector<int> map;
-};
-
-Behaviour Observe(const unsigned char* base) {
-    Behaviour b;
-    for (int v = -0x20; v < 0x240; ++v) b.values.push_back(v);
-    for (int v : {0x1590, 0x7FFFFFFF, INT_MIN, INT_MIN + 1}) b.values.push_back(v);
-    const auto family = reinterpret_cast<FamilyFn>(reinterpret_cast<std::uintptr_t>(base) + 0x749AC0);
-    const auto decode = reinterpret_cast<DecodeFn>(reinterpret_cast<std::uintptr_t>(base) + 0x74AC20);
-    const auto range = reinterpret_cast<RangeFn>(reinterpret_cast<std::uintptr_t>(base) + 0x74AC50);
-    const auto map = reinterpret_cast<MapFn>(reinterpret_cast<std::uintptr_t>(base) + 0x74ACA0);
-    for (int v : b.values) {
-        b.family.push_back(family(v));
-        b.decode.push_back(decode(v));
-    }
-    for (int kind = 0; kind < 8; ++kind) {
-        b.range.push_back(range(kind));
-        b.map.push_back(map(kind));
-    }
-    return b;
-}
-
-// This version's MultiSlot rooms: the vanilla kinds mirrored around the centre.
-bool IsMirror(int v) { return v >= 2 * static_cast<int>(kSearchTypeCenter) - 0x94 && v <= 2 * static_cast<int>(kSearchTypeCenter) - 0x91; }
-// Rooms of MultiSlot 0.2-0.4.1 (0x8C..0x8F), 0.4.2-0.4.3 (0x7C..0x7F), 0.5.0-1.0.0 (0x74..0x77), 1.1.0-1.1.1 (0x6C..0x6F)
-// 1.2.0 (0x64..0x67), 1.2.1-1.2.5 (0x5C..0x5F), and the room-size builds up to EDF6Coop 2.2.x, whose machines have
-// fewer slots: 8 (0x54..0x57), 10 (0x48..0x4B), 12 (0x40..0x43), 16 (0x38..0x3B), 24 (0x28..0x2B), 32 (0x20..0x23).
-bool IsOldMirror(int v) {
-    return !IsMirror(v) && ((v >= 0x8C && v <= 0x8F) || (v >= 0x7C && v <= 0x7F) || (v >= 0x74 && v <= 0x77) ||
-                            (v >= 0x6C && v <= 0x6F) || (v >= 0x64 && v <= 0x67) || (v >= 0x5C && v <= 0x5F) ||
-                            (v >= 0x54 && v <= 0x57) || (v >= 0x48 && v <= 0x4B) || (v >= 0x40 && v <= 0x43) ||
-                            (v >= 0x38 && v <= 0x3B) || (v >= 0x28 && v <= 0x2B) || (v >= 0x20 && v <= 0x23));
-}
 
 bool InModule(std::uintptr_t address, HMODULE module) {
     const auto base = reinterpret_cast<std::uintptr_t>(module);
@@ -128,48 +78,8 @@ bool RedirectedInto(const unsigned char* site, HMODULE plugin) {
     return InModule(target, plugin);
 }
 
-// The private EDF mapping has no imports or DllMain. Its allocator, record copies and destructor only need
-// CRT imports here; resolve those from this process, as the stream native tests do, without starting the game.
-void CheckVoiceHudLifetime(const unsigned char* base, HMODULE game, HMODULE plugin) {
-    const auto call = SessionCalls().at(0);
-    const bool redirected = RedirectedInto(base + call.rva, plugin);
-    Check(redirected, "voice HUD allocation reaches the plugin through a stub");
-    if (!redirected) return;
-    const bool imports = native_test::ResolveCrtImports(game);
-    Check(imports, "voice HUD native lifetime has its CRT imports");
-    if (!imports) return;
-    std::int32_t displacement = 0;
-    std::memcpy(&displacement, base + call.rva + 1, sizeof(displacement));
-    using Allocate = void* (*)(std::size_t);
-    const auto allocate = reinterpret_cast<Allocate>(reinterpret_cast<std::uintptr_t>(base) + call.rva + 5 + displacement);
-    using Resize = void (*)(void*, std::size_t, const void*);
-    using Destroy = void (*)(void*);
-    const auto resize = reinterpret_cast<Resize>(reinterpret_cast<std::uintptr_t>(base) + 0x9621A0);
-    const auto destroy = reinterpret_cast<Destroy>(reinterpret_cast<std::uintptr_t>(base) + 0x961930);
-    // Native vector: +8 data, +0x10 capacity, +0x18 count. The template record has two empty wstrings
-    // (inline capacity 7) followed by the HUD's flags. Exercise real record construction and destruction,
-    // not a C++ copy of the alignment check. Repeat so a leaked/stale vector state cannot pass silently.
-    alignas(16) std::array<std::uint64_t, 10> record{};
-    record[3] = 7;
-    record[7] = 7;
-    for (const std::size_t count : {std::size_t{4}, std::size_t{52}, std::size_t{kMaxPlayers}}) {
-        for (int cycle = 0; cycle < 3; ++cycle) {
-            void* buffer = allocate(0x50 * count);
-            Check(buffer != nullptr, "voice HUD native allocation succeeds");
-            if (!buffer) return;
-            std::array<std::uint64_t, 4> vector{0, reinterpret_cast<std::uint64_t>(buffer), count, 0};
-            resize(vector.data(), count, record.data());
-            Check(vector[3] == count, "native voice HUD resize initializes every record");
-            destroy(vector.data());
-            Check(vector[1] == 0 && vector[2] == 0 && vector[3] == 0,
-                  "native voice HUD destructor releases and clears the grown vector");
-            destroy(vector.data());
-        }
-    }
-}
-
-// `jmp rel32` at the site -> a thunk laid out like MidThunkCode (handler inside the plugin, the
-// site's displaced bytes, resume right after the site).
+// The site jumps to a read-only executable thunk that is exactly MidThunkCode for it, apart from the handler and
+// resume addresses; the handler is in the plugin and the unwinder knows the thunk.
 bool HookedInto(const unsigned char* base, const MidSite& site, HMODULE plugin) {
     const unsigned char* at = base + site.rva;
     if (at[0] != 0xE9) return false;
@@ -180,8 +90,6 @@ bool HookedInto(const unsigned char* base, const MidSite& site, HMODULE plugin) 
     const unsigned char* thunk = at + 5 + relative;
     MEMORY_BASIC_INFORMATION mbi{};
     if (!VirtualQuery(thunk, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || mbi.Protect != PAGE_EXECUTE_READ) return false;
-    // Every byte as in a reference thunk, except the handler address and the resume address (pushed as the
-    // return address at the start, and jumped to at the end).
     const std::uint64_t handlerMarker = 0x1122334455667788ull, resumeMarker = 0x8877665544332211ull;
     const auto reference = MidThunkCode(reinterpret_cast<MidHandler>(static_cast<std::uintptr_t>(handlerMarker)),
                                         site.original.data() + site.displacedOffset, site.displacedSize, resumeMarker);
@@ -206,80 +114,28 @@ bool HookedInto(const unsigned char* base, const MidSite& site, HMODULE plugin) 
     }
     for (std::size_t i = 0; i < reference.size(); ++i)
         if (!operand[i] && thunk[i] != reference[i]) return false;
-    // And the unwinder knows the thunk, so a fault in its handler unwinds back into the game.
     DWORD64 imageBase = 0;
     const bool described = RtlLookupFunctionEntry(static_cast<DWORD64>(reinterpret_cast<std::uintptr_t>(thunk)), &imageBase,
                                                   nullptr) != nullptr;
     return handlers == 1 && resumes == 2 && described && InModule(static_cast<std::uintptr_t>(handler), plugin);
 }
 
-// The site jumps to a read-only executable cave that is exactly WideCompareCode for it (widecmp.h).
-bool WidenedInto(const unsigned char* base, const WideCompare& site) {
-    const unsigned char* at = base + site.rva;
-    if (at[0] != 0xE9) return false;
-    for (std::size_t i = 5; i < site.original.size(); ++i)
-        if (at[i] != 0x90) return false;
-    std::int32_t relative = 0;
-    std::memcpy(&relative, at + 1, 4);
-    const unsigned char* cave = at + 5 + relative;
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!VirtualQuery(cave, &mbi, sizeof(mbi)) || mbi.State != MEM_COMMIT || mbi.Protect != PAGE_EXECUTE_READ) return false;
-    const auto expected = WideCompareCode(site, static_cast<std::uint64_t>(reinterpret_cast<std::uintptr_t>(at)));
-    return !expected.empty() && std::memcmp(cave, expected.data(), expected.size()) == 0;
-}
-
-bool CompareUntouched(const unsigned char* base, const WideCompare& site) {
-    return std::memcmp(base + site.rva, site.original.data(), site.original.size()) == 0;
-}
-
 bool SiteUntouched(const unsigned char* base, const MidSite& site) {
     return std::memcmp(base + site.rva, site.original.data(), site.original.size()) == 0;
 }
 
-bool SlotInto(const unsigned char* base, const PointerSlot& slot, HMODULE plugin) {
-    std::uintptr_t value = 0;
-    std::memcpy(&value, base + slot.rva, sizeof(value));
-    return InModule(value, plugin);
-}
-
-int Applied(const unsigned char* base, const std::vector<Patch>& patches) {
-    int count = 0;
-    for (const auto& patch : patches)
-        if (std::memcmp(base + patch.rva, patch.replacement.data(), patch.replacement.size()) == 0) ++count;
-    return count;
-}
-
-int Untouched(const unsigned char* base, const std::vector<Patch>& patches) {
-    int count = 0;
-    for (const auto& patch : patches)
-        if (Matches(base + patch.rva, patch)) ++count;
-    return count;
-}
-
-void WriteToBadAddress() { LateFault(0x10); }
-
-__declspec(noinline) void ThrowAndCatch() {
+void ThrowAndCatch() {
     try {
         throw std::runtime_error("thrown and caught outside EDF.dll");
     } catch (const std::exception&) {
     }
 }
 
-void WriteBytes(const std::wstring& path, const std::vector<unsigned char>& bytes) {
-    std::ofstream(std::filesystem::path(path), std::ios::binary | std::ios::trunc).write(reinterpret_cast<const char*>(bytes.data()),
-                                                                  static_cast<std::streamsize>(bytes.size()));
-}
-
-std::vector<unsigned char> ReadBytes(const std::wstring& path) {
-    std::ifstream in(std::filesystem::path(path), std::ios::binary);
-    return std::vector<unsigned char>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
-}
-
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
     if (argc < 5) {
-        std::printf("usage: MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder off|host4|host8|fresh|upgrade|nomission\n");
+        std::printf("usage: MultiSlotLoadTest EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced\n");
         return 2;
     }
     const std::wstring mode = argv[4];
@@ -294,69 +150,26 @@ int wmain(int argc, wchar_t** argv) {
         return 1;
     }
     const auto base = reinterpret_cast<const unsigned char*>(game);
-    const Behaviour before = Observe(base);
 
     const std::wstring folder = std::wstring(argv[3]) + L"\\" + mode;
-    const std::wstring mods = folder + L"\\Mods";
-    const std::wstring plugins = mods + L"\\Plugins";
-    const std::wstring uiFolder = mods + L"\\UI";
-    const std::wstring layoutPath = uiFolder + L"\\LYT_MAINFRAME.SGO";
-    const std::wstring hudFolder = mods + L"\\HUD";
-    const std::wstring hudPath = hudFolder + L"\\ONLINEHUDTEXTURE.RAB";
-    for (const auto& path : {std::wstring(argv[3]), folder, mods, plugins}) CreateDirectoryW(path.c_str(), nullptr);
+    const std::wstring plugins = folder + L"\\Mods\\Plugins";
+    for (const auto& path : {std::wstring(argv[3]), folder, folder + L"\\Mods", plugins}) CreateDirectoryW(path.c_str(), nullptr);
     const std::wstring dll = plugins + L"\\EDF6Coop.dll";
     const std::wstring logPath = plugins + L"\\EDF6Coop.log";
+    const std::wstring iniPath = plugins + L"\\EDF6Coop.ini";
     CopyFileW(argv[2], dll.c_str(), FALSE);
     DeleteFileW(logPath.c_str());
-    const std::wstring iniPath = plugins + L"\\EDF6Coop.ini";
     DeleteFileW(iniPath.c_str());
-    // The two plugins EDF6Coop replaces, as a player upgrading from them has them in Mods\Plugins.
-    const std::wstring oldRooms = plugins + L"\\EDF6MultiSlot", oldDirect = plugins + L"\\EDF6DirectNet";
-    for (const auto& old : {oldRooms, oldDirect})
-        for (const wchar_t* ext : {L".dll", L".dll.disabled", L".ini"}) DeleteFileW((old + ext).c_str());
-    const bool upgrade = mode == L"upgrade";  // no EDF6Coop.ini, but the replaced plugins and their settings
-    const bool fresh = mode == L"fresh" || upgrade;  // no EDF6Coop.ini: one is written and used
-    if (upgrade) {
-        std::ofstream(std::filesystem::path(oldRooms + L".dll"), std::ios::binary) << "MZ not loaded";
-        std::ofstream(std::filesystem::path(oldDirect + L".dll"), std::ios::binary) << "MZ not loaded";
-        std::ofstream(std::filesystem::path(oldRooms + L".ini"), std::ios::binary)
-            << "[MultiSlot]\r\nEnabled=1\r\nEightPlayerRooms=1\r\nMaxPlayers=8\r\n[RoomScreen]\r\nPageKeys=F2,Tab\r\n";
-        std::ofstream(std::filesystem::path(oldDirect + L".ini"), std::ios::binary)
-            << "\xEF\xBB\xBF[DirectNet]\r\nEnabled=1\r\nKey=secret\r\n[Update]\r\nAutoUpdate=0\r\n";
-    }
-    if (!fresh) {
-        const char* ini = mode == L"off"         ? "[MultiSlot]\r\nEnabled=0\r\nEightPlayerRooms=1\r\n"
-                          : mode == L"recoveryoff" ? "[MultiSlot]\r\nEnabled=1\r\nHandshakeRecovery=0\r\n"
-                          : mode == L"keeproomoff" ? "[MultiSlot]\r\nEnabled=1\r\nKeepRoomOnPeerTimeout=0\r\n"
-                          : mode == L"quiet"     ? "[MultiSlot]\r\nEnabled=1\r\nHandshakeRecovery=0\r\nNetLog=0\r\n"
-                          : mode == L"host4"     ? "[MultiSlot]\r\nEnabled=1\r\nNetLog=0\r\n[Mission]\r\nExtraEnemies=0\r\n"
-                          : mode == L"nomission" ? "[MultiSlot]\r\nEnabled=1\r\nMaxPlayers=4\r\n[Mission]\r\nExtend=0\r\n"
-                          : mode == L"smooth"    ? "[MultiSlot]\r\nEnabled=1\r\nNetLog=1\r\n[Smoothing]\r\nRemotePlayerPercent=30\r\n"
-                                                 : "[MultiSlot]\r\nEnabled=1\r\nEightPlayerRooms=1\r\nCrashLog=1\r\nNetLog=1\r\n"
-                                                   "[RoomScreen]\r\nDummyMembers=1\r\nPageKey=F2\r\nDummyAddKey=F3\r\nDummyRemoveKey=F4\r\n"
-                                                   "[Test]\r\nGhostPlayers=4\r\n[Mission]\r\nScale6=1.25\r\n";
+    // A plugin EDF6Coop replaces, as a player who had it still has it in Mods\Plugins.
+    const std::wstring replaced = plugins + L"\\EDF6DirectNet.dll";
+    DeleteFileW(replaced.c_str());
+    DeleteFileW((replaced + L".disabled").c_str());
+    if (mode == L"replaced") std::ofstream(std::filesystem::path(replaced), std::ios::binary) << "MZ not loaded";
+    if (mode == L"off" || mode == L"keeproomoff" || mode == L"on") {
+        const char* ini = mode == L"off"           ? "[DirectNet]\r\nEnabled=0\r\n"
+                          : mode == L"keeproomoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n"
+                                                   : "[Log]\r\nCrashLog=1\r\n";
         std::ofstream(std::filesystem::path(iniPath), std::ios::binary | std::ios::trunc) << ini;
-    }
-
-    // Mods\UI\LYT_MAINFRAME.SGO before loading: ours (off, host8), another mod's (nomission), none (host4, fresh).
-    const std::vector<unsigned char> ours(kMenuLayoutBytes, kMenuLayoutBytes + sizeof(kMenuLayoutBytes));
-    auto foreign = ours;
-    foreign[foreign.size() / 2] ^= 0x5A;
-    DeleteFileW(layoutPath.c_str());
-    RemoveDirectoryW(uiFolder.c_str());
-    if (mode == L"off" || mode == L"host8" || mode == L"nomission") {
-        CreateDirectoryW(uiFolder.c_str(), nullptr);
-        WriteBytes(layoutPath, mode == L"nomission" ? foreign : ours);
-    }
-    // Mods\HUD\ONLINEHUDTEXTURE.RAB: ours (off, host8, nomission), another mod's (quiet), none (the rest).
-    const std::vector<unsigned char> ourHud(kHudArchiveBytes, kHudArchiveBytes + sizeof(kHudArchiveBytes));
-    auto foreignHud = ourHud;
-    foreignHud[foreignHud.size() / 2] ^= 0x5A;
-    DeleteFileW(hudPath.c_str());
-    RemoveDirectoryW(hudFolder.c_str());
-    if (mode == L"off" || mode == L"host8" || mode == L"nomission" || mode == L"quiet") {
-        CreateDirectoryW(hudFolder.c_str(), nullptr);
-        WriteBytes(hudPath, mode == L"quiet" ? foreignHud : ourHud);
     }
 
     const HMODULE plugin = LoadLibraryW(dll.c_str());
@@ -365,303 +178,50 @@ int wmain(int argc, wchar_t** argv) {
     if (!load) return 1;
     PluginInfo info{};
     const bool loaded = load(&info);
-    const Behaviour after = Observe(base);
     const std::string log = ReadText(logPath);
-    const auto guest = GuestPatches();
-    const auto sessions = SessionPatches();
-    const auto hostHooks = HostModeHooks();
-    const auto calls = GuestCalls();
-    const auto missionPatches = MissionPatches();
-    const auto missionHooks = MissionHooks();
-    const auto missionCalls = MissionCalls();
-    const auto hudPatches = HudColourPatches();
-    const auto hudHooks = HudColourHooks();
-    const auto hudWrap = HudIndexWrapHooks();
-    // guarded: the weapon guard is in, and without the mission phase it hooks the mission start site alone.
-    const auto missionUntouched = [&](bool guarded) {
-        bool untouched = Untouched(base, missionPatches) == static_cast<int>(missionPatches.size()) &&
-                         Untouched(base, hudPatches) == static_cast<int>(hudPatches.size());
-        for (const auto& hook : hudHooks) untouched = untouched && SiteUntouched(base, hook);
-        for (const auto& hook : hudWrap) untouched = untouched && SiteUntouched(base, hook);
-        for (const auto& hook : missionHooks)
-            untouched = untouched && ((guarded && hook.rva == WeaponGuardHooks()[1].rva) || SiteUntouched(base, hook));
-        for (const auto& call : missionCalls) untouched = untouched && CallTargets(base + call.rva, call.rva, call.target);
-        for (const auto& hook : SpawnHooks()) untouched = untouched && SiteUntouched(base, hook);
-        for (const auto& slot : MissionSlots()) untouched = untouched && SlotTargets(base + slot.rva, reinterpret_cast<std::uint64_t>(base), slot.target);
-        for (const auto& call : PacketFitCalls()) untouched = untouched && CallTargets(base + call.rva, call.rva, call.target);
-        for (const auto& hook : PacketFitHooks()) untouched = untouched && SiteUntouched(base, hook);
-        for (const auto& site : MissionCompares()) untouched = untouched && CompareUntouched(base, site);
-        for (const auto& hook : BvmPlayerTableHooks()) untouched = untouched && SiteUntouched(base, hook);
-        return untouched;
-    };
+    const auto guard = WeaponGuardHooks();
 
     if (mode == L"off") {
         Check(!loaded, "Enabled=0 asks the loader to unload");
-        Check(Untouched(base, guest) == static_cast<int>(guest.size()), "Enabled=0 leaves every guest patch site untouched");
-        Check(Untouched(base, sessions) == static_cast<int>(sessions.size()), "Enabled=0 leaves the room tables at four");
-        for (const auto& site : SessionCompares()) Check(CompareUntouched(base, site), "Enabled=0 leaves the room table bounds at four");
-        for (const auto& hook : hostHooks) Check(SiteUntouched(base, hook), "Enabled=0 leaves the host room sites untouched");
-        for (const auto& hook : HostDataHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves the file open untouched");
-        const PointerSlot frame = MainFrameSlot();
-        Check(SlotTargets(base + frame.rva, reinterpret_cast<std::uint64_t>(base), frame.target), "Enabled=0 leaves the menu frame vtable untouched");
-        for (const auto& call : calls) Check(CallTargets(base + call.rva, call.rva, call.target), "Enabled=0 leaves calls untouched");
-        for (const auto& call : SessionCalls())
-            Check(CallTargets(base + call.rva, call.rva, call.target), "Enabled=0 leaves voice HUD allocation untouched");
-        Check(after.family == before.family && after.decode == before.decode && after.range == before.range && after.map == before.map,
-              "Enabled=0 leaves SEARCH_TYPE behaviour identical");
+        for (const auto& hook : guard) Check(SiteUntouched(base, hook), "Enabled=0 leaves the weapon guard sites alone");
+        for (const auto& hook : PeerTimeoutHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves Users::Add alone");
+        for (const auto& call : PeerTimeoutCalls())
+            Check(CallTargets(base + call.rva, call.rva, call.target), "Enabled=0 leaves the room-leave check alone");
+        for (const auto& hook : HitAuthorityHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves the hit sites alone");
         Check(Contains(log, "Enabled=0"), "Enabled=0 is logged");
-        Check(missionUntouched(false), "Enabled=0 leaves mission code untouched");
-        for (const auto& call : PeerTimeoutCalls())
-            Check(CallTargets(base + call.rva, call.rva, call.target), "Enabled=0 leaves the room-leave check untouched");
-        for (const auto& hook : PeerTimeoutHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves Users::Add untouched");
-        for (const auto& hook : UserSlotHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves the member slots alone");
-        Check(GetFileAttributesW(layoutPath.c_str()) == INVALID_FILE_ATTRIBUTES && GetFileAttributesW(uiFolder.c_str()) == INVALID_FILE_ATTRIBUTES,
-              "Enabled=0 removes our menu layout (and the UI folder it was alone in)");
-        Check(Contains(log, "Menu: removed Mods\\UI\\LYT_MAINFRAME.SGO"), "the removal is logged");
-        Check(GetFileAttributesW(hudPath.c_str()) == INVALID_FILE_ATTRIBUTES && GetFileAttributesW(hudFolder.c_str()) == INVALID_FILE_ATTRIBUTES,
-              "Enabled=0 removes our HUD archive (and the HUD folder it was alone in)");
-        Check(Contains(log, "HUD: removed Mods\\HUD\\ONLINEHUDTEXTURE.RAB"), "the HUD archive removal is logged");
-        // What EDFModLoader does next with a plugin that says no (its dllmain.cpp): FreeLibrary. 1.5.13's log
-        // writer thread was running by then and faulted in the unmapped DLL within one 200 ms interval.
-        FreeLibrary(plugin);
+        FreeLibrary(plugin);  // what EDFModLoader does with a plugin that refuses
         Check(GetModuleHandleW(dll.c_str()) == nullptr, "the refused plugin is unloaded completely");
-        Sleep(600);
-        const std::string unloaded = ReadText(logPath);
-        Check(Contains(unloaded, "] UNLOADED the plugin was unloaded") && !Contains(unloaded, "SHUTDOWN"),
-              "the process goes on, and the log calls it an unload, not the game exiting");
     } else {
-        // host8's INI is a 2.2 one with EightPlayerRooms=1, and upgrade carries EDF6MultiSlot's over: both are 8.
-        const bool eightPlayers = mode == L"host8" || upgrade;
-        // NetLog defaults to on: only host4's INI turns it off.
-        const bool netLog = mode != L"host4" && mode != L"quiet";
-        const bool recovery = mode != L"recoveryoff" && mode != L"quiet";
-        for (const auto& call : RecoveryCalls()) {
-            Check(recovery ? RedirectedInto(base + call.rva, plugin) : CallTargets(base + call.rva, call.rva, call.target),
-                  "recovery call is installed only when enabled");
-        }
-        Check(Contains(log, recovery ? "HandshakeRecovery=1:" : "HandshakeRecovery=0:"), "recovery mode is logged");
-        // KeepRoomOnPeerTimeout defaults to on, NetLog or not; only its own key turns it off.
-        const bool keepRoom = mode != L"keeproomoff";
-        for (const auto& call : PeerTimeoutCalls())
-            Check(keepRoom ? RedirectedInto(base + call.rva, plugin) : CallTargets(base + call.rva, call.rva, call.target),
-                  "the room-leave check reaches the plugin only when KeepRoomOnPeerTimeout is on");
-        for (const auto& hook : PeerTimeoutHooks())
-            Check(keepRoom ? HookedInto(base, hook, plugin) : SiteUntouched(base, hook),
-                  "Users::Add records join times only when KeepRoomOnPeerTimeout is on");
-        Check(Contains(log, keepRoom ? "KeepRoomOnPeerTimeout=1:" : "KeepRoomOnPeerTimeout=0:"), "KeepRoomOnPeerTimeout is logged");
-        if (!netLog && recovery)
-            Check(Contains(log, "Recovery transport: 1 EOS import redirected"), "recovery works independently of NetLog");
         Check(loaded, "EML6_Load succeeds against the supported EDF.dll");
         Check(info.infoVersion == PluginInfo::MaxInfoVer && info.name && std::strcmp(info.name, "EDF6Coop") == 0,
-              "PluginInfo is filled in");
+              "PluginInfo names EDF6Coop");
         Check(info.version.major == MULTISLOT_VERSION_MAJOR && info.version.minor == MULTISLOT_VERSION_MINOR &&
                   info.version.patch == MULTISLOT_VERSION_PATCH && info.version.build == 0,
-              "PluginInfo carries CMakeLists.txt's project version");
-        Check(Applied(base, guest) == static_cast<int>(guest.size()), "every guest patch is written");
-        Check(Applied(base, sessions) == static_cast<int>(sessions.size()), "room user slots and packet sessions are sized for the room");
-        CheckVoiceHudLifetime(base, game, plugin);
-        for (const auto& site : SessionCompares()) Check(WidenedInto(base, site), site.name);
-        Check(Contains(log, ("Rooms: " + std::to_string(kMaxPlayers) + " user slots, packet sessions and voice chat HUD records").c_str()),
-              "the room table size is logged");
-        for (const auto& call : calls) Check(RedirectedInto(base + call.rva, plugin), "member count call reaches the plugin through a stub");
-        for (const auto& call : RoomViewCalls()) Check(RedirectedInto(base + call.rva, plugin), "room screen call reaches the plugin through a stub");
-        Check(SlotInto(base, RoomViewSlot(), plugin), "HUiRoom OnUpdate vtable slot points into the plugin");
-        // Every call to the room member list builder is redirected, with or without DummyMembers: the list is cut
-        // to this build's room size before the voice chat HUD writes a record per member, and fake members reach
-        // the room screen, the HUD and anything else that asks for the members.
-        for (const auto& call : MemberListCalls()) Check(RedirectedInto(base + call.rva, plugin), call.name);
-
-        // 8Player MOD: the room sites and the menu frame are hooked whatever the setting; the setting is
-        // read when a room is created (hostmode_test covers the handlers).
-        for (const auto& hook : hostHooks) Check(HookedInto(base, hook, plugin), hook.name);
-        // Host data ([HostData] Enabled=1 by default): the file open, which only logs until an overlay is on.
-        for (const auto& hook : HostDataHooks()) Check(HookedInto(base, hook, plugin), hook.name);
-        // The weapon guard's room info site; its mission start site is checked with the mission phase below.
-        Check(HookedInto(base, WeaponGuardHooks()[0], plugin), "the weapon guard hooks the room info parser");
-        for (const auto& hook : UserSlotHooks()) Check(HookedInto(base, hook, plugin), hook.name);
-        Check(SlotInto(base, MainFrameSlot(), plugin), "HUiMainFrame OnUpdate vtable slot points into the plugin");
-        Check(Contains(log, eightPlayers ? "Hosting: 8Player MOD ON" : "Hosting: Player MOD OFF"), "the host mode setting is logged");
-        Check(Contains(log, "EightPlayerRooms=1 from an earlier version") == (mode == L"host8"),
-              "a 2.2 INI's EightPlayerRooms=1 is read as eight-player rooms, and the log says so");
-        if (upgrade) {
-            const std::string written = ReadIniText(iniPath);
-            Check(Contains(written, "RoomSize=8\r\n") && !Contains(written, "EightPlayerRooms") &&
-                      Contains(written, "PageKeys=F2,Tab\r\n") &&
-                      Contains(written, "Key=secret\r\n") && Contains(written, "AutoUpdate=0\r\n"),
-                  "the replaced plugins' settings are carried into EDF6Coop.ini");
-            Check(!Contains(written, "MaxPlayers="), "a setting that no longer exists is not carried over");
-            Check(Contains(log, "MaxPlayers=8 is no longer a setting"), "and the log says which one was dropped");
-            for (const auto& old : {oldRooms, oldDirect})
-                Check(GetFileAttributesW((old + L".dll").c_str()) == INVALID_FILE_ATTRIBUTES &&
-                          GetFileAttributesW((old + L".dll.disabled").c_str()) != INVALID_FILE_ATTRIBUTES,
-                      "a replaced plugin is renamed to .disabled, so the loader skips it from now on");
-            Check(GetFileAttributesW((oldRooms + L".ini").c_str()) != INVALID_FILE_ATTRIBUTES,
-                  "the old settings files are left where they were");
-        }
-        if (fresh && !upgrade) {
+              "PluginInfo carries the project version");
+        for (const auto& hook : guard) Check(HookedInto(base, hook, plugin), hook.name);
+        const bool keepRoom = mode != L"keeproomoff";
+        for (const auto& hook : PeerTimeoutHooks())
+            Check(keepRoom ? HookedInto(base, hook, plugin) : SiteUntouched(base, hook), hook.name);
+        for (const auto& call : PeerTimeoutCalls())
+            Check(keepRoom ? RedirectedInto(base + call.rva, plugin) : CallTargets(base + call.rva, call.rva, call.target),
+                  call.name);
+        Check(Contains(log, keepRoom ? "KeepRoomOnPeerTimeout=1:" : "KeepRoomOnPeerTimeout=0:"), "KeepRoomOnPeerTimeout is logged");
+        Check(Contains(log, "Crash log armed"), "the crash log is armed");
+        if (mode == L"fresh") {
             const std::string written = ReadIniText(iniPath);
             Check(ReadText(iniPath).rfind("\xFF\xFE", 0) == 0, "the INI is written as UTF-16LE with a BOM");
-            Check(Contains(written, "[RoomScreen]") && Contains(written, "RoomSize=0\r\n") && Contains(written, "NetLog=1\r\n") &&
-                      Contains(written, "[DirectNet]") && Contains(written, "[Update]") &&
-                      Contains(written, "DummyMembers=0") && Contains(written, "PageKeys=F3,Tab\r\n") &&
-                      Contains(written, "[CopyArmor]") && Contains(written, "PadButton=LeftStick\r\n") &&
-                      Contains(written, "DummyAddKey=F6\r\n") && !Contains(written, "MaxPlayers=") && !Contains(written, "\r\nPageKey=") &&
-                      !Contains(written, "@MULTISLOT_"),
-                  "missing INI is written with the documented defaults (CRLF)");
-            Check(Contains(log, "Settings: wrote EDF6Coop.ini with the defaults"), "writing the default INI is logged");
-            // A dump copies the game's memory, so it must never be on for someone who only installed
-            // the package. The default INI says 0 and the plugin must read 0 when the key is absent.
-            Check(Contains(written, "CrashDump=0\r\n"), "the default INI leaves crash dumps off");
+            Check(Contains(written, "[DirectNet]") && Contains(written, "[Resilience]") && Contains(written, "[Netcode]") &&
+                      Contains(written, "[Log]") && Contains(written, "CrashDump=0\r\n"),
+                  "a missing INI is written with every section, crash dumps off");
         }
-        Check(Contains(log, "Crash log armed"), "the crash log is armed");
-        // The off-path wording is what tells the player nothing is being written. (The same line also
-        // mentions CrashDump=1 as the way to turn it on, so the wording is checked, not the substring.)
-        Check(Contains(log, "no crash dump (CrashDump is off by default"), "the log says the dump is off");
-        if (mode == L"smooth") {
-            // The one instruction is retargeted; the shared 0.05 at 17A5A70 must be left alone.
-            const unsigned char* site = base + kSmoothingSite;
-            Check(site[0] == 0x0F && site[1] == 0x59 && site[2] == 0x35, "the multiply itself is unchanged");
-            std::int32_t disp = 0;
-            std::memcpy(&disp, site + 3, sizeof(disp));
-            const unsigned char* constant = site + 7 + disp;
-            Check(constant != base + 0x17A5A70, "it no longer reads the shared 0.05");
-            Check(reinterpret_cast<std::uintptr_t>(constant) % 16 == 0, "its operand is 16-byte aligned for mulps");
-            float splat[4]{};
-            std::memcpy(splat, constant, sizeof(splat));
-            Check(splat[0] > 0.29f && splat[0] < 0.31f && splat[1] == splat[0] && splat[2] == splat[0] &&
-                      splat[3] == splat[0],
-                  "and points at 0.30 four ways");
-            const std::uint8_t stock[16] = {0xCD, 0xCC, 0x4C, 0x3D, 0xCD, 0xCC, 0x4C, 0x3D,
-                                            0xCD, 0xCC, 0x4C, 0x3D, 0xCD, 0xCC, 0x4C, 0x3D};
-            Check(std::memcmp(base + 0x17A5A70, stock, sizeof(stock)) == 0,
-                  "the shared constant the other nine sites use is untouched");
-            Check(Contains(log, "closes 30% of the gap"), "the log says what it changed");
-        } else {
-            const unsigned char* site = base + kSmoothingSite;
-            std::int32_t disp = 0;
-            std::memcpy(&disp, site + 3, sizeof(disp));
-            Check(site + 7 + disp == base + 0x17A5A70, "without the setting the correction is left alone");
-            Check(Contains(log, "own position smoothing is untouched"), "and the log says so");
+        if (mode == L"replaced") {
+            Check(GetFileAttributesW(replaced.c_str()) == INVALID_FILE_ATTRIBUTES &&
+                      GetFileAttributesW((replaced + L".disabled").c_str()) != INVALID_FILE_ATTRIBUTES,
+                  "a replaced plugin is renamed .disabled");
         }
-        // EDF.dll ends the game with TerminateProcess; if that import cannot be wrapped the shutdown
-        // marker never fires and every start misreports the last one as cut, which is what 1.5.2-1.5.8 did.
-        Check(Contains(log, "Exit marker: a normal quit now writes SHUTDOWN"),
-              "the TerminateProcess import is wrapped, so a clean exit can be recorded");
-        Check(Contains(log, upgrade ? "switched with Tab/RS" : "switched with F3/Tab/RS"),
-              "member pages switch with the configured keys (F3, Tab; upgrade carries Tab alone) and the right stick");
-        if (mode == L"host8") {
-            // An INI from 0.5.0: PageKey=F2 and dummy keys F3/F4.
-            Check(Contains(log, "PageKey is no longer used"), "the old page key is reported as unused");
-            Check(Contains(log, "Dummy keys may not be F2 or a page key: using add 117, remove 115"),
-                  "a dummy key on a page key moves to its default (F6), the other stays (F4)");
-        }
-        if (mode == L"nomission") Check(Contains(log, "MaxPlayers is no longer used"), "an old MaxPlayers setting is reported as unused");
-        else Check(!Contains(log, "MaxPlayers is no longer used"), "no MaxPlayers report without the key");
-
-        // The menu layout file follows the plugin; another mod's file is left alone.
-        if (mode == L"nomission") {
-            Check(ReadBytes(layoutPath) == foreign, "another mod's menu layout is left alone");
-            Check(Contains(log, "belongs to another mod"), "the foreign menu layout is logged");
-        } else {
-            Check(ReadBytes(layoutPath) == ours, "our menu layout is in Mods\\UI");
-            Check(Contains(log, "Menu: wrote Mods\\UI\\LYT_MAINFRAME.SGO") == (mode != L"host8"),
-                  "writing the layout is logged only when it was written");
-        }
-
-        for (std::size_t i = 0; i < before.values.size(); ++i) {
-            const int v = before.values[i];
-            const bool accepted = (static_cast<unsigned>(v) & ~0xFu) == 0x90u || IsMirror(v);
-            Check(after.family[i] == accepted, "join check accepts exactly this family's mirror values and 0x90..0x9F");
-            if ((static_cast<unsigned>(v) & ~0xFu) == 0x90u) Check(after.family[i] == before.family[i], "vanilla rooms stay joinable");
-            if (IsOldMirror(v)) Check(!after.family[i] && after.decode[i] == 0, "rooms of earlier MultiSlot versions are refused");
-            if (IsMirror(v)) {
-                const int vanilla = 2 * static_cast<int>(kSearchTypeCenter) - v;
-                Check(after.decode[i] == before.decode[static_cast<std::size_t>(vanilla + 0x20)], "mirror value decodes to its vanilla kind");
-            } else if (!IsOldMirror(v)) {
-                Check(after.decode[i] == before.decode[i], "decode is unchanged outside the mirror values");
-            }
-        }
-        for (int kind = 0; kind < 8; ++kind) {
-            const std::uint64_t old = before.range[kind];
-            const auto low = static_cast<std::uint32_t>(old), high = static_cast<std::uint32_t>(old >> 32);
-            if (low == 0x91 && high >= 0x91 && high <= 0x94) {
-                // Both families of the kind, whatever the setting: [mirror(high), high]. The rooms of earlier
-                // MultiSlot versions between them are left out of the results (lobbystate_test TestRoomList).
-                Check(after.range[kind] == ((static_cast<std::uint64_t>(high) << 32) | (2 * kSearchTypeCenter - high)),
-                      "the search lists normal and MultiSlot rooms of the kind, whatever the setting");
-            } else {
-                Check(after.range[kind] == old, "unknown search kinds are unchanged");
-            }
-            // The published value is chosen per room in the update hook, so the kind map stays the game's.
-            Check(after.map[kind] == before.map[kind], "kind map unchanged");
-        }
-
-        if (mode == L"nomission") {
-            Check(missionUntouched(true), "Extend=0 leaves every mission site untouched, the HUD's included");
-            Check(HookedInto(base, WeaponGuardHooks()[1], plugin), "Extend=0: the weapon guard hooks the mission start message alone");
-            Check(Contains(log, "Mission: Extend=0"), "Extend=0 is logged");
-            Check(!Contains(log, "Mission sync:"), "Extend=0 leaves the mission start message alone");
-            Check(GetFileAttributesW(hudPath.c_str()) == INVALID_FILE_ATTRIBUTES && Contains(log, "HUD: removed Mods\\HUD\\ONLINEHUDTEXTURE.RAB"),
-                  "Extend=0 removes our HUD archive: the HUD is the game's");
-        } else {
-            // The HUD: one colour per player with our archive in place; another mod's archive leaves the game's
-            // tables and wraps the index instead.
-            const bool colours = mode != L"quiet";
-            Check(Applied(base, hudPatches) == (colours ? static_cast<int>(hudPatches.size()) : 0) &&
-                      Untouched(base, hudPatches) == (colours ? 0 : static_cast<int>(hudPatches.size())),
-                  colours ? "every HUD table patch is written" : "a foreign HUD archive leaves the HUD tables at four");
-            for (const auto& hook : hudHooks) Check(colours ? HookedInto(base, hook, plugin) : SiteUntouched(base, hook), hook.name);
-            // The index wraps around the tables either way (kHudTablePlayers with ours, four without).
-            for (const auto& hook : hudWrap) Check(HookedInto(base, hook, plugin), hook.name);
-            Check(ReadBytes(hudPath) == (colours ? ourHud : foreignHud), colours ? "our HUD archive is in Mods\\HUD" : "another mod's HUD archive is left alone");
-            Check(Contains(log, "HUD: wrote Mods\\HUD\\ONLINEHUDTEXTURE.RAB") == (colours && mode != L"host8"),
-                  "writing the HUD archive is logged only when it was written");
-            Check(Contains(log, colours ? "HUD: one colour per player for players 1-" : "HUD: players 5-"), "the HUD colours are logged");
-            if (!colours) Check(Contains(log, "HUD: Mods\\HUD\\ONLINEHUDTEXTURE.RAB belongs to another mod"), "the foreign HUD archive is logged");
-            Check(Applied(base, missionPatches) == static_cast<int>(missionPatches.size()), "every mission patch is written");
-            for (const auto& hook : missionHooks) Check(HookedInto(base, hook, plugin), hook.name);
-            for (const auto& site : MissionCompares()) Check(WidenedInto(base, site), site.name);
-            for (const auto& hook : BvmPlayerTableHooks()) Check(HookedInto(base, hook, plugin), hook.name);
-            for (const auto& call : missionCalls) Check(RedirectedInto(base + call.rva, plugin), call.name);
-            for (const auto& slot : MissionSlots()) Check(SlotInto(base, slot, plugin), slot.name);
-            for (const auto& call : PacketFitCalls()) Check(RedirectedInto(base + call.rva, plugin), call.name);
-            for (const auto& hook : PacketFitHooks()) Check(HookedInto(base, hook, plugin), hook.name);
-            // Whatever NetLog and HandshakeRecovery say: without it no mission of eight starts.
-            Check(Contains(log, "Mission sync: a start message too large for one EOS packet"),
-                  "the mission start message transport is installed with Extend=1");
-            Check(Contains(log, ("Mission: players 5-" + std::to_string(kMaxPlayers)).c_str()) && !Contains(log, "Mission: Extend=0"),
-                  "mission support is logged (and only that)");
-            const bool spawns = mode != L"host4";
-            for (const auto& hook : SpawnHooks()) Check(spawns ? HookedInto(base, hook, plugin) : SiteUntouched(base, hook), hook.name);
-            Check(Contains(log, spawns ? "enemy counts x1.2" : "ExtraEnemies=0, enemy counts unchanged"), "enemy count setting is logged");
-        }
-        if (mode == L"host8") {
-            for (const auto& hook : GhostHooks()) Check(HookedInto(base, hook, plugin), hook.name);
-            for (const auto& call : GhostCalls()) Check(RedirectedInto(base + call.rva, plugin), call.name);
-            Check(Contains(log, "Test: GhostPlayers=4"), "ghost harness is logged");
-            Check(Contains(log, "Scale5..Scale32 are no longer used"),
-                  "old per-player-count scale keys are reported as unused");
-        } else {
-            for (const auto& hook : GhostHooks()) Check(SiteUntouched(base, hook), "ghost sites untouched without GhostPlayers");
-            for (const auto& call : GhostCalls())
-                Check(mode == L"nomission" ? CallTargets(base + call.rva, call.rva, call.target)
-                                            : RedirectedInto(base + call.rva, plugin),
-                      "mission admission shares the ghost call site even without GhostPlayers");
-        }
-        if (netLog) {
-            Check(Contains(log, "Net log: 15 EOS imports redirected"), "NetLog=1 installs all EOS import wrappers");
-            for (const auto& hook : DiagnosticHooks()) Check(HookedInto(base, hook, plugin), hook.name);
-            for (const auto& call : DiagnosticCalls()) Check(RedirectedInto(base + call.rva, plugin), call.name);
-        } else {
-            Check(!Contains(log, "Net log:"), "NetLog=0 leaves the net log off");
-            for (const auto& hook : DiagnosticHooks()) Check(SiteUntouched(base, hook), "diagnostic sites untouched without NetLog");
-            for (const auto& call : DiagnosticCalls()) Check(CallTargets(base + call.rva, call.rva, call.target), "diagnostic calls untouched without NetLog");
-        }
-        Check(Contains(log, "Crash log armed"), "crash log is armed");
-        Check(Contains(log, "Patched EDF.dll: ") && !Contains(log, "PATCH EDF+"), "the patched sites are summed up in one line");
-        if (mode == L"host8") {
+        if (mode == L"on") {
             ThrowAndCatch();
-            WriteToBadAddress();
+            LateFault(0x10);
             const std::string crash = ReadText(logPath);
             Check(Contains(crash, "EXCEPTION C0000005"), "access violation is logged");
             Check(Contains(crash, "writing 0000000000000010"), "fault address and access kind are logged");
