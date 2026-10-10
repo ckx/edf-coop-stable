@@ -1,5 +1,5 @@
 #pragma once
-// Remote player sync in the game (W2, docs/net-re/player.md; the arithmetic is netplayer.h).
+// Remote player sync in the game (docs/net-re/player.md; the arithmetic is netplayer.h).
 //
 // Twenty vtable slots of the five player classes (SoldierBase, AssultSoldier, Engineer, HeavyArmor, PaleWing):
 //   slot 92 (record mask)  adds kPlayerBlockBit every SendIntervalFrames sync frames for this machine's player;
@@ -7,8 +7,7 @@
 //   slot 53 (read)         reads it when the bit is there and keeps the sample for that remote copy;
 //   slot 55 (NetworkUpdate) for a remote copy with fresh samples: turns the game's own correction off for the
 //                          frame and drives the copy itself (extrapolation, feed-forward, convergence).
-// Plus one constant: the packet controller's 90 ms flush timer (EDF+12CB66C), FlushIntervalMs. That one is shared
-// with the transport work (W1) and is listed as such in the RE notes.
+// Plus one constant: the packet controller's 90 ms flush timer (EDF+12CB66C), FlushIntervalMs.
 //
 // A member that does not send the block keeps the game's own path on every machine: nothing changes for its copy.
 // Every slot and every instruction the hooks rely on is checked first; anything else and nothing is installed.

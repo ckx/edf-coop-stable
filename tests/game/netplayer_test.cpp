@@ -1,4 +1,4 @@
-// W2 player sync without the game (netplayer.h): the block format, the game's bin element inside an
+// Player sync without the game (netplayer.h): the block format, the game's bin element inside an
 // eos::Serialize-shaped buffer, the sender's velocity, and a simulated remote copy driven by StepRemote through
 // latency, jitter, a jump, a stop and a warp. The game's own Serialize functions are exercised against the same
 // format by GameNet_playersync.

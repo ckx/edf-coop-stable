@@ -1,5 +1,5 @@
 #pragma once
-// Remote player sync (W2, docs/net-re/player.md): what the game-free part computes and sends.
+// Remote player sync (docs/net-re/player.md): what the game-free part computes and sends.
 //
 // The game sends a player's position only every sixth sync frame, as three half floats (0.25-1 m steps on the big
 // maps), with no velocity and no time; the remote copy runs its own movement from the replicated stick input and

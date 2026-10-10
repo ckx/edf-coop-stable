@@ -68,7 +68,7 @@ int main(int argc, char** argv) {
     InstallCrashLog(pluginOnly ? GetModuleHandleW(L"kernel32.dll") : GetModuleHandleW(nullptr), dump.c_str());
     Check(CrashDumpArmed(), "a usable path and DbgHelp arm the dump");
 
-    // One of the plugin's probes (armor.cpp RulesFor calling into the game, say): Guarded catches the fault, so the
+    // One of the plugin's probes (the weapon guard reading the game's tables, say): Guarded catches the fault, so the
     // crash handler looks away - no report, and the one dump is not spent on it.
     Check(!Guarded([] { *static_cast<volatile int*>(nullptr) = 1; }), "a probe's fault comes back as false");
     Check(FileSize(dump) < 0, "a fault inside a probe writes no dump");

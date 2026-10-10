@@ -333,7 +333,7 @@ int VersionGate(Machine& machine, bool host) {
     return 0;
 }
 
-// W2 player sync (netplayer.h): a player record as EDF6Coop extends it - the game's own fields written with the
+// Player sync (netplayer.h): a player record as EDF6Coop extends it - the game's own fields written with the
 // game's writers (mask, a float, the position as the game sends it), then the block as a bin element written by
 // EDF6Coop's writer, then the same block written by the game's own bin writer (EDF+12B5200) - goes through the
 // game's controller to the other machine, which reads it twice: with the game's readers and EDF6Coop's bin reader,

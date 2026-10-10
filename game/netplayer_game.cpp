@@ -288,7 +288,7 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
     const int flushMs = EffectiveFlushIntervalMs(wanted.flushIntervalMs, NetFeatureEnabledLocally(NetFeature::PlayerSync));
     const bool flush = flushMs > 0;
     if (flush && std::memcmp(base + kFlushIntervalSite, flushOriginal, sizeof(flushOriginal)) != 0) {
-        Log("PLAYER sync: OFF - the packet flush interval at EDF+%X is not the game's 90 ms (W1 or another mod "
+        Log("PLAYER sync: OFF - the packet flush interval at EDF+%X is not the game's 90 ms (another mod "
             "changed it?); nothing changed",
             kFlushIntervalSite);
         return false;

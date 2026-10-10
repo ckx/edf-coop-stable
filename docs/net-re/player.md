@@ -2,6 +2,8 @@
 
 EDF.dll TimeDateStamp 0x678CCB46，纯静态。H=指令直读，M=有证据推断，L=推测。
 
+W2 = 玩家同步（`game/netplayer*`），W1 = 传输层和联机协议版本门（`src/`、`game/netfeature*`）。下文提到的 `netplayer_members`、成员之间的网状直连和 8 人以上的房间已在 2026-10 移除，相关段落只作记录。
+
 ## 类与 vtable（H）
 SoldierBase 0x17D24D8 / AssultSoldier 0x17CDF28 / Engineer 0x17CF100 / HeavyArmor 0x17CF5B8 / PaleWing 0x17D0FF8；NetworkObject 子表在 +0x120。
 - NetworkObject slot5 0x125A70 -> slot7 0x59FA80（写）；slot6 0x125180 -> slot8 0x592130（读）。

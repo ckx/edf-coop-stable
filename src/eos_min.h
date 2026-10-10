@@ -245,16 +245,6 @@ struct EOS_LobbyDetails_GetLobbyOwnerOptions {  // ApiVersion 1
     int32_t ApiVersion;
 };
 
-struct EOS_Lobby_AddNotifyLobbyMemberUpdateReceivedOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-};
-
-struct EOS_Lobby_LobbyMemberUpdateReceivedCallbackInfo {
-    void* ClientData;
-    const char* LobbyId;
-    EOS_ProductUserId TargetUserId;
-};
-
 struct EOS_Lobby_PromoteMemberOptions {  // ApiVersion 1
     int32_t ApiVersion;
     const char* LobbyId;
@@ -262,82 +252,9 @@ struct EOS_Lobby_PromoteMemberOptions {  // ApiVersion 1
     EOS_ProductUserId TargetUserId;
 };
 
-// EOS_LobbyDetails_Info at ApiVersion 3 (SDK 1.16): EDF.dll reads it only at that version.
-struct EOS_LobbyDetails_Info {
-    int32_t ApiVersion;
-    const char* LobbyId;
-    EOS_ProductUserId LobbyOwnerUserId;
-    int32_t PermissionLevel;
-    uint32_t AvailableSlots;
-    uint32_t MaxMembers;
-    EOS_Bool bAllowInvites;
-    const char* BucketId;
-    EOS_Bool bAllowHostMigration;
-    EOS_Bool bRTCRoomEnabled;
-    EOS_Bool bAllowJoinById;
-    EOS_Bool bRejoinAfterKickRequiresInvite;
-    EOS_Bool bPresenceEnabled;
-    const uint32_t* AllowedPlatformIds;
-    uint32_t AllowedPlatformIdsCount;
-};
-constexpr int32_t EOS_LOBBYDETAILS_INFO_API_LATEST = 3;
-
-struct EOS_LobbyDetails_CopyInfoOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-};
-struct EOS_LobbyDetails_GetAttributeCountOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-};
-struct EOS_LobbyDetails_CopyAttributeByIndexOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-    uint32_t AttrIndex;
-};
-
-typedef struct EOS_LobbySearchHandle* EOS_HLobbySearch;
-struct EOS_LobbySearch_FindOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-    EOS_ProductUserId LocalUserId;
-};
-struct EOS_LobbySearch_FindCallbackInfo {
-    EOS_EResult ResultCode;
-    void* ClientData;
-};
-struct EOS_LobbySearch_GetSearchResultCountOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-};
-struct EOS_LobbySearch_CopySearchResultByIndexOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-    uint32_t LobbyIndex;
-};
-struct EOS_LobbySearch_SetLobbyIdOptions {  // ApiVersion 1
-    int32_t ApiVersion;
-    const char* LobbyId;
-};
-
 #pragma pack(pop)
 
-static_assert(offsetof(EOS_LobbyDetails_Info, MaxMembers) == 0x20, "EOS_LobbyDetails_Info");
-static_assert(offsetof(EOS_LobbyDetails_Info, AllowedPlatformIdsCount) == 0x50, "EOS_LobbyDetails_Info");
-
-using EOS_LobbySearch_OnFindCallback = void (*)(const EOS_LobbySearch_FindCallbackInfo*);
-using PFN_EOS_LobbySearch_Find = void (*)(EOS_HLobbySearch, const EOS_LobbySearch_FindOptions*, void*,
-                                          EOS_LobbySearch_OnFindCallback);
-using PFN_EOS_LobbySearch_GetSearchResultCount = uint32_t (*)(EOS_HLobbySearch,
-                                                              const EOS_LobbySearch_GetSearchResultCountOptions*);
-using PFN_EOS_LobbySearch_CopySearchResultByIndex = EOS_EResult (*)(
-    EOS_HLobbySearch, const EOS_LobbySearch_CopySearchResultByIndexOptions*, EOS_HLobbyDetails*);
-using PFN_EOS_LobbySearch_SetLobbyId = EOS_EResult (*)(EOS_HLobbySearch, const EOS_LobbySearch_SetLobbyIdOptions*);
-using PFN_EOS_LobbySearch_Release = void (*)(EOS_HLobbySearch);
-using PFN_EOS_LobbyDetails_CopyInfo = EOS_EResult (*)(EOS_HLobbyDetails, const EOS_LobbyDetails_CopyInfoOptions*,
-                                                      EOS_LobbyDetails_Info**);
-using PFN_EOS_LobbyDetails_Info_Release = void (*)(EOS_LobbyDetails_Info*);
-using PFN_EOS_LobbyDetails_GetAttributeCount = uint32_t (*)(EOS_HLobbyDetails,
-                                                            const EOS_LobbyDetails_GetAttributeCountOptions*);
-using PFN_EOS_LobbyDetails_CopyAttributeByIndex = EOS_EResult (*)(
-    EOS_HLobbyDetails, const EOS_LobbyDetails_CopyAttributeByIndexOptions*, EOS_Lobby_Attribute**);
-
 using EOS_Lobby_OnLobbyIdCallback = void (*)(const EOS_Lobby_LobbyIdCallbackInfo*);
-using EOS_Lobby_OnLobbyMemberUpdateReceivedCallback = void (*)(const EOS_Lobby_LobbyMemberUpdateReceivedCallbackInfo*);
 using PFN_EOS_Lobby_CreateLobby = void (*)(EOS_HLobby, const EOS_Lobby_CreateLobbyOptionsHead*, void*,
                                            EOS_Lobby_OnLobbyIdCallback);
 using PFN_EOS_Lobby_JoinLobby = void (*)(EOS_HLobby, const EOS_Lobby_JoinLobbyOptionsHead*, void*,
@@ -392,9 +309,6 @@ struct EOS_Lobby_KickMemberOptions {  // ApiVersion 1
 using PFN_EOS_Lobby_KickMember = void (*)(EOS_HLobby, const EOS_Lobby_KickMemberOptions*, void*, void*);
 using PFN_EOS_LobbyDetails_Release = void (*)(EOS_HLobbyDetails);
 using PFN_EOS_Lobby_Attribute_Release = void (*)(EOS_Lobby_Attribute*);
-using PFN_EOS_Lobby_AddNotifyMemberUpdate = EOS_NotificationId (*)(
-    EOS_HLobby, const EOS_Lobby_AddNotifyLobbyMemberUpdateReceivedOptions*, void*,
-    EOS_Lobby_OnLobbyMemberUpdateReceivedCallback);
 
 using EOS_Lobby_OnLobbyMemberStatusReceivedCallback = void (*)(const EOS_Lobby_LobbyMemberStatusReceivedCallbackInfo*);
 using PFN_EOS_P2P_AcceptConnection = EOS_EResult (*)(EOS_HP2P, const EOS_P2P_PeerConnectionOptions*);
