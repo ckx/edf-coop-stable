@@ -57,7 +57,7 @@ jobs:
       - name: Say which tests were skipped
         shell: pwsh
         run: |
-          $listed = & ctest --test-dir multislot/build --show-only=json-v1 | ConvertFrom-Json
-          $game = $listed.tests | Where-Object { $_.name -like 'PatchTablesMatchEDF' -or $_.name -like 'PluginLoad_*' -or $_.name -like 'GameNet_*' }
+          $listed = & ctest --test-dir multislot/build -L game --show-only=json-v1 | ConvertFrom-Json
+          $game = $listed.tests
           $names = ($game | ForEach-Object { $_.name }) -join ', '
           Write-Output "::warning title=Game tests skipped::No EDF.dll in CI, so these ran as skipped: $names. Run build.ps1 -Test on a machine with the game to cover them."

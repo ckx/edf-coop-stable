@@ -42,7 +42,7 @@ $stage = Join-Path $root "release\upload-$version"
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-& (Join-Path $root 'build.ps1') -Test
+& (Join-Path $root 'build.ps1') -Test -RequireGame
 & (Join-Path $root 'package.ps1') | Out-Null
 $dll = Join-Path $multislot 'dist\EDF6Coop.dll'
 # The zip carries the same file.

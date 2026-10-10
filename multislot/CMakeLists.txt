@@ -26,12 +26,9 @@ set(MODLOADER_INCLUDE "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader")
 
 # The installed game this build reads from (read-only): EDF.dll for the patch-table and load tests, Root.cpk
 # for tools/make_menu_label.py. Pass -DEDF6_GAME_DIR=... or set the EDF6_GAME_DIR environment variable.
-if(DEFINED ENV{EDF6_GAME_DIR})
-    set(EDF6_GAME_DIR_DEFAULT "$ENV{EDF6_GAME_DIR}")
-else()
-    set(EDF6_GAME_DIR_DEFAULT "${CMAKE_SOURCE_DIR}/..")
-endif()
-set(EDF6_GAME_DIR "${EDF6_GAME_DIR_DEFAULT}" CACHE PATH "EARTH DEFENSE FORCE 6 install folder (holds EDF.dll)")
+set(EDF6_GAME_DIR "$ENV{EDF6_GAME_DIR}" CACHE PATH "EARTH DEFENSE FORCE 6 install folder (holds EDF.dll)")
+# Release builds pass ON: a build that cannot run the tests against the game must not pass for one that did.
+option(EDF6_REQUIRE_GAME "Fail the configure when EDF6_GAME_DIR has no EDF.dll" OFF)
 if(MSVC)
     set(WARNINGS /W4 /WX /utf-8 /permissive-)
     set(DIRECTNET_FLAGS /W4 /WX /utf-8 /EHsc)
@@ -173,19 +170,23 @@ add_dependencies(LobbyStateTests FakeEosSdk)
 add_test(NAME LobbyStateAndGhostMembers COMMAND LobbyStateTests "${CMAKE_BINARY_DIR}/lobbystate-test.log"
     "$<TARGET_FILE:FakeEosSdk>")
 set(EDF_DLL "${EDF6_GAME_DIR}/EDF.dll")
-# The tests against the game's code are registered either way. Without EDF.dll they report themselves skipped
-# (exit code 77), so ctest names them in its summary instead of a configure warning nobody reads in CI.
-set(GAME_TEST_SKIPPED 77)
+# The tests against the game's code are registered either way, labelled `game`. Without EDF.dll they report
+# themselves skipped (exit code 77), so ctest names them in its summary instead of a configure warning nobody reads.
 if(NOT EXISTS "${EDF_DLL}")
-    message(WARNING "No EDF.dll in EDF6_GAME_DIR (${EDF6_GAME_DIR}): the tests against the game's code "
-                    "(PatchTablesMatchEDF, PluginLoad_*, GameNet_*) will be reported as skipped")
+    if(EDF6_REQUIRE_GAME)
+        message(FATAL_ERROR "No EDF.dll in EDF6_GAME_DIR (${EDF6_GAME_DIR}), and EDF6_REQUIRE_GAME is ON")
+    endif()
+    message(WARNING "No EDF.dll in EDF6_GAME_DIR (${EDF6_GAME_DIR}): the tests labelled `game` will be reported as skipped")
 endif()
+function(game_test name)
+    add_test(NAME ${name} COMMAND ${ARGN})
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS game)
+endfunction()
 
 add_executable(MultiSlotTests tests/tests.cpp src/hud.cpp src/patches.cpp src/rooms.cpp src/mission.cpp src/midhook.cpp src/code.cpp src/log.cpp src/smoothing.cpp
     src/userslots.cpp src/vectoralloc.cpp)
 target_compile_options(MultiSlotTests PRIVATE ${WARNINGS})
-add_test(NAME PatchTablesMatchEDF COMMAND MultiSlotTests "${EDF_DLL}")
-set_tests_properties(PatchTablesMatchEDF PROPERTIES SKIP_RETURN_CODE ${GAME_TEST_SKIPPED})
+game_test(PatchTablesMatchEDF MultiSlotTests "${EDF_DLL}")
 
 # Hit authority (src/hitauth.h): the event, the decision, the owner's checks; and against EDF.dll, the hook sites,
 # the game facts the rule rests on and the event's round trip through the game's own stream code.
@@ -196,8 +197,7 @@ target_include_directories(HitAuthTests PRIVATE "${CMAKE_SOURCE_DIR}/..")
 target_compile_options(HitAuthTests PRIVATE ${WARNINGS})
 target_link_libraries(HitAuthTests PRIVATE DirectNetPart)
 add_test(NAME HitAuthority COMMAND HitAuthTests)
-add_test(NAME HitAuthorityGameCode COMMAND HitAuthTests "${EDF_DLL}")
-set_tests_properties(HitAuthorityGameCode PROPERTIES SKIP_RETURN_CODE ${GAME_TEST_SKIPPED})
+game_test(HitAuthorityGameCode HitAuthTests "${EDF_DLL}")
 
 add_executable(RoomViewTests tests/roomview_test.cpp src/roomview.cpp src/armor.cpp src/mission.cpp src/midhook.cpp
     src/code.cpp src/patches.cpp src/log.cpp src/identity.cpp src/joinlog.cpp)
@@ -280,8 +280,7 @@ target_include_directories(NetWorldTests PRIVATE "${CMAKE_SOURCE_DIR}/..")
 target_compile_options(NetWorldTests PRIVATE ${WARNINGS})
 target_link_libraries(NetWorldTests PRIVATE DirectNetPart)
 add_test(NAME NetWorldEnemyTargets COMMAND NetWorldTests)
-add_test(NAME NetWorldSitesMatchEDF COMMAND NetWorldTests "${EDF_DLL}")
-set_tests_properties(NetWorldSitesMatchEDF PROPERTIES SKIP_RETURN_CODE ${GAME_TEST_SKIPPED})
+game_test(NetWorldSitesMatchEDF NetWorldTests "${EDF_DLL}")
 
 add_executable(FakeMemberTests tests/fakemembers_test.cpp src/fakemembers.cpp src/roomview.cpp src/armor.cpp
     src/mission.cpp src/midhook.cpp src/code.cpp src/patches.cpp src/log.cpp src/identity.cpp src/joinlog.cpp)
@@ -315,9 +314,8 @@ target_include_directories(MultiSlotLoadTest PRIVATE ${MODLOADER_INCLUDE} "${CMA
 target_compile_options(MultiSlotLoadTest PRIVATE ${WARNINGS})
 add_dependencies(MultiSlotLoadTest EDF6Coop)
 foreach(mode off host4 host8 fresh upgrade nomission recoveryoff keeproomoff quiet smooth)
-    add_test(NAME PluginLoad_${mode} COMMAND MultiSlotLoadTest "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>"
+    game_test(PluginLoad_${mode} MultiSlotLoadTest "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>"
              "${CMAKE_BINARY_DIR}/loadtest" ${mode})
-    set_tests_properties(PluginLoad_${mode} PROPERTIES SKIP_RETURN_CODE ${GAME_TEST_SKIPPED})
 endforeach()
 
 # Rooms played by several processes, each running the real EDF.dll and the real EDF6Coop.dll with a fake EOS
@@ -341,9 +339,8 @@ add_dependencies(GameNetTests GameMachine EDF6Coop)
 add_test(NAME GameNetLogStats COMMAND GameNetTests --log-stats)
 foreach(scenario room link mission2 mission4 mission8 mission8late mission8lossy mission8busy mission8rushed sidelink mission4modweapon mission4slowpeer
         playersync mission16 mission32)
-    add_test(NAME GameNet_${scenario} COMMAND GameNetTests "${EDF6_GAME_DIR}" "$<TARGET_FILE:EDF6Coop>"
+    game_test(GameNet_${scenario} GameNetTests "${EDF6_GAME_DIR}" "$<TARGET_FILE:EDF6Coop>"
              "$<TARGET_FILE:GameMachine>" "${CMAKE_BINARY_DIR}/gamenettest" ${scenario})
-    set_tests_properties(GameNet_${scenario} PROPERTIES SKIP_RETURN_CODE ${GAME_TEST_SKIPPED})
 endforeach()
 
 # The direct-link part's own tests (they need no game) and its join probe.
@@ -405,9 +402,8 @@ target_compile_options(NetFeatureTests PRIVATE ${WARNINGS})
 target_link_libraries(NetFeatureTests PRIVATE DirectNetPart)
 add_test(NAME NetcodeVersionGate COMMAND NetFeatureTests)
 foreach(scenario netstats versiongate bulk mesh meshblocked meshflap mission8xpress mission32bulk netstatsmixed meshoff joinfull mission8bulklost slotorder mission8bulkcut slotmigrate slotmigratenodirect slotmigrateearlyroom slotgiveup slotchurn slotchurnlate worldadmission)
-    add_test(NAME GameNet_${scenario} COMMAND GameNetTests "${EDF6_GAME_DIR}" "$<TARGET_FILE:EDF6Coop>"
+    game_test(GameNet_${scenario} GameNetTests "${EDF6_GAME_DIR}" "$<TARGET_FILE:EDF6Coop>"
              "$<TARGET_FILE:GameMachine>" "${CMAKE_BINARY_DIR}/gamenettest" ${scenario})
-    set_tests_properties(GameNet_${scenario} PROPERTIES SKIP_RETURN_CODE ${GAME_TEST_SKIPPED})
 endforeach()
 add_executable(NetInterestTests tests/netaoi_test.cpp src/netaoi.cpp src/interest.cpp src/netfeature.cpp src/netcompress.cpp
     src/lobbystate.cpp src/hostmode.cpp src/roomview.cpp src/mission.cpp src/armor.cpp src/midhook.cpp src/code.cpp src/patches.cpp

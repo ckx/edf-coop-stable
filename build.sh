@@ -40,6 +40,7 @@ fi
 # Always explicit: CMake keeps cached values, and a later build without -c would stay a placeholder build.
 cmake -S "$multislot" -B "$build" -G Ninja -DCMAKE_TOOLCHAIN_FILE="$root/cmake/mingw-w64.cmake" \
     -DCMAKE_BUILD_TYPE=RelWithDebInfo -DMULTISLOT_CI=$([ $ci = 1 ] && echo ON || echo OFF) \
+    -DEDF6_REQUIRE_GAME=$([ $ci = 1 ] && echo OFF || echo ON) \
     -DPython3_EXECUTABLE="$python" ${EDF6_GAME_DIR:+-DEDF6_GAME_DIR="$EDF6_GAME_DIR"}
 cmake --build "$build"
 

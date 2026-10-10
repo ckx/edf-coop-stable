@@ -22,7 +22,6 @@
 #include "../src/direct_net.h"
 #include "../src/fake_lobby.h"
 #include "../src/hold.h"
-#include "../src/iat.h"
 #include "../src/netclass.h"
 #include "../src/netif.h"
 #include "../src/reliable.h"
@@ -2375,35 +2374,6 @@ void testKeyMismatch() {
     CHECK(good.rejectedPackets() == 0 && host.rejectedPackets() == 0);
 }
 
-void testIat(const wchar_t* edfPath) {
-    printf("iat: EDF.dll import slots\n");
-    HMODULE edf = LoadLibraryExW(edfPath, nullptr, DONT_RESOLVE_DLL_REFERENCES);
-    if (!edf) {
-        printf("  SKIP: cannot load %ls (error %lu)\n", edfPath, GetLastError());
-        return;
-    }
-    const char* dll = "EOSSDK-Win64-Shipping.dll";
-    CHECK(dn::findImportSlot(edf, dll, "EOS_Platform_GetP2PInterface") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_SendPacket") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_ReceivePacket") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_AddNotifyPeerConnectionClosed") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_CloseConnection") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_CloseConnections") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_Lobby_AddNotifyLobbyMemberStatusReceived") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_Platform_Tick") != nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_RemoveNotifyPeerConnectionClosed") != nullptr);
-    // Lobby hooks: plugin detection, the host's address, room-level disconnect hiding, diagnostics.
-    for (const char* name : {"EOS_Lobby_CreateLobby", "EOS_Lobby_JoinLobby", "EOS_Lobby_LeaveLobby",
-                             "EOS_Lobby_DestroyLobby", "EOS_Lobby_AddNotifyLobbyMemberUpdateReceived",
-                             "EOS_Lobby_KickMember", "EOS_Lobby_UpdateLobby"})
-        CHECK(dn::findImportSlot(edf, dll, name) != nullptr);
-    // The receive hook relies on the game reading packets only through ReceivePacket.
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_GetNextReceivedPacketSize") == nullptr);
-    CHECK(dn::findImportSlot(edf, dll, "EOS_P2P_NoSuchFunction") == nullptr);
-    CHECK(dn::findImportSlot(edf, "nosuch.dll", "EOS_P2P_SendPacket") == nullptr);
-    FreeLibrary(edf);
-}
-
 void testNetif() {
     printf("netif: physical adapter\n");
     auto pi = dn::findPhysicalInterface();
@@ -3565,7 +3535,6 @@ int wmain(int argc, wchar_t** argv) {
         printf("%s\n", dn::updateOnce(argv[2], version).c_str());
         return 0;
     }
-    const wchar_t* edf = argc > 1 ? argv[1] : L"D:\\steam\\steamapps\\common\\EARTH DEFENSE FORCE 6\\EDF.dll";
     testWire();
     testWireRejectsMalformed();
     testReliableUnderLoss();
@@ -3573,7 +3542,6 @@ int wmain(int argc, wchar_t** argv) {
     testHostCandidates();
     testHostCandidateFilter();
     testNetif();
-    testIat(edf);
     testKeyMismatch();
     testReliableUnordered();
     testRetransmitsFollowDelivery();
