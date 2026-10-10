@@ -48,6 +48,7 @@ publishes its netcode protocol (`EDF6NET_PROTO`), which EDF6Coop does on its own
 | `GameNet_netstats` | 3 | every machine sends state records (unreliable to the game) and reliable ones while each machine loses its first 40 unreliable packets of 80 bytes or more: the state datagrams go to EOS reliably, nothing is lost, every record arrives |
 | `GameNet_netstatsunreliable` | 3 | the same with `[Sync] ReliableGameTraffic=0`: packets are lost and state records never arrive, which is what `netstats` guards against |
 | `GameNet_direct` | 3 | the host listens on the direct link, the joiners dial it over loopback: both connect, and every record arrives |
+| `GameNet_directoutage` | 3 | the same, and the first guest's direct link loses everything it sends for 2.5 s mid-game (`[Test] DirectOutageAfterMs/ForMs`): both ends stop routing over it within about 1.5 s, what it had not delivered goes over EOS, it carries again once it answers, and every record arrives exactly once |
 
 Network imperfections, set per scenario: `EDF6NET_DELAY=<channel>:<ms>`, `EDF6NET_DROP=<bytes>:<count>` (only
 unreliable packets), `EDF6NET_LOBBY_DELAY=<ms>`; per seat `EDF6NET_DELAY_FROM=<user>:<ms>` (everything that
@@ -55,6 +56,8 @@ machine receives from that member). `EDF6NET_SECONDS` sets how long the netstats
 
 ## What they caught
 
+- `directoutage` cuts only what the guest sends, so the packets the host handed to EOS had reached the guest over
+  the direct link already. Every state record still arrived exactly once: the game drops a datagram it has had.
 - A role subscribed to the game's packet controller only after its handshakes with every other member ended
   (`Connect`). The controller delivers a record on the tick it arrives, to whoever listens then, and acknowledges
   it either way, so its sender never resends it: a machine still in a handshake lost the first record the others

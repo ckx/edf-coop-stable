@@ -7,9 +7,9 @@
 #include <chrono>
 #include <cstring>
 #include <random>
+#include <utility>
 
 #include "log.h"
-#include "netclass.h"
 
 #ifndef SIO_UDP_CONNRESET
 #define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
@@ -20,6 +20,7 @@ namespace {
 
 constexpr size_t kMaxDatagram = 2048;
 constexpr size_t kMaxInbox = 16384;
+constexpr size_t kMaxStranded = 16384;
 constexpr uint64_t kHelloIntervalMs = 1000;
 constexpr uint64_t kRosterIntervalMs = 5000;
 // Roster datagrams are unreliable; after a change resend quickly so a lost copy does not leave a
@@ -28,46 +29,22 @@ constexpr uint64_t kRosterBurstMs = 1000;
 constexpr uint64_t kRosterBurstIntervalMs = 200;
 constexpr uint64_t kResolveIntervalMs = 30000;
 // A Reset (unauthenticated) ends a joiner's link only when the host has not been heard for this long:
-// a live host pings every second, so a forged Reset cannot end a working link, while a restarted host
-// is reconnected within seconds instead of after the link timeout.
+// a live host pings four times a second, so a forged Reset cannot end a working link, while a restarted
+// host is reconnected within seconds instead of after the link timeout.
 constexpr uint64_t kResetQuietMs = 3000;
 // A cookie is valid in the time bucket it was made in and the next one (20-40 s): long enough for a
 // client to answer, short enough that a captured proven hello soon stops being accepted at all.
 constexpr uint64_t kCookieBucketMs = 20000;
 constexpr uint16_t kDefaultPort = 27015;
-// Rooms hold up to 1024 players (the netcode rewrite's target; EDF6Coop 2.4 rooms hold 32). The margin leaves
-// room for links of players who left and have not timed out yet, which are no longer in the member list (see
-// rosterLocked); the cap also bounds what a hello flood with made-up ids can allocate. Member lists of more than
-// kRosterPage go in pages (wire.h). A joiner's links to other joiners (mesh) are bounded the same way.
-constexpr size_t kMaxClients = 1100;
-// --- Paths (see direct_net.h) ---
-// A link not heard from for this long (or 2.5 ping intervals, whichever is longer) is not healthy.
-constexpr uint64_t kPathStaleMinMs = 1500;
-// An unhealthy direct link carries state again once it has been healthy this long without a break.
-constexpr uint64_t kPathRecoverMs = 1000;
-// Losing this share of its pings (smoothed over about ten) makes a link unhealthy.
-constexpr double kLossUnhealthy = 0.25;
-// A link whose queueing delay (RateController::queueMs) or unacknowledged backlog exceeds these is congested:
-// state goes around it through the relay.
-constexpr uint32_t kCongestedQueueMs = 150;
-constexpr size_t kCongestedBacklog = 256 * 1024;
-// Pings: a link carrying game data (within kActiveMs) is pinged every kActivePingMs, but at least kActivePerLinkMs
-// apart per active link of ours, so 1000 links cost what 4 do at most... rather, cost a fixed rate; an idle link at
-// the configured interval, kIdlePerLinkMs per link of ours, at most kIdlePingMaxMs.
-constexpr uint64_t kActiveMs = 2000;
-constexpr uint64_t kActivePingMs = 250;
-constexpr uint64_t kActivePerLinkMs = 2;
-constexpr uint64_t kIdlePerLinkMs = 10;
-constexpr uint64_t kIdlePingMaxMs = 10000;
-// Introductions (PeerQuery): asked again every kIntroQueryMs while no link comes up; after kIntroFailures in a row
-// the pair stays on the relay for kIntroBackoffMs. A dial that got no welcome in kDialTimeoutMs is given up, a
-// direct link that carried no game data for kPeerIdleMs is closed (the relay is always there).
-constexpr uint64_t kIntroQueryMs = 3000;
-constexpr uint32_t kIntroFailures = 3;
-constexpr uint64_t kIntroBackoffMs = 60000;
-constexpr uint64_t kDialTimeoutMs = 10000;
-constexpr uint64_t kPeerIdleMs = 60000;
-constexpr uint64_t kIntroducedMs = 1000;  // host: one introduction of a pair per second at most
+// Links a host keeps: the room's members and players who left and have not timed out yet. The cap also bounds
+// what a hello flood with made-up ids can allocate.
+constexpr size_t kMaxClients = 64;
+// A link answers (a Pong or an Ack) at least every ping interval; one that has not for this long plus its round
+// trip stops carrying game data (see direct_net.h), and carries it again after answering for kRecoverMs.
+constexpr uint64_t kAnswerMs = 1500;
+constexpr uint64_t kRecoverMs = 1000;
+// A joiner whose welcome verified but whose host never answered with the link keys starts a new session.
+constexpr uint64_t kConfirmMs = 5000;
 static_assert(kMaxPayload + 3 * kMaxString + 64 < kMaxDatagram, "a full Data datagram must fit the receive buffer");
 
 // Millisecond resolution: GetTickCount64 moves in ~15.6 ms steps, which made every RTT sample on a
@@ -173,39 +150,7 @@ bool plausibleHostName(const std::string& host) {
     return std::any_of(last.begin(), last.end(), [](char c) { return isalpha(static_cast<unsigned char>(c)) != 0; });
 }
 
-bool contains(const std::vector<std::string>& v, const std::string& s) {
-    return std::find(v.begin(), v.end(), s) != v.end();
-}
-
-// A literal address with its port, as a host's PeerInfo names it ("1.2.3.4:5", "[v6]:5").
-bool parseAddress(const std::string& text, sockaddr_storage& addr, int& len) {
-    std::string host;
-    uint16_t port = 0;
-    if (!splitHostPort(text, host, port) || !parseLiteral(host, addr)) return false;
-    if (addr.ss_family == AF_INET) {
-        reinterpret_cast<sockaddr_in*>(&addr)->sin_port = htons(port);
-        len = sizeof(sockaddr_in);
-    } else {
-        reinterpret_cast<sockaddr_in6*>(&addr)->sin6_port = htons(port);
-        len = sizeof(sockaddr_in6);
-    }
-    return true;
-}
-
-constexpr uint8_t kState = static_cast<uint8_t>(TrafficClass::State);
-constexpr uint8_t kEvent = static_cast<uint8_t>(TrafficClass::Event);
-constexpr uint8_t kControl = static_cast<uint8_t>(TrafficClass::Control);
-
 }  // namespace
-
-const char* pathName(Path p) {
-    switch (p) {
-        case Path::Direct: return "direct";
-        case Path::Relay: return "relay";
-        case Path::None: break;
-    }
-    return "none";
-}
 
 std::string shortId(const std::string& puid) { return puid.size() > 8 ? puid.substr(0, 8) : puid; }
 
@@ -300,13 +245,9 @@ bool DirectNet::start(const DirectOptions& options) {
         return false;
     }
     cookieSecret_ = std::move(secret);
+    startMs_ = nowMs();
     retransmitBudget_ = opt_.retransmitBudget ? opt_.retransmitBudget : processRetransmitBudget();
-    testUplinkTokens_ = 0;
-    testUplinkMs_ = 0;
     memberIds_ = opt_.memberIds;
-    netProtocol_ = opt_.netProtocol;
-    netCaps_ = opt_.netCaps;
-    refuseOtherProtocols_ = opt_.refuseOtherProtocols;
     roomOwner_ = opt_.roomOwner;
     roomOwnerId_ = opt_.roomOwnerIdentity;
     identity_ = opt_.identity ? opt_.identity : processIdentity();
@@ -331,16 +272,15 @@ void DirectNet::stop() {
     {
         std::lock_guard<std::mutex> lock(mu_);
         sendBye();
-        // Another thread may still hold a pointer to this instance (AutoJoin swaps instances):
-        // with no links left, send() and canRoute() report false and the game falls back to EOS.
+        // Another thread may still hold a pointer to this instance (AutoJoin swaps instances): with no
+        // links left, send() and canRoute() report false and the game falls back to EOS, and what the
+        // links had not delivered goes there too.
+        const uint64_t now = nowMs();
+        for (auto& [id, link] : clients_) strand(link, now);
+        if (hostLink_) strand(*hostLink_, now);
         clients_.clear();
         hostLink_.reset();
         roster_.clear();
-        peerLinks_.clear();
-        dials_.clear();
-        intros_.clear();
-        inbox_.clear();
-        lastDataMs_.clear();
         closesocket(sock_);
         sock_ = INVALID_SOCKET;
     }
@@ -358,12 +298,8 @@ void DirectNet::setLocalUser(const std::string& puid) {
         clients_.clear();
         hostLink_.reset();
         roster_.clear();
-        peerLinks_.clear();
-        peerSeen_.clear();
-        dials_.clear();
-        intros_.clear();
         inbox_.clear();
-        lastDataMs_.clear();
+        stranded_.clear();
         newLocalSession();
     }
     localPuid_ = puid;
@@ -379,12 +315,8 @@ void DirectNet::setMemberIdentities(std::map<std::string, std::string> commitmen
 
 void DirectNet::setRoomOwner(const std::string& puid, const std::string& commitment) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (roomOwner_ != puid || roomOwnerId_ != commitment) {
-        if (hostLink_) dropHostLink("room owner/identity changed; discard its old admission and authenticate again");
-        hostRoom_.clear();
-        hostRoomFrom_.clear();
-        ++hostRoomVersion_;
-    }
+    if ((roomOwner_ != puid || roomOwnerId_ != commitment) && hostLink_)
+        dropHostLink("room owner/identity changed; discard its old admission and authenticate again");
     roomOwner_ = puid;
     roomOwnerId_ = commitment;
 }
@@ -403,241 +335,43 @@ void DirectNet::sendBye() {
     for (int copy = 0; copy < 3; ++copy) {
         for (auto& [id, link] : clients_) sendLink(link, bye);
         if (hostLink_) sendLink(*hostLink_, bye);
-        for (auto& [id, link] : peerLinks_) sendLink(link, bye);
-        for (auto& [id, dial] : dials_)
-            if (dial.link) sendLink(*dial.link, bye);
     }
+}
+
+// The link that carries game data to client `puid` now. An overloaded one carries nothing more even before the tick
+// closes it.
+DirectNet::Link* DirectNet::routableClient(const std::string& puid) {
+    auto it = clients_.find(puid);
+    return it != clients_.end() && it->second.routable && !it->second.tx.overloaded() ? &it->second : nullptr;
+}
+
+DirectNet::Link* DirectNet::routeTo(const std::string& remote) {
+    if (localPuid_.empty() || remote == localPuid_) return nullptr;
+    if (opt_.mode == Mode::Host) return routableClient(remote);
+    const bool reached = hostLink_ && hostLink_->routable && !hostLink_->tx.overloaded() &&
+                         (remote == hostLink_->puid || std::find(roster_.begin(), roster_.end(), remote) != roster_.end());
+    return reached ? &*hostLink_ : nullptr;
 }
 
 bool DirectNet::canRoute(const std::string& remote) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (localPuid_.empty() || remote == localPuid_) return false;
-    if (opt_.mode == Mode::Host) {
-        auto it = clients_.find(remote);
-        return it != clients_.end() && usable(it->second);
-    }
-    if (hostLink_ && usable(*hostLink_) && (remote == hostLink_->puid || contains(roster_, remote))) return true;
-    return peerLink(remote) != nullptr;
+    return routeTo(remote) != nullptr;
 }
 
 bool DirectNet::send(const std::string& remote, const std::string& socketName, uint8_t channel, uint8_t reliability,
                      const uint8_t* data, size_t size) {
-    return sendClassified(remote, socketName, channel, reliability, data, size, 0).sent;
-}
-
-DirectNet::Link* DirectNet::peerLink(const std::string& remote) {
-    if (opt_.mode != Mode::Join) return nullptr;
-    if (auto it = peerLinks_.find(remote); it != peerLinks_.end() && usable(it->second)) return &it->second;
-    if (auto it = dials_.find(remote); it != dials_.end() && it->second.link && usable(*it->second.link))
-        return &*it->second.link;
-    return nullptr;
-}
-
-bool DirectNet::blockedPeer(const std::string& puid) const {
-    if (testBlockToMs_) {
-        const uint64_t now = nowMs();
-        if (now >= testBlockFromMs_ && now < testBlockToMs_) return true;
-    }
-    auto it = testBlocked_.find(puid);
-    return it != testBlocked_.end() && it->second;
-}
-
-void DirectNet::setMesh(bool on) {
     std::lock_guard<std::mutex> lock(mu_);
-    if (opt_.mesh == on) return;
-    opt_.mesh = on;
-    if (!on && (!peerLinks_.empty() || !dials_.empty())) {
-        Message bye;
-        bye.type = MsgType::Bye;
-        for (auto& [id, link] : peerLinks_) sendLink(link, bye);
-        for (auto& [id, dial] : dials_)
-            if (dial.link) sendLink(*dial.link, bye);
-        peerLinks_.clear();
-        dials_.clear();
-        logf("DIRECT links to other joiners closed: mesh off; the host relays");
-    }
-    intros_.clear();
-}
-
-void DirectNet::setNetcode(uint32_t protocol, uint32_t caps, bool refuseOthers) {
-    std::lock_guard<std::mutex> lock(mu_);
-    netProtocol_ = protocol;
-    netCaps_ = caps;
-    refuseOtherProtocols_ = refuseOthers;
-}
-
-void DirectNet::setUnlistedPolicy(bool lobbyFull, std::set<std::string> lobby, std::set<std::string> banned) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (lobbyFull != lobbyFull_)
-        logf("DIRECT %s", lobbyFull ? "Epic's lobby is full and the room holds more: members outside it may come in over the "
-                                      "direct link, each proving its EOS id over EOS"
-                                    : "only members Epic's lobby lists come in over the direct link");
-    lobbyFull_ = lobbyFull;
-    lobbyIds_ = std::move(lobby);
-    bannedIds_ = std::move(banned);
-}
-
-// Proofs kept at most (kMaxClients, the room's size and then some): the oldest goes first.
-void DirectNet::proveEosIdentity(const std::string& puid, const std::string& commitment) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (puid.empty() || commitment.empty()) return;
-    auto [it, fresh] = provenIds_.insert_or_assign(puid, commitment);
-    (void)it;
-    if (fresh) provenOrder_.push_back(puid);
-    while (provenIds_.size() > kMaxClients && !provenOrder_.empty()) {
-        provenIds_.erase(provenOrder_.front());
-        provenOrder_.pop_front();
-    }
-}
-
-std::vector<std::string> DirectNet::takeProofRequests() {
-    std::lock_guard<std::mutex> lock(mu_);
-    std::vector<std::string> out(proofRequests_.begin(), proofRequests_.end());
-    proofRequests_.clear();
-    return out;
-}
-
-std::map<std::string, DirectNet::MemberNetcode> DirectNet::clientNetcode() {
-    std::lock_guard<std::mutex> lock(mu_);
-    std::map<std::string, MemberNetcode> out;
-    for (const auto& [id, link] : clients_)
-        if (link.up)
-            if (auto it = clientNetcode_.find(id); it != clientNetcode_.end()) out[id] = it->second;
-    return out;
-}
-
-void DirectNet::setShedState(bool on) {
-    std::lock_guard<std::mutex> lock(mu_);
-    opt_.shedState = on;
-}
-
-bool DirectNet::mesh() {
-    std::lock_guard<std::mutex> lock(mu_);
-    return opt_.mesh;
-}
-
-void DirectNet::setTestBlockPeers(uint64_t afterMs, uint64_t forMs) {
-    std::lock_guard<std::mutex> lock(mu_);
-    testBlockFromMs_ = nowMs() + afterMs;
-    testBlockToMs_ = forMs == UINT64_MAX ? UINT64_MAX : testBlockFromMs_ + forMs;
-}
-
-bool DirectNet::congested(const Link& link) const {
-    return (link.cc.measured() && link.cc.queueMs() > kCongestedQueueMs) || link.tx.pendingBytes() > kCongestedBacklog;
-}
-
-uint64_t DirectNet::pingIntervalFor(const Link& link, uint64_t now) const {
-    const uint64_t links = clients_.size() + peerLinks_.size() + dials_.size() + (hostLink_ ? 1 : 0);
-    if (link.lastDataMs && now - link.lastDataMs < kActiveMs)
-        return std::min<uint64_t>(opt_.pingIntervalMs, std::max<uint64_t>(kActivePingMs, links * kActivePerLinkMs));
-    // A joiner's link to its host keeps the configured beat: the host's member list goes by it (rosterFreshMs).
-    if (opt_.mode == Mode::Join && !link.peer) return opt_.pingIntervalMs;
-    return std::max<uint64_t>(opt_.pingIntervalMs, std::min<uint64_t>(links * kIdlePerLinkMs, kIdlePingMaxMs));
-}
-
-bool DirectNet::healthy(const Link& link, uint64_t now) const {
-    const uint64_t stale = std::max<uint64_t>(kPathStaleMinMs, pingIntervalFor(link, now) * 5 / 2);
-    return usable(link) && now - link.lastRecvMs <= stale && link.loss < kLossUnhealthy && !congested(link);
-}
-
-DirectNet::Route DirectNet::routeFor(const std::string& remote, uint8_t cls, uint64_t now) {
-    Route route;
-    if (opt_.mode == Mode::Host) {
-        auto it = clients_.find(remote);
-        if (it != clients_.end() && usable(it->second)) route = {&it->second, nullptr, Path::Direct};
-        return route;
-    }
-    Link* host = hostLink_ && usable(*hostLink_) ? &*hostLink_ : nullptr;
-    if (host && remote == host->puid) return {host, nullptr, Path::Direct};
-    Link* direct = opt_.mesh ? peerLink(remote) : nullptr;
-    Link* relay = host && contains(roster_, remote) ? host : nullptr;
-    if (opt_.mesh && !direct && relay) wantPeer(remote, now);
-    if (cls == kEvent || cls == kControl) {
-        // Both at once: whichever arrives first is taken, the other is a copy the receiver drops.
-        if (direct) return {direct, relay, Path::Direct};
-        return {relay, nullptr, relay ? Path::Relay : Path::None};
-    }
-    const bool good = direct && healthy(*direct, now) && direct->healthySinceMs && now - direct->healthySinceMs >= kPathRecoverMs;
-    if (good) {
-        // Suspect (two pings' time without a word from it, a round trip included): the copy over the relay makes
-        // sure state keeps arriving until the direct link is known healthy or stale, whichever it turns out to be.
-        const uint64_t quiet = 2 * pingIntervalFor(*direct, now) + direct->rttMs;
-        return {direct, relay && now - direct->lastRecvMs > quiet ? relay : nullptr, Path::Direct};
-    }
-    if (relay) return {relay, nullptr, Path::Relay};
-    if (direct) return {direct, nullptr, Path::Direct};
-    return route;
-}
-
-bool DirectNet::takeStateBudget(Link& link, size_t bytes, uint64_t now) {
-    const double rate = link.cc.rate();
-    const double cap = std::max(rate / 4, 2.0 * static_cast<double>(bytes));  // 250 ms, and a datagram always fits
-    if (link.stateTokensMs == 0) link.stateTokens = cap;
-    link.stateTokens = std::min(cap, link.stateTokens + static_cast<double>(now - link.stateTokensMs) * rate / 1000.0);
-    link.stateTokensMs = now;
-    if (link.stateTokens < static_cast<double>(bytes)) return false;
-    link.stateTokens -= static_cast<double>(bytes);
-    return true;
-}
-
-SendReport DirectNet::sendClassified(const std::string& remote, const std::string& socketName, uint8_t channel,
-                                     uint8_t reliability, const uint8_t* data, size_t size, uint8_t cls) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (localPuid_.empty() || remote == localPuid_ || size > kMaxPayload || cls > 3) return {};
-    const uint64_t now = nowMs();
-    Route route = routeFor(remote, cls, now);
-    if (!route.first) return {};
-    // The game's own datagrams only: a packet the plugin sends with a reliability of its own goes as it asks.
-    if (reliability != 0) cls = 0;
-    if (cls == kState && opt_.shedState && !takeStateBudget(*route.first, size, now)) {
-        ++stateShed_;
-        return {true, 0};
-    }
+    Link* link = size <= kMaxPayload ? routeTo(remote) : nullptr;
+    if (!link) return false;
     DataMsg msg;
     msg.src = localPuid_;
     msg.dst = remote;
     msg.socketName = socketName;
     msg.channel = channel;
     msg.reliability = reliability;
-    msg.cls = cls;
     msg.payload.assign(data, data + size);
-    auto count = [&](const Link& link) {
-        (link.puid == remote ? directOut_ : viaRelayOut_) += size;
-    };
-    count(*route.first);
-    if (route.second) {
-        count(*route.second);
-        sendData(*route.second, msg, now);
-    }
-    sendData(*route.first, std::move(msg), now);
-    return {true, route.second ? 2 : 1};
-}
-
-uint32_t DirectNet::linkBudget(const std::string& remote) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (localPuid_.empty() || remote == localPuid_) return 0;
-    Route route = routeFor(remote, kState, nowMs());
-    if (!route.first) return 0;
-    uint32_t rate = route.first->cc.rate();
-    // Through the host, what it relays for us also comes out of the host's own budget for that member.
-    if (route.path == Path::Relay) rate = std::min<uint32_t>(rate, static_cast<uint32_t>(opt_.relayBytesPerSecond));
-    return rate;
-}
-
-Path DirectNet::pathTo(const std::string& remote) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (localPuid_.empty() || remote == localPuid_) return Path::None;
-    return routeFor(remote, kState, nowMs()).path;
-}
-
-bool DirectNet::peerLinked(const std::string& remote) {
-    std::lock_guard<std::mutex> lock(mu_);
-    return peerLink(remote) != nullptr;
-}
-
-void DirectNet::setTestBlockPeer(const std::string& puid, bool blocked) {
-    std::lock_guard<std::mutex> lock(mu_);
-    testBlocked_[puid] = blocked;
+    sendData(*link, std::move(msg), nowMs());
+    return true;
 }
 
 bool DirectNet::pop(const uint8_t* channel, uint32_t maxSize, Delivered& out) {
@@ -657,10 +391,9 @@ bool DirectNet::pop(const uint8_t* channel, uint32_t maxSize, Delivered& out) {
     return false;
 }
 
-bool DirectNet::heardFromRecently(const std::string& remote, uint64_t windowMs) {
+std::vector<Stranded> DirectNet::takeStranded() {
     std::lock_guard<std::mutex> lock(mu_);
-    auto it = lastDataMs_.find(remote);
-    return it != lastDataMs_.end() && nowMs() - it->second <= windowMs;
+    return std::exchange(stranded_, {});
 }
 
 bool DirectNet::linkAlive(const std::string& remote, uint64_t windowMs) {
@@ -671,19 +404,8 @@ bool DirectNet::linkAlive(const std::string& remote, uint64_t windowMs) {
         auto it = clients_.find(remote);
         return it != clients_.end() && it->second.up && now - it->second.lastRecvMs <= windowMs;
     }
-    if (Link* peer = peerLink(remote); peer && now - peer->lastRecvMs <= windowMs) return true;
     return hostLink_ && hostLink_->up && now - hostLink_->lastRecvMs <= windowMs &&
-           (remote == hostLink_->puid || contains(roster_, remote));
-}
-
-uint64_t DirectNet::linkId(const std::string& remote) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (localPuid_.empty() || remote.empty() || remote == localPuid_) return 0;
-    if (opt_.mode == Mode::Host) {
-        auto it = clients_.find(remote);
-        return it != clients_.end() && it->second.up ? it->second.id : 0;
-    }
-    return hostLink_ && hostLink_->up && (remote == hostLink_->puid || contains(roster_, remote)) ? hostLink_->id : 0;
+           (remote == hostLink_->puid || std::find(roster_.begin(), roster_.end(), remote) != roster_.end());
 }
 
 bool DirectNet::anyLinkAlive(uint64_t windowMs) {
@@ -706,33 +428,14 @@ void DirectNet::setActive(bool active) {
         return;
     }
     sendBye();
-    size_t closed = clients_.size() + (hostLink_ ? 1 : 0) + peerLinks_.size() + dials_.size();
+    size_t closed = clients_.size() + (hostLink_ ? 1 : 0);
     clients_.clear();
     hostLink_.reset();
     roster_.clear();
     lastRoster_.clear();
-    peerLinks_.clear();
-    peerSeen_.clear();
-    dials_.clear();
-    intros_.clear();
-    introduced_.clear();
-    provenIds_.clear();
-    provenOrder_.clear();
-    proofRequests_.clear();
-    lobbyFull_ = false;
-    clientNetcode_.clear();
-    rosterPages_ = {};
-    roomPages_ = {};
-    // Unread game packets and their diagnostics belong to the room just left, not the next one.
+    // Unread game packets, and ours not delivered, belong to the room just left, not the next one.
     inbox_.clear();
-    lastDataMs_.clear();
-    // The room's member lists belong to the room: the next one starts with nothing said.
-    roomMembers_.clear();
-    roomSet_ = false;
-    if (!hostRoom_.empty()) {
-        hostRoom_.clear();
-        ++hostRoomVersion_;
-    }
+    stranded_.clear();
     newLocalSession();  // a later room starts fresh sessions
     logf("DIRECT closed %zu direct link(s): not in a room", closed);
 }
@@ -742,65 +445,34 @@ std::vector<std::string> DirectNet::directMembers() {
     return rosterLocked();
 }
 
-void DirectNet::setRoomMembers(std::vector<std::string> members) {
-    // In the order every member's game adds them (room_view.h roomOrder): it numbers them by it.
-    std::lock_guard<std::mutex> lock(mu_);
-    if (roomSet_ && members == roomMembers_) return;
-    roomMembers_ = std::move(members);
-    roomSet_ = true;
-    ++roomVersion_;
-    rosterChanged();  // the room list goes out with the roster
-}
-
-std::vector<std::string> DirectNet::hostRoom(uint64_t* version, std::string* from) {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (version) *version = hostRoomVersion_;
-    // A cached lobby grant belongs to its authenticated live host session, never a replacement host or reconnect.
-    if (!hostLink_ || !usable(*hostLink_) || hostLink_->puid != roomOwner_ || hostRoomFrom_ != roomOwner_ ||
-        roomPages_.version > roomPages_.applied) {
-        if (from) from->clear();
-        return {};
-    }
-    if (from) *from = hostRoomFrom_;
-    return hostRoom_;
-}
-
 std::vector<std::string> DirectNet::rosterLocked() const {
     if (opt_.mode == Mode::Join) return roster_;
     std::vector<std::string> r;
     if (!localPuid_.empty()) r.push_back(localPuid_);
-    uint64_t now = nowMs();
     for (const auto& [id, link] : clients_)
-        if (link.up && now - link.lastRecvMs <= opt_.rosterFreshMs) r.push_back(id);
+        if (link.routable) r.push_back(id);
     return r;
 }
 
-WireTraffic DirectNet::takeWireTraffic() {
-    WireTraffic t{wireOut_.exchange(0), wireIn_.exchange(0), relayed_.exchange(0)};
-    t.direct = directOut_.exchange(0);
-    t.viaRelay = viaRelayOut_.exchange(0);
-    t.stateShed = stateShed_.exchange(0);
-    t.relayShed = relayShed_.exchange(0);
-    return t;
-}
+WireTraffic DirectNet::takeWireTraffic() { return {wireOut_.exchange(0), wireIn_.exchange(0), relayed_.exchange(0)}; }
 
 std::string DirectNet::statusLine() {
     std::lock_guard<std::mutex> lock(mu_);
     char buf[256];
     std::string s;
     // Counts are totals since the link opened. retx: our resends; dup: the peer's resends of packets we
-    // had; gaveup: unreliable game packets we stopped resending; skipped: the peer's that never came;
-    // held: time our resends waited for credit (the link delivers less than it loses); credit: resends
-    // the link may send now.
+    // had; gaveup: unreliable game packets we stopped resending (or handed to EOS); skipped: the peer's that
+    // never came; held: time our resends waited for credit (the link delivers less than it loses); credit:
+    // resends the link may send now.
     auto describe = [&](const Link& l) {
         snprintf(buf, sizeof(buf),
                  " [%s %s rtt=%ums rto=%ums pending=%zu retx=%llu dup=%llu gaveup=%llu skipped=%llu held=%llums "
-                 "credit=%.0f]",
+                 "credit=%.0f%s]",
                  shortId(l.puid).c_str(), addrToString(l.addr, l.addrLen).c_str(), l.rttMs, l.tx.rtoMs(),
                  l.tx.pendingCount(), static_cast<unsigned long long>(l.tx.retransmits()),
                  static_cast<unsigned long long>(l.rx.duplicates()), static_cast<unsigned long long>(l.tx.abandoned()),
                  static_cast<unsigned long long>(l.rx.skipped()), static_cast<unsigned long long>(l.tx.limitedMs()),
-                 l.tx.credit());
+                 l.tx.credit(), l.up && !l.routable ? " NOT ANSWERING" : "");
         s += buf;
     };
     if (opt_.mode == Mode::Host) {
@@ -808,31 +480,14 @@ std::string DirectNet::statusLine() {
         for (const auto& [id, link] : clients_) describe(link);
     } else {
         s = hostLink_ && hostLink_->up ? "JOIN connected"
+            : hostLink_                ? "JOIN host welcomed us, waiting for it to confirm the link keys"
             : cookie_                  ? "JOIN host answered, waiting for both identities to check out"
                                        : "JOIN waiting for host";
         if (hostLink_) describe(*hostLink_);
         s += " roster=" + std::to_string(roster_.size());
-        size_t up = 0, shown = 0;
-        for (const auto& [id, link] : peerLinks_) up += link.up ? 1 : 0;
-        for (const auto& [id, dial] : dials_) up += dial.link && dial.link->up ? 1 : 0;
-        s += " direct-to-joiners=" + std::to_string(up) + " dialling=" + std::to_string(dials_.size());
-        const uint64_t now = nowMs();
-        auto peer = [&](const Link& l) {
-            if (!l.up || shown++ >= 8) return;
-            snprintf(buf, sizeof(buf), " [joiner %s %s rtt=%ums loss=%.0f%% budget=%uKB/s queue=%ums%s]", shortId(l.puid).c_str(),
-                     addrToString(l.addr, l.addrLen).c_str(), l.rttMs, l.loss * 100.0, l.cc.rate() / 1024, l.cc.queueMs(),
-                     healthy(l, now) ? "" : " UNHEALTHY");
-            s += buf;
-        };
-        for (const auto& [id, link] : peerLinks_) peer(link);
-        for (const auto& [id, dial] : dials_)
-            if (dial.link) peer(*dial.link);
     }
     if (uint64_t n = rejected_) s += " rejected=" + std::to_string(n);
     if (uint64_t n = sendFailures_) s += " send-refused=" + std::to_string(n);
-    if (uint64_t n = stateShed_) s += " state-over-budget=" + std::to_string(n);
-    if (uint64_t n = relayShed_) s += " relay-over-budget=" + std::to_string(n);
-    if (uint64_t n = relayFiltered_) s += " relay-held-by-interest=" + std::to_string(n);
     if (uint64_t n = retransmitBudget_ ? retransmitBudget_->refusals() : 0) s += " shared-retx-cap-hit=" + std::to_string(n);
     return s;
 }
@@ -841,6 +496,7 @@ std::string DirectNet::statusLine() {
 // uplink congested: callers stop resending (ReliableSender::sendRefused) instead of piling more on.
 bool DirectNet::sendRaw(const std::vector<uint8_t>& dg, const sockaddr_storage& to, int toLen) {
     if (testBlackhole_) return true;
+    if (opt_.testOutageForMs && nowMs() - startMs_ - opt_.testOutageAfterMs < opt_.testOutageForMs) return true;
     wireOut_ += dg.size();
     if (opt_.testDropRate > 0.0) {
         static thread_local std::mt19937 rng(12345);
@@ -877,8 +533,6 @@ void DirectNet::sendMsg(const Message& m, const sockaddr_storage& to, int toLen)
 // crypto fails: an unsealed datagram would only be dropped by the peer.
 // False when the datagram did not leave (see sendRaw).
 bool DirectNet::sendSealed(Link& link, std::vector<uint8_t>& dg) {
-    if (link.peer && blockedPeer(link.puid)) return true;  // tests: lost on the way
-    link.cc.onSent(static_cast<uint32_t>(dg.size()), nowMs());
     if (!sealLink(dg, ++link.txCounter, link.txMac)) {
         logRateLimited("seal", 10000, "DIRECT cannot authenticate a packet to %s (Windows crypto failed)",
                        shortId(link.puid).c_str());
@@ -892,11 +546,8 @@ void DirectNet::sendData(Link& link, DataMsg msg, uint64_t now) {
     m.type = MsgType::Data;
     m.epoch = link.epoch;
     // An unreliable packet keeps its reliability 0 on the wire: a host relaying it applies its own
-    // upgradeUnreliable, and gives it up after the deadline like the sender does. A classified one (netclass.h)
-    // is not repaired here: state is replaced by the next one, and an event or control datagram is the game's to
-    // resend (and goes over two paths).
-    link.lastDataMs = now;
-    bool upgraded = msg.reliability == 0 && opt_.upgradeUnreliable && msg.cls == 0;
+    // upgradeUnreliable, and gives it up after the deadline like the sender does.
+    bool upgraded = msg.reliability == 0 && opt_.upgradeUnreliable;
     bool tracked = msg.reliability != 0 || upgraded;
     msg.seq = tracked ? link.tx.nextSeq() : 0;
     uint32_t seq = msg.seq;
@@ -907,7 +558,6 @@ void DirectNet::sendData(Link& link, DataMsg msg, uint64_t now) {
 }
 
 void DirectNet::deliverLocal(DataMsg msg) {
-    lastDataMs_[msg.src] = nowMs();
     if (inbox_.size() >= kMaxInbox) {
         logRateLimited("inbox-full", 5000, "DIRECT inbox full (%zu packets): game is not reading, dropping oldest",
                        inbox_.size());
@@ -918,11 +568,35 @@ void DirectNet::deliverLocal(DataMsg msg) {
     d.socketName = std::move(msg.socketName);
     d.channel = msg.channel;
     d.data = std::move(msg.payload);
-    d.cls = msg.cls;
     inbox_.push_back(std::move(d));
 }
 
-void DirectNet::routeData(DataMsg msg) {
+void DirectNet::keepStranded(DataMsg msg) {
+    if (stranded_.size() >= kMaxStranded) {
+        logRateLimited("stranded-full", 5000, "DIRECT %zu packets wait for EOS and the game sends nothing: dropping",
+                       stranded_.size());
+        return;
+    }
+    stranded_.push_back({std::move(msg.dst), std::move(msg.socketName), msg.channel, msg.reliability, std::move(msg.payload)});
+}
+
+void DirectNet::returnToSender(DataMsg msg, uint64_t now) {
+    Link* from = routableClient(msg.src);
+    if (!from) {
+        logRateLimited("return-lost", 5000, "DIRECT lost a packet %s -> %s: neither link answers",
+                       shortId(msg.src).c_str(), shortId(msg.dst).c_str());
+        return;
+    }
+    msg.returned = true;
+    sendData(*from, std::move(msg), now);
+}
+
+void DirectNet::routeData(DataMsg msg, uint64_t now) {
+    if (msg.returned) {
+        // Ours, which the host could not deliver: it goes over EOS.
+        if (opt_.mode == Mode::Join && msg.src == localPuid_) keepStranded(std::move(msg));
+        return;
+    }
     if (msg.dst == localPuid_) {
         deliverLocal(std::move(msg));
         return;
@@ -935,34 +609,31 @@ void DirectNet::routeData(DataMsg msg) {
                        shortId(msg.src).c_str());
         return;
     }
-    auto it = clients_.find(msg.dst);
-    if (it == clients_.end() || !usable(it->second)) {
-        logRateLimited("forward-miss", 5000, "DIRECT cannot forward %s -> %s: destination not connected directly",
-                       shortId(msg.src).c_str(), shortId(msg.dst).c_str());
+    if (Link* to = routableClient(msg.dst)) {
+        relayed_ += msg.payload.size();
+        sendData(*to, std::move(msg), now);
         return;
     }
-    const uint64_t now = nowMs();
-    if (msg.cls == kState && msg.reliability == 0) {
-        // Interest management decides for the receiver, as for a datagram of our own (the subject is its sender).
-        if (RelayStateFilter filter = relayFilter_.load();
-            filter && !filter(msg.dst, msg.src, static_cast<uint32_t>(msg.payload.size()), it->second.cc.rate(),
-                              static_cast<uint64_t>(GetTickCount64()))) {
-            ++relayFiltered_;
-            return;
+    returnToSender(std::move(msg), now);
+}
+
+void DirectNet::strand(Link& link, uint64_t now) {
+    size_t ours = 0, returned = 0;
+    std::vector<std::vector<uint8_t>> pending = link.tx.strand();
+    for (auto& dg : pending) {
+        auto m = decode(dg.data(), dg.size(), opt_.key, nullptr);
+        if (!m || m->type != MsgType::Data || m->data.returned) continue;  // a return to this very peer: lost with it
+        if (m->data.src == localPuid_) {
+            keepStranded(std::move(m->data));
+            ++ours;
+        } else if (opt_.mode == Mode::Host && m->data.src != link.puid) {
+            returnToSender(std::move(m->data), now);
+            ++returned;
         }
-        // The host's uplink pays for what it relays: state beyond the relay budget is dropped (the next replaces it).
-        const double rate = static_cast<double>(opt_.relayBytesPerSecond);
-        if (relayTokensMs_ == 0) relayTokens_ = rate / 4;
-        relayTokens_ = std::min(rate / 4, relayTokens_ + static_cast<double>(now - relayTokensMs_) * rate / 1000.0);
-        relayTokensMs_ = now;
-        if (relayTokens_ < static_cast<double>(msg.payload.size())) {
-            ++relayShed_;
-            return;
-        }
-        relayTokens_ -= static_cast<double>(msg.payload.size());
     }
-    relayed_ += msg.payload.size();
-    sendData(it->second, std::move(msg), now);
+    if (!pending.empty())
+        logf("DIRECT %zu packets the link to %s had not delivered: %zu go over EOS, %zu back to their senders",
+             pending.size(), shortId(link.puid).c_str(), ours, returned);
 }
 
 void DirectNet::sendLink(Link& link, Message m) {
@@ -995,6 +666,32 @@ bool DirectNet::authentic(Link& link, const Received& r, const sockaddr_storage&
     return true;
 }
 
+// The peer sent a datagram with the link keys: it holds them, and what we send it is read.
+void DirectNet::linkUp(Link& link, uint64_t now) {
+    link.up = link.routable = link.answeredBefore = true;
+    link.lastAnswerMs = link.answeringSinceMs = now;
+}
+
+// Whether `link` carries game data (see direct_net.h), updated from when its peer last answered. True when that
+// changed; a link that stopped answering hands what it had not delivered on.
+bool DirectNet::updateHealth(Link& link, uint64_t now, const char* who) {
+    const bool answering = link.up && !link.tx.overloaded() && now - link.lastAnswerMs <= kAnswerMs + link.rttMs;
+    if (!answering) {
+        link.answeringSinceMs = 0;
+        if (!link.routable) return false;
+        link.routable = false;
+        logf("DIRECT %s has not answered for %llu ms: game data goes over EOS until it answers again", who,
+             static_cast<unsigned long long>(now - link.lastAnswerMs));
+        strand(link, now);
+        return true;
+    }
+    if (!link.answeringSinceMs) link.answeringSinceMs = now;
+    if (link.routable || now - link.answeringSinceMs < kRecoverMs) return false;
+    link.routable = true;
+    logf("DIRECT %s answers again: game data goes over it again", who);
+    return true;
+}
+
 void DirectNet::onLinkCommon(Link& link, const Message& m, uint64_t now) {
     link.lastRecvMs = now;
     switch (m.type) {
@@ -1007,18 +704,16 @@ void DirectNet::onLinkCommon(Link& link, const Message& m, uint64_t now) {
         }
         case MsgType::Pong:
             link.rttMs = static_cast<uint32_t>(now - m.ping.timeMs);
-            link.cc.onRtt(link.rttMs, now);
-            link.loss *= 0.9;
-            if (link.pingOutMs && m.ping.timeMs >= link.pingOutMs) link.pingOutMs = 0;
+            link.lastAnswerMs = now;
             break;
         case MsgType::Ack:
             link.tx.onAck(m.ack, now);
+            link.lastAnswerMs = now;
             break;
         case MsgType::Data:
         case MsgType::Forward: {
-            if (m.type == MsgType::Data) link.lastDataMs = now;
             if (m.type == MsgType::Data && m.data.seq == 0) {
-                routeData(m.data);
+                routeData(m.data, now);
                 break;
             }
             std::vector<DataMsg> ready;
@@ -1026,7 +721,7 @@ void DirectNet::onLinkCommon(Link& link, const Message& m, uint64_t now) {
             ack.type = MsgType::Ack;
             ack.ack = m.type == MsgType::Data ? link.rx.onData(m.data, ready) : link.rx.onForward(m.forward.floor, ready);
             sendLink(link, ack);
-            for (auto& d : ready) routeData(std::move(d));
+            for (auto& d : ready) routeData(std::move(d), now);
             break;
         }
         default:
@@ -1052,27 +747,7 @@ std::optional<Cookie> DirectNet::cookieFor(const HelloMsg& h, const sockaddr_sto
 
 // Why a hello with a valid cookie does not prove the EOS id it claims, or nullptr when it does.
 const char* DirectNet::identityRefusal(const HelloMsg& h) {
-    if (refuseOtherProtocols_ && netProtocol_ && h.netProtocol != netProtocol_)
-        return "it runs another EDF6Coop netcode protocol (another version); the room host refuses it";
     auto member = memberIds_.find(h.puid);
-    if (member == memberIds_.end() && opt_.mode == Mode::Host && lobbyFull_) {
-        // A member beyond Epic's lobby (see setUnlistedPolicy): never one Epic lists, never one this room removed,
-        // and only with the key it proved over EOS.
-        if (lobbyIds_.count(h.puid))
-            return "Epic's lobby lists that player, but it published no direct-link identity there (the game as it "
-                   "ships, or its entry has not reached us yet); nobody may come in under its id over the direct link";
-        if (bannedIds_.count(h.puid)) return "that player was removed from this room";
-        auto proven = provenIds_.find(h.puid);
-        if (proven == provenIds_.end()) {
-            if (proofRequests_.size() < kMaxClients) proofRequests_.insert(h.puid);
-            return "it has not proven its EOS id over EOS yet (a player beyond Epic's lobby does that first)";
-        }
-        if (identityCommitment(h.publicKey) != proven->second)
-            return "it is not signed by the key that EOS id proved over EOS (someone else claiming to be it?)";
-        auto digest = helloDigest(h);
-        if (!digest || !verifySignature(h.publicKey, *digest, h.signature)) return "its signature does not verify";
-        return nullptr;
-    }
     if (member == memberIds_.end())
         return "that player published no direct-link identity in this room (a game without the plugin, "
                "EDF6DirectNet 0.3.6 or older, or its room info has not reached us yet); it stays on EOS";
@@ -1115,8 +790,7 @@ void DirectNet::onHostHello(const HelloMsg& h, const sockaddr_storage& from, int
                        addrToString(from, fromLen).c_str(), why);
         return;
     }
-    const auto listed = memberIds_.find(id);
-    const std::string commitment = listed != memberIds_.end() ? listed->second : provenIds_[id];
+    const std::string commitment = memberIds_[id];
     auto it = clients_.find(id);
     bool sameSession = it != clients_.end() && it->second.session == h.session && it->second.peerNonce == h.nonce &&
                        it->second.peerEcdh == h.ecdh;
@@ -1153,16 +827,14 @@ void DirectNet::onHostHello(const HelloMsg& h, const sockaddr_storage& from, int
         link.epoch = linkEpoch(h.nonce, localNonce_);
         link.lastRecvMs = now;
         if (!openHostLink(link, h)) return;
-        bool wasUp = it != clients_.end() && it->second.up;
+        if (it != clients_.end()) strand(it->second, now);  // the old session's link is gone
         if (other && other->puid != id) {
             std::string stale = other->puid;  // copy: erase must not take a key owned by the node
-            wasUp |= other->up;
+            strand(*other, now);
             clients_.erase(stale);
         }
         clients_[id] = std::move(link);
         seen_[id] = Seen{commitment, h.session};
-        clientNetcode_[id] = MemberNetcode{h.netProtocol, h.netCaps};
-        if (wasUp) rosterChanged();  // the old session's link is gone
     }
     Link& link = clients_[id];
     link.lastRecvMs = now;
@@ -1195,7 +867,7 @@ bool DirectNet::openHostLink(Link& link, const HelloMsg& h) {
 // Welcomes the client of `link`, signed with our identity. The signature covers the member list, so
 // it is made again only when that changed since the last welcome of this link.
 void DirectNet::sendWelcome(Link& link, const sockaddr_storage& to, int toLen) {
-    std::vector<std::string> roster = link.peer ? std::vector<std::string>() : rosterLocked();
+    std::vector<std::string> roster = rosterLocked();
     if (link.welcomeDatagram.empty() || roster != link.welcome.roster) {
         link.welcome.roster = std::move(roster);
         auto digest = welcomeDigest(link.welcome, link.peerEcdh);
@@ -1247,48 +919,26 @@ void DirectNet::onHostDatagram(const Received& r, const sockaddr_storage& from, 
     } else if (!authentic(*link, r, from, fromLen)) {
         return;
     }
-    if (!link->up && m.type != MsgType::Bye) {
-        // The client holds the link keys: it verified our welcome. Game data may flow now.
-        link->up = true;
-        link->id = ++linkIds_;
-        logf("DIRECT client %s connected from %s (%zu direct clients)", shortId(link->puid).c_str(),
-             addrToString(from, fromLen).c_str(), clients_.size());
-        rosterChanged();
-    }
     if (m.type == MsgType::Bye) {
         std::string gone = link->puid;  // copy: erase must not take a key owned by the node
         logf("DIRECT client %s said goodbye", shortId(gone).c_str());
+        strand(*link, now);
         clients_.erase(gone);
         rosterChanged();
         return;
+    }
+    if (!link->up) {
+        linkUp(*link, now);
+        logf("DIRECT client %s connected from %s (%zu direct clients)", shortId(link->puid).c_str(),
+             addrToString(from, fromLen).c_str(), clients_.size());
+        rosterChanged();
     }
     if (m.type == MsgType::Data && m.data.src != link->puid) {
         logRateLimited("spoof", 5000, "DIRECT dropped packet claiming src %s from client %s",
                        shortId(m.data.src).c_str(), shortId(link->puid).c_str());
         return;
     }
-    if (m.type == MsgType::PeerQuery) {
-        link->lastRecvMs = now;
-        onPeerQuery(*link, m.peer.puid, now);
-        return;
-    }
     onLinkCommon(*link, m, now);
-}
-
-// A joiner wants a direct link with another one: both learn where the other is, as this host sees them.
-void DirectNet::onPeerQuery(Link& from, const std::string& wanted, uint64_t now) {
-    auto target = clients_.find(wanted);
-    if (wanted == from.puid || target == clients_.end() || !usable(target->second)) return;
-    const auto key = from.puid < wanted ? std::make_pair(from.puid, wanted) : std::make_pair(wanted, from.puid);
-    uint64_t& last = introduced_[key];
-    if (last && now - last < kIntroducedMs) return;
-    last = now;
-    Message info;
-    info.type = MsgType::PeerInfo;
-    info.peer = {wanted, addrToString(target->second.addr, target->second.addrLen)};
-    sendLink(from, info);
-    info.peer = {from.puid, addrToString(from.addr, from.addrLen)};
-    sendLink(target->second, info);
 }
 
 void DirectNet::onClientDatagram(const Received& r, const sockaddr_storage& from, int fromLen, uint64_t now) {
@@ -1299,34 +949,14 @@ void DirectNet::onClientDatagram(const Received& r, const sockaddr_storage& from
     const Message& m = r.msg;
     switch (m.type) {
         case MsgType::Challenge: {
-            if (m.challenge.clientNonce != localNonce_) {
-                // Another joiner we dial (mesh) asks us to prove our address first, as a host does.
-                for (auto& [puid, dial] : dials_) {
-                    if (dial.link || dial.nonce != m.challenge.clientNonce) continue;
-                    const bool fresh = !dial.cookie || *dial.cookie != m.challenge.cookie;
-                    dial.cookie = m.challenge.cookie;
-                    if (fresh) sendPeerHello(puid, dial, now);
-                    return;
-                }
-                return;
-            }
             // The host keeps nothing for us until we echo this cookie in a hello signed with our identity.
-            if (hostLink_ || hostAddrLen_ == 0) return;
+            if (m.challenge.clientNonce != localNonce_ || hostLink_ || hostAddrLen_ == 0) return;
             bool fresh = !cookie_ || *cookie_ != m.challenge.cookie;
             cookie_ = m.challenge.cookie;
             if (fresh && active_ && !localPuid_.empty()) sendHello(now);  // a repeat waits for the next retry
             return;
         }
         case MsgType::Welcome:
-            if (m.welcome.clientNonce != localNonce_) {
-                for (auto& [puid, dial] : dials_)
-                    if (!dial.link && dial.nonce == m.welcome.clientNonce) {
-                        const std::string who = puid;  // copy: onPeerWelcome may log it after changes
-                        onPeerWelcome(who, dial, m.welcome, now);
-                        return;
-                    }
-                return;
-            }
             onClientWelcome(m.welcome, from, fromLen, now);
             return;
         case MsgType::Reset: {
@@ -1337,65 +967,28 @@ void DirectNet::onClientDatagram(const Received& r, const sockaddr_storage& from
                 dropHostLink("the host no longer knows our link (restarted?), reconnecting");
             return;
         }
-        case MsgType::Hello:
-            onPeerHello(m.hello, from, fromLen, now);
-            return;
-        case MsgType::Punch:
-            return;  // it only opened the sender's NAT towards us
         default:
             break;
     }
-    // A link to another joiner (by its epoch), or else the host's: proven by the link keys. Stray ones are not
-    // even logged.
-    if (onPeerDatagram(r, from, fromLen, now)) return;
-    if (!hostLink_ || !authentic(*hostLink_, r, from, fromLen)) return;
+    // Proven by the link keys; stray ones are not even logged.
+    if (!isLinkScoped(m.type) || !hostLink_ || !authentic(*hostLink_, r, from, fromLen)) return;
     if (m.type == MsgType::Bye) {
         dropHostLink("the host closed the direct link, reconnecting");
         return;
     }
-    if (m.type == MsgType::Roster) {
-        // A member list older than the one applied (reordered in flight) would bring back a member
-        // the host already dropped. A list of several pages applies once all of them are in.
-        if (m.roster.hostNonce != hostLink_->peerNonce) return;
-        std::vector<std::string> list;
-        const bool single = m.roster.offset == 0 && m.roster.total == m.roster.roster.size();
-        if (single ? m.counter >= hostLink_->rosterCounter && currentSinglePage(rosterPages_, m.roster.version)
-                   : applyPage(rosterPages_, m.roster.version, m.roster.total, m.roster.offset, m.roster.roster, list)) {
-            if (single) {
-                hostLink_->rosterCounter = m.counter;
-                rosterPages_.applied = m.roster.version;
-                rosterPages_.version = m.roster.version;
-                rosterPages_.pages.clear();
-                list = m.roster.roster;
-            }
-            if (roster_ != list) logf("DIRECT roster now has %zu direct members", list.size());
-            roster_ = std::move(list);
-        }
+    if (!hostLink_->up) {
+        linkUp(*hostLink_, now);
+        bool other = !sameAddr(hostReplyAddr_, hostReplyAddrLen_, hostAddr_, hostAddrLen_);
+        logf("DIRECT connected to host %s at %s%s%s", shortId(hostLink_->puid).c_str(),
+             addrToString(hostAddr_, hostAddrLen_).c_str(), other ? ", it answers from " : "",
+             other ? addrToString(hostReplyAddr_, hostReplyAddrLen_).c_str() : "");
     }
-    if (m.type == MsgType::Room) {
-        if (m.room.hostNonce != hostLink_->peerNonce) return;
-        std::vector<std::string> list;
-        const bool single = m.room.offset == 0 && m.room.total == m.room.members.size();
-        if (single ? m.counter >= hostLink_->roomCounter && currentSinglePage(roomPages_, m.room.version)
-                   : applyPage(roomPages_, m.room.version, m.room.total, m.room.offset, m.room.members, list)) {
-            if (single) {
-                hostLink_->roomCounter = m.counter;
-                roomPages_.applied = m.room.version;
-                roomPages_.version = m.room.version;
-                roomPages_.pages.clear();
-                list = m.room.members;
-            }
-            if (hostRoom_ != list || hostRoomFrom_ != hostLink_->puid) {
-                hostRoom_ = std::move(list);
-                hostRoomFrom_ = hostLink_->puid;
-                ++hostRoomVersion_;
-            }
-        }
-    }
-    if (m.type == MsgType::PeerInfo) {
-        hostLink_->lastRecvMs = now;
-        onPeerInfo(m.peer, now);
-        return;
+    // A member list older than the one applied (reordered in flight) would bring back a member the host
+    // already dropped.
+    if (m.type == MsgType::Roster && m.roster.hostNonce == hostLink_->peerNonce && m.counter >= hostLink_->rosterCounter) {
+        hostLink_->rosterCounter = m.counter;
+        if (roster_ != m.roster.roster) logf("DIRECT roster now has %zu direct members", m.roster.roster.size());
+        roster_ = m.roster.roster;
     }
     onLinkCommon(*hostLink_, m, now);
 }
@@ -1415,9 +1008,11 @@ const char* DirectNet::welcomeRefusal(const WelcomeMsg& w) {
     return nullptr;
 }
 
+// The host's welcome verified: the link is made, but carries game data only once the host has answered with the
+// link keys (linkUp); until then it is pinged, and a host that derived other keys never answers.
 void DirectNet::onClientWelcome(const WelcomeMsg& w, const sockaddr_storage& from, int fromLen, uint64_t now) {
     if (hostAddrLen_ == 0 || w.clientNonce != localNonce_) return;  // not an answer to our hello
-    if (hostLink_ && hostLink_->peerNonce == w.hostNonce) return;  // a repeat: the link is up already
+    if (hostLink_ && hostLink_->peerNonce == w.hostNonce) return;  // a repeat: the link is made already
     if (const char* why = welcomeRefusal(w)) {
         logRateLimited(why, 10000, "DIRECT refused the welcome of %s from %s: %s; the game stays on EOS",
                        shortId(w.hostPuid).c_str(), addrToString(from, fromLen).c_str(), why);
@@ -1446,32 +1041,23 @@ void DirectNet::onClientWelcome(const WelcomeMsg& w, const sockaddr_storage& fro
     link.identityCommitment = identityCommitment(w.publicKey);
     link.peerNonce = w.hostNonce;
     link.epoch = linkEpoch(localNonce_, w.hostNonce);
-    link.up = true;
-    link.id = ++linkIds_;
     link.lastRecvMs = now;
-    rosterPages_ = {};
-    roomPages_ = {};
-    hostRoom_.clear();
-    hostRoomFrom_.clear();
-    ++hostRoomVersion_;
     hostLink_ = std::move(link);
     hostReplyAddr_ = from;
     hostReplyAddrLen_ = fromLen;
     roster_ = w.roster;
-    bool other = !sameAddr(from, fromLen, hostAddr_, hostAddrLen_);
-    logf("DIRECT connected to host %s at %s%s%s", shortId(w.hostPuid).c_str(), addrToString(hostAddr_, hostAddrLen_).c_str(),
-         other ? ", it answers from " : "", other ? addrToString(from, fromLen).c_str() : "");
+    Message p;
+    p.type = MsgType::Ping;
+    p.ping.timeMs = now;
+    sendLink(*hostLink_, p);
+    hostLink_->lastPingMs = now;
 }
 
 void DirectNet::dropHostLink(const char* why) {
     logf("DIRECT %s", why);
+    if (hostLink_) strand(*hostLink_, nowMs());
     hostLink_.reset();
     roster_.clear();
-    rosterPages_ = {};
-    roomPages_ = {};
-    hostRoom_.clear();
-    hostRoomFrom_.clear();
-    ++hostRoomVersion_;
     newLocalSession();
     lastHelloMs_ = 0;
 }
@@ -1484,9 +1070,8 @@ void DirectNet::processDatagram(const uint8_t* data, size_t size, const sockaddr
         uint16_t theirs = 0;
         memcpy(&theirs, data + 6, 2);
         logRateLimited("protocol", 30000,
-                       "DIRECT %s speaks direct-link protocol %u, we speak %u: it runs another EDF6DirectNet version "
-                       "(0.3.6 and older speak 2, 0.4.0 speaks 3, 0.4.1 speaks 4). No direct link with it; the game talks to it over "
-                       "EOS as usual",
+                       "DIRECT %s speaks direct-link protocol %u, we speak %u: it runs another EDF6Coop version. No "
+                       "direct link with it; the game talks to it over EOS as usual",
                        addrToString(from, fromLen).c_str(), theirs, kProtocol);
         return;
     }
@@ -1510,52 +1095,13 @@ void DirectNet::rosterChanged() {
 }
 
 void DirectNet::broadcastRoster() {
-    std::vector<std::string> roster = rosterLocked();
-    if (roster != lastRoster_ || rosterVersion_ == 0) ++rosterVersion_;
-    lastRoster_ = roster;
-    for (auto& [id, link] : clients_) {
-        sendListPages(link, MsgType::Roster, roster, rosterVersion_);
-        sendRoom(link);
-    }
+    lastRoster_ = rosterLocked();
+    Message m;
+    m.type = MsgType::Roster;
+    m.roster.hostNonce = localNonce_;
+    m.roster.roster = lastRoster_;
+    for (auto& [id, link] : clients_) sendLink(link, m);
     lastRosterMs_ = nowMs();
-}
-
-void DirectNet::sendRoom(Link& link) {
-    if (!roomSet_) return;
-    sendListPages(link, MsgType::Room, roomMembers_, roomVersion_);
-}
-
-// A member list in pages of kRosterPage (one page, total = its size, for a list that fits).
-void DirectNet::sendListPages(Link& link, MsgType type, const std::vector<std::string>& list, uint32_t version) {
-    size_t offset = 0;
-    do {
-        const size_t n = std::min(kRosterPage, list.size() - offset);
-        Message m;
-        m.type = type;
-        RosterMsg page;
-        page.hostNonce = localNonce_;
-        page.roster.assign(list.begin() + static_cast<std::ptrdiff_t>(offset),
-                           list.begin() + static_cast<std::ptrdiff_t>(offset + n));
-        page.version = version;
-        page.total = static_cast<uint16_t>(list.size());
-        page.offset = static_cast<uint16_t>(offset);
-        if (type == MsgType::Roster) {
-            m.roster = std::move(page);
-        } else {
-            m.room.hostNonce = page.hostNonce;
-            m.room.members = std::move(page.roster);
-            m.room.version = page.version;
-            m.room.total = page.total;
-            m.room.offset = page.offset;
-        }
-        sendLink(link, m);
-        offset += n;
-    } while (offset < list.size());
-}
-
-bool DirectNet::applyPage(Pages& pages, uint32_t version, uint16_t total, uint16_t offset,
-                          const std::vector<std::string>& entries, std::vector<std::string>& out) {
-    return applyListPage(pages, version, total, offset, entries, out);
 }
 
 bool DirectNet::resolveHost() {
@@ -1595,6 +1141,7 @@ bool DirectNet::resolveHost() {
     std::lock_guard<std::mutex> lock(mu_);
     if (!sameAddr(addr, len, hostAddr_, hostAddrLen_)) {
         logf("DIRECT host address %s -> %s", opt_.hostAddress.c_str(), addrToString(addr, len).c_str());
+        if (hostLink_) strand(*hostLink_, nowMs());
         hostAddr_ = addr;
         hostAddrLen_ = len;
         hostReplyAddrLen_ = 0;
@@ -1615,14 +1162,12 @@ void DirectNet::tick(uint64_t now) {
             f.forward.floor = *floor;
             sendLink(link, f);
         }
-        measure(link, now);
-        if (now - link.lastPingMs >= pingIntervalFor(link, now)) {
+        if (now - link.lastPingMs >= opt_.pingIntervalMs) {
             Message p;
             p.type = MsgType::Ping;
             p.ping.timeMs = now;
             sendLink(link, p);
             link.lastPingMs = now;
-            if (!link.pingOutMs) link.pingOutMs = now;
         }
     };
     // True (and logged) when `link` has to close: silent too long, stuck on a packet the game sent
@@ -1652,19 +1197,19 @@ void DirectNet::tick(uint64_t now) {
     if (opt_.mode == Mode::Host) {
         bool changed = false;
         for (auto it = clients_.begin(); it != clients_.end();) {
-            if (closing(it->second, ("client " + shortId(it->first)).c_str())) {
+            const std::string who = "client " + shortId(it->first);
+            if (closing(it->second, who.c_str())) {
+                strand(it->second, now);
                 it = clients_.erase(it);
                 changed = true;
                 continue;
             }
+            changed |= updateHealth(it->second, now, who.c_str());
             pollLink(it->second);
             ++it;
         }
-        if (!changed && rosterLocked() != lastRoster_) changed = true;  // a client went quiet or came back
-        for (auto it = introduced_.begin(); it != introduced_.end();)
-            it = now - it->second > 60000 ? introduced_.erase(it) : std::next(it);
         bool burst = now < rosterBurstUntilMs_ && now - lastRosterMs_ >= kRosterBurstIntervalMs;
-        if (changed)
+        if (changed || rosterLocked() != lastRoster_)
             rosterChanged();
         else if (burst || (!clients_.empty() && now - lastRosterMs_ >= kRosterIntervalMs))
             broadcastRoster();
@@ -1672,276 +1217,16 @@ void DirectNet::tick(uint64_t now) {
     }
 
     if (hostLink_ && closing(*hostLink_, "host link")) dropHostLink("reconnecting to the host");
-    // Links to other joiners (mesh): dials retried and given up, links measured, idle or dead ones closed.
-    for (auto it = dials_.begin(); it != dials_.end();) {
-        Dial& d = it->second;
-        if (d.link) {
-            const char* why = closing(*d.link, ("direct link to joiner " + shortId(it->first)).c_str()) ? "it failed"
-                              : now - std::max(d.link->lastDataMs, d.startMs) > kPeerIdleMs ? "it carried nothing for a minute"
-                                                                                               : nullptr;
-            if (why) {
-                logf("DIRECT closing the direct link to joiner %s (%s); the host relays", shortId(it->first).c_str(), why);
-                Message bye;
-                bye.type = MsgType::Bye;
-                sendLink(*d.link, bye);
-                it = dials_.erase(it);
-                continue;
-            }
-            pollLink(*d.link);
-        } else if (now - d.startMs > kDialTimeoutMs) {
-            logRateLimited(("dial-" + it->first).c_str(), 30000,
-                           "DIRECT joiner %s did not answer at its address within %llu s; the host relays",
-                           shortId(it->first).c_str(), static_cast<unsigned long long>(kDialTimeoutMs / 1000));
-            it = dials_.erase(it);
-            continue;
-        } else if (now - d.lastHelloMs >= kHelloIntervalMs) {
-            sendPeerHello(it->first, d, now);
-        }
-        ++it;
-    }
-    for (auto it = peerLinks_.begin(); it != peerLinks_.end();) {
-        Link& l = it->second;
-        const bool dead = l.up ? closing(l, ("direct link from joiner " + shortId(it->first)).c_str())
-                               : now - l.lastRecvMs > kDialTimeoutMs;
-        if (dead || (l.up && l.lastDataMs && now - l.lastDataMs > kPeerIdleMs)) {
-            it = peerLinks_.erase(it);
-            continue;
-        }
-        if (l.up) pollLink(l);
-        ++it;
-    }
+    if (hostLink_ && !hostLink_->up && now - hostLink_->lastRecvMs > kConfirmMs)
+        dropHostLink("the host welcomed us but never answered with the link keys (a key exchange that came out "
+                     "different?); starting over");
     if (hostLink_) {
+        updateHealth(*hostLink_, now, "host link");
         pollLink(*hostLink_);
         return;
     }
     if (active_ && !localPuid_.empty() && hostAddrLen_ > 0 && now - lastHelloMs_ >= kHelloIntervalMs) sendHello(now);
 }
-
-// --- Paths and the mesh ---
-
-void DirectNet::measure(Link& link, uint64_t now) {
-    // A ping unanswered for three round trips (a second at least) is lost: the path loses packets, or queues them
-    // longer than anything the game can use.
-    if (link.pingOutMs && now - link.pingOutMs > std::max<uint64_t>(1000, 3ull * link.rttMs)) {
-        link.loss = 0.9 * link.loss + 0.1;
-        link.cc.onLoss(now);
-        link.pingOutMs = 0;
-    }
-    const bool h = healthy(link, now);
-    if (h && !link.healthySinceMs) link.healthySinceMs = now;
-    if (!h) link.healthySinceMs = 0;
-}
-
-void DirectNet::wantPeer(const std::string& remote, uint64_t now) {
-    if (dials_.count(remote) || peerLinks_.count(remote) || !hostLink_) return;
-    Intro& in = intros_[remote];
-    if (now < in.retryAfterMs || (in.lastQueryMs && now - in.lastQueryMs < kIntroQueryMs)) return;
-    if (in.lastQueryMs && ++in.failures >= kIntroFailures) {
-        logf("DIRECT no direct link to joiner %s after %u tries; the host relays its packets, trying again in %llu s",
-             shortId(remote).c_str(), kIntroFailures, static_cast<unsigned long long>(kIntroBackoffMs / 1000));
-        in = {};
-        in.retryAfterMs = now + kIntroBackoffMs;
-        return;
-    }
-    in.lastQueryMs = now;
-    Message q;
-    q.type = MsgType::PeerQuery;
-    q.peer.puid = remote;
-    sendLink(*hostLink_, q);
-}
-
-// The host told us where another joiner is. The lower EOS id dials, the other opens its NAT towards it.
-void DirectNet::onPeerInfo(const PeerMsg& info, uint64_t now) {
-    if (!opt_.mesh || !active_ || info.puid.empty() || info.puid == localPuid_ || !contains(roster_, info.puid)) return;
-    sockaddr_storage addr{};
-    int len = 0;
-    if (!parseAddress(info.address, addr, len)) return;
-    if (family_ == AF_INET6) toDualStack(addr, len);
-    if (localPuid_ < info.puid) {
-        if (peerLinks_.count(info.puid)) return;
-        Dial& d = dials_[info.puid];
-        if (d.link) return;
-        if (d.nonce == 0 || !sameAddr(d.addr, d.addrLen, addr, len)) {
-            d.addr = addr;
-            d.addrLen = len;
-            d.nonce = randomNonce();
-            d.session = identity_ ? identity_->nextSession() : 0;
-            d.ecdh = EcdhKey::generate();
-            d.cookie.reset();
-            d.startMs = now;
-        }
-        sendPeerHello(info.puid, d, now);
-        return;
-    }
-    if (blockedPeer(info.puid)) return;
-    Message punch;
-    punch.type = MsgType::Punch;
-    sendMsg(punch, addr, len);
-}
-
-void DirectNet::sendPeerHello(const std::string& puid, Dial& d, uint64_t now) {
-    d.lastHelloMs = now;
-    if (blockedPeer(puid)) return;  // tests: lost on the way
-    Message h;
-    h.type = MsgType::Hello;
-    h.hello.nonce = d.nonce;
-    h.hello.session = d.session;
-    h.hello.puid = localPuid_;
-    h.hello.netProtocol = netProtocol_;
-    h.hello.netCaps = netCaps_;
-    if (d.cookie && identity_ && d.ecdh) {
-        h.hello.cookie = *d.cookie;
-        h.hello.publicKey = identity_->publicKey();
-        h.hello.ecdh = d.ecdh->publicKey();
-        auto digest = helloDigest(h.hello);
-        auto signature = digest ? identity_->sign(*digest) : std::nullopt;
-        if (signature) h.hello.signature = *signature;
-    }
-    sendMsg(h, d.addr, d.addrLen);
-}
-
-// Another joiner dials us (it has the lower EOS id): we answer as a host does - a cookie for its address first, then
-// its hello must be signed by the identity it published in the room.
-void DirectNet::onPeerHello(const HelloMsg& h, const sockaddr_storage& from, int fromLen, uint64_t now) {
-    if (!opt_.mesh || localPuid_.empty() || !active_ || h.puid.empty() || h.puid >= localPuid_ || blockedPeer(h.puid))
-        return;
-    const uint64_t bucket = now / kCookieBucketMs;
-    auto current = cookieFor(h, from, fromLen, bucket);
-    auto previous = cookieFor(h, from, fromLen, bucket - 1);
-    if (!current) return;
-    if (h.cookie != *current && (!previous || h.cookie != *previous)) {
-        Message c;
-        c.type = MsgType::Challenge;
-        c.challenge.clientNonce = h.nonce;
-        c.challenge.cookie = *current;
-        sendMsg(c, from, fromLen);
-        return;
-    }
-    if (const char* why = identityRefusal(h)) {
-        logRateLimited(why, 10000, "DIRECT refused the direct link of joiner %s from %s: %s", shortId(h.puid).c_str(),
-                       addrToString(from, fromLen).c_str(), why);
-        return;
-    }
-    const std::string commitment = memberIds_[h.puid];
-    auto it = peerLinks_.find(h.puid);
-    const bool sameSession = it != peerLinks_.end() && it->second.session == h.session &&
-                             it->second.peerNonce == h.nonce && it->second.peerEcdh == h.ecdh;
-    auto seen = peerSeen_.find(h.puid);
-    if (!sameSession && seen != peerSeen_.end() && seen->second.commitment == commitment && h.session <= seen->second.session)
-        return;  // a replayed hello of an earlier session
-    if (!sameSession) {
-        if (it == peerLinks_.end() && peerLinks_.size() >= kMaxClients) return;
-        Link link;
-        link.addr = from;
-        link.addrLen = fromLen;
-        link.puid = h.puid;
-        link.peer = true;
-        link.peerNonce = h.nonce;
-        link.session = h.session;
-        link.epoch = linkEpoch(h.nonce, localNonce_);
-        link.lastRecvMs = now;
-        if (!openHostLink(link, h)) return;
-        peerLinks_[h.puid] = std::move(link);
-        peerSeen_[h.puid] = Seen{commitment, h.session};
-    }
-    Link& link = peerLinks_[h.puid];
-    link.lastRecvMs = now;
-    sendWelcome(link, from, fromLen);
-}
-
-// The joiner we dialled answered: its welcome must be signed by the identity it published in the room.
-void DirectNet::onPeerWelcome(const std::string& puid, Dial& d, const WelcomeMsg& w, uint64_t now) {
-    auto member = memberIds_.find(puid);
-    const char* why = nullptr;
-    if (w.hostPuid != puid) why = "another member answered at its address";
-    else if (member == memberIds_.end() || identityCommitment(w.publicKey) != member->second)
-        why = "it is not signed by the identity that member published in the room";
-    auto digest = d.ecdh ? welcomeDigest(w, d.ecdh->publicKey()) : std::nullopt;
-    if (!why && (!digest || !verifySignature(w.publicKey, *digest, w.signature))) why = "its signature does not verify";
-    if (why) {
-        logRateLimited(why, 10000, "DIRECT refused the direct link answer of joiner %s: %s", shortId(puid).c_str(), why);
-        return;
-    }
-    HelloMsg hello;
-    hello.nonce = d.nonce;
-    hello.session = d.session;
-    hello.puid = localPuid_;
-    hello.ecdh = d.ecdh->publicKey();
-    auto shared = d.ecdh->agree(w.ecdh);
-    auto keys = shared ? deriveLinkKeys(*shared, opt_.key, hello, w) : std::nullopt;
-    Link link;
-    if (keys) {
-        link.txMac = LinkMac(keys->clientToHost);
-        link.rxMac = LinkMac(keys->hostToClient);
-    }
-    if (!link.txMac.valid() || !link.rxMac.valid()) return;
-    link.addr = d.addr;
-    link.addrLen = d.addrLen;
-    link.puid = puid;
-    link.peer = true;
-    link.peerNonce = w.hostNonce;
-    link.epoch = linkEpoch(d.nonce, w.hostNonce);
-    link.up = true;
-    link.id = ++linkIds_;
-    link.lastRecvMs = now;
-    link.lastDataMs = now;
-    d.link = std::move(link);
-    intros_.erase(puid);
-    logf("DIRECT linked directly to joiner %s at %s", shortId(puid).c_str(), addrToString(d.addr, d.addrLen).c_str());
-    // The first datagram with the link keys brings our side of the link up on its end.
-    Message p;
-    p.type = MsgType::Ping;
-    p.ping.timeMs = now;
-    sendLink(*d.link, p);
-}
-
-bool DirectNet::onPeerDatagram(const Received& r, const sockaddr_storage& from, int fromLen, uint64_t now) {
-    const Message& m = r.msg;
-    Link* link = nullptr;
-    bool responder = false;
-    for (auto& [puid, l] : peerLinks_)
-        if (l.epoch == m.epoch) {
-            link = &l;
-            responder = true;
-            break;
-        }
-    if (!link)
-        for (auto& [puid, d] : dials_)
-            if (d.link && d.link->epoch == m.epoch) {
-                link = &*d.link;
-                break;
-            }
-    if (!link) return false;
-    if (blockedPeer(link->puid)) return true;  // tests: lost on the way
-    if (!authentic(*link, r, from, fromLen)) return true;
-    const std::string puid = link->puid;  // copy: the link may go below
-    if (responder && !sameAddr(link->addr, link->addrLen, from, fromLen)) {
-        link->addr = from;  // the joiner's NAT moved it; only it holds the key
-        link->addrLen = fromLen;
-    }
-    if (responder && !link->up && m.type != MsgType::Bye) {
-        link->up = true;
-        link->id = ++linkIds_;
-        link->lastDataMs = now;
-        intros_.erase(puid);
-        logf("DIRECT joiner %s linked directly from %s", shortId(puid).c_str(), addrToString(from, fromLen).c_str());
-    }
-    if (m.type == MsgType::Bye) {
-        dropPeer(puid, "it closed the direct link");
-        return true;
-    }
-    if (m.type == MsgType::Data && (m.data.src != puid || m.data.dst != localPuid_)) return true;
-    if (!isLinkScoped(m.type) || m.type == MsgType::Roster || m.type == MsgType::Room || m.type == MsgType::PeerQuery ||
-        m.type == MsgType::PeerInfo)
-        return true;  // the host's business, not a joiner's
-    onLinkCommon(*link, m, now);
-    return true;
-}
-
-void DirectNet::dropPeer(const std::string& puid, const char* why) {
-    if (peerLinks_.erase(puid) + dials_.erase(puid)) logf("DIRECT direct link to joiner %s closed (%s); the host relays", shortId(puid).c_str(), why);
-}
-
 
 // Our hello: plain until the host sent a cookie, then with our ECDH key, signed with our identity.
 void DirectNet::sendHello(uint64_t now) {
@@ -1950,8 +1235,6 @@ void DirectNet::sendHello(uint64_t now) {
     h.hello.nonce = localNonce_;
     h.hello.session = localSession_;
     h.hello.puid = localPuid_;
-    h.hello.netProtocol = netProtocol_;
-    h.hello.netCaps = netCaps_;
     if (cookie_ && identity_ && localEcdh_) {
         h.hello.cookie = *cookie_;
         h.hello.publicKey = identity_->publicKey();

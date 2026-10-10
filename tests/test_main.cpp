@@ -21,7 +21,6 @@
 #include "../src/config.h"
 #include "../src/direct_net.h"
 #include "../src/hold.h"
-#include "../src/netclass.h"
 #include "../src/netif.h"
 #include "../src/reliable.h"
 #include "../src/upnp.h"
@@ -943,6 +942,43 @@ void testNoReflectionToSender() {
     CHECK(waitFor([&] { return host.pop(nullptr, 1170, d); }, 2000) && d.src == kA && d.data == payloadFor(51));
 }
 
+std::string hex(const uint8_t* p, size_t n) {
+    static const char* digits = "0123456789abcdef";
+    std::string out;
+    for (size_t i = 0; i < n; ++i) out += {digits[p[i] >> 4], digits[p[i] & 15]};
+    return out;
+}
+
+// Windows's BCrypt and Wine's (Proton) must agree bit for bit, or two players' link keys differ and their
+// link never comes up. Standard vectors (FIPS 180-2, RFC 4231 case 1), and the link keys as Python's hmac makes them.
+void testCryptoKnownAnswers() {
+    printf("crypto: SHA-256, HMAC-SHA256 and the link key derivation give the standard answers\n");
+    const uint8_t abc[] = {'a', 'b', 'c'};
+    auto digest = dn::sha256(abc, sizeof(abc));
+    CHECK(digest && hex(digest->data(), 32) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+    const std::string hiThere = "Hi There";
+    auto mac = dn::hmacSha256(std::string(20, '\x0b'), reinterpret_cast<const uint8_t*>(hiThere.data()), hiThere.size());
+    CHECK(mac && hex(mac->data(), 32) == "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
+    auto tag = dn::hmacTag(std::string(20, '\x0b'), reinterpret_cast<const uint8_t*>(hiThere.data()), hiThere.size());
+    CHECK(tag && hex(tag->data(), 8) == "b0344c61d8db3853");
+    dn::LinkKey key{};
+    for (size_t i = 0; i < key.size(); ++i) key[i] = 0x0b;  // the first 20 bytes are RFC 4231's key, then 12 more
+    dn::Digest shared{};
+    for (size_t i = 0; i < shared.size(); ++i) shared[i] = static_cast<uint8_t>(i);
+    dn::HelloMsg hello;
+    hello.nonce = 0x11223344;
+    hello.session = 7;
+    hello.puid = kA;
+    for (size_t i = 0; i < hello.ecdh.size(); ++i) hello.ecdh[i] = static_cast<uint8_t>(i * 3);
+    dn::WelcomeMsg welcome;
+    welcome.hostNonce = 0x55667788;
+    welcome.hostPuid = kHost;
+    for (size_t i = 0; i < welcome.ecdh.size(); ++i) welcome.ecdh[i] = static_cast<uint8_t>(i * 5 + 1);
+    auto keys = dn::deriveLinkKeys(shared, "abc", hello, welcome);
+    CHECK(keys && hex(keys->clientToHost.data(), 32) == "9370b7eb258c10e6c19b321e47ade024107da10e76f213207ce764a89c676059" &&
+          hex(keys->hostToClient.data(), 32) == "46e6ad20cc5dc528306b9f1aa05c0b3340222b100cbc46566fdf7daedbcaf718");
+}
+
 void testIdentityCrypto() {
     printf("identity: commitments, signatures and session numbers\n");
     auto a = dn::Identity::generate(), b = dn::Identity::generate();
@@ -1452,42 +1488,113 @@ void testHostRestart() {
     CHECK(streamInOrder(a, kHost, host2, kA, 500));
 }
 
-void testStalledLinkSurvives() {
-    printf("direct: a 3 s total outage loses nothing (packets buffered, delivered in order)\n");
+// The ids of payloadFor packets, in the order given.
+std::vector<uint32_t> idsOf(const std::vector<std::vector<uint8_t>>& packets) {
+    std::vector<uint32_t> ids;
+    for (const auto& p : packets) {
+        uint32_t id = 0;
+        memcpy(&id, p.data(), 4);
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+std::vector<std::vector<uint8_t>> strandedTo(dn::DirectNet& net, const std::string& dst) {
+    std::vector<std::vector<uint8_t>> out;
+    for (auto& s : net.takeStranded())
+        if (s.dst == dst && s.channel == 1 && s.socketName == "EDF6") out.push_back(std::move(s.data));
+    return out;
+}
+
+void testLinkStopsAnswering() {
+    printf("direct: a link that stops answering hands its undelivered packets to EOS within ~1.5 s, then recovers\n");
+    dn::DirectOptions ho = hostOptions(0, 0);
+    ho.linkTimeoutMs = 60000;  // the answers, not the timeout, must decide
     dn::DirectNet host;
-    CHECK(host.start(hostOptions(0, 0)));
+    CHECK(host.start(ho));
     host.setLocalUser(kHost);
+    dn::DirectOptions jo = joinOptions("127.0.0.1:" + std::to_string(host.boundPort()), 0);
+    jo.linkTimeoutMs = 60000;
     dn::DirectNet a;
-    CHECK(a.start(joinOptions("127.0.0.1:" + std::to_string(host.boundPort()), 0)));
+    CHECK(a.start(jo));
     a.setLocalUser(kA);
     CHECK(waitFor([&] { return a.canRoute(kHost) && host.canRoute(kA); }, 5000));
-    a.setTestBlackhole(true);  // every datagram the client sends vanishes
-    for (uint32_t i = 0; i < 300; ++i) {
-        auto p = payloadFor(i);
-        CHECK(a.send(kHost, "EDF6", 1, 2, p.data(), p.size()));
+    a.setTestBlackhole(true);  // every datagram the client sends vanishes: one way only
+    std::vector<std::vector<uint8_t>> sent;
+    for (uint32_t i = 0; i < 100; ++i) {
+        sent.push_back(payloadFor(i));
+        CHECK(a.send(kHost, "EDF6", 1, 0, sent.back().data(), sent.back().size()));  // as the game sends
     }
-    std::this_thread::sleep_for(std::chrono::seconds(3));
-    CHECK(a.canRoute(kHost) && host.canRoute(kA));  // still connected during the outage
-    // ...but the host hears nothing from the client any more, while the client still hears the host.
-    CHECK(!host.linkAlive(kA, 2000) && host.linkAlive(kA, 5000) && a.linkAlive(kHost, 2000));
-    CHECK(!host.anyLinkAlive(2000));
+    auto t0 = std::chrono::steady_clock::now();
+    CHECK(waitFor([&] { return !a.canRoute(kHost) && !host.canRoute(kA); }, 3000));
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - t0).count();
+    printf("  both sides stopped routing after %lld ms\n", static_cast<long long>(ms));
+    CHECK(ms < 2500);
+    CHECK(!a.send(kHost, "EDF6", 1, 0, sent[0].data(), sent[0].size()));  // the game's next packet goes over EOS
+    // Every packet the host never got is handed over, as sent, exactly once.
+    auto stranded = strandedTo(a, kHost);
+    std::vector<uint32_t> want(100);
+    for (uint32_t i = 0; i < 100; ++i) want[i] = i;
+    CHECK(idsOf(stranded) == want && stranded == sent);
+    CHECK(a.takeStranded().empty());
+    dn::Delivered d;
+    CHECK(!host.pop(nullptr, 1170, d));
+    // Back: it carries again after answering for a while, and nothing handed to EOS comes a second time.
     a.setTestBlackhole(false);
-    CHECK(waitFor([&] { return host.linkAlive(kA, 2000); }, 3000));
-    uint32_t next = 0;
-    bool ok = true;
-    waitFor(
-        [&] {
-            dn::Delivered d;
-            while (host.pop(nullptr, 1170, d)) {
-                uint32_t id = 0;
-                memcpy(&id, d.data.data(), 4);
-                ok &= id == next++;
-            }
-            return next >= 300;
-        },
-        10000);
-    printf("  delivered %u/300 after the outage, in order=%s\n", next, ok ? "yes" : "NO");
-    CHECK(ok && next == 300);
+    CHECK(!waitFor([&] { return a.canRoute(kHost); }, 500));  // not at the first answer
+    CHECK(waitFor([&] { return a.canRoute(kHost) && host.canRoute(kA); }, 4000));
+    CHECK(streamInOrder(a, kHost, host, kA, 50));
+    CHECK(!host.pop(nullptr, 1170, d) && a.takeStranded().empty());
+}
+
+void testRelayReturnsUndelivered() {
+    printf("direct: what the host cannot deliver to a joiner goes back to its sender, which sends it over EOS\n");
+    dn::DirectOptions ho = hostOptions(0, 0);
+    ho.linkTimeoutMs = 60000;
+    dn::DirectNet host;
+    CHECK(host.start(ho));
+    host.setLocalUser(kHost);
+    std::string addr = "127.0.0.1:" + std::to_string(host.boundPort());
+    dn::DirectNet a, b;
+    CHECK(a.start(joinOptions(addr, 0)) && b.start(joinOptions(addr, 0)));
+    a.setLocalUser(kA);
+    b.setLocalUser(kB);
+    CHECK(waitFor([&] { return a.canRoute(kB) && b.canRoute(kA); }, 5000));
+    b.setTestBlackhole(true);  // b hears the host but nothing of b's arrives
+    std::vector<std::vector<uint8_t>> sent;
+    // Through the host, until a learns that the host no longer reaches b.
+    for (uint32_t i = 0; i < 500; ++i) {
+        sent.push_back(payloadFor(i));
+        if (!a.send(kB, "EDF6", 1, 0, sent.back().data(), sent.back().size())) {
+            sent.pop_back();
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    printf("  a sent %zu packets to b through the host before it stopped\n", sent.size());
+    CHECK(!sent.empty() && sent.size() < 500 && !a.canRoute(kB) && a.canRoute(kHost));
+    // Every one reached b, or came back to a for EOS (or both: b got it but its acknowledgement did not arrive).
+    std::vector<bool> covered(sent.size());
+    waitFor([&] {
+        for (const auto& p : strandedTo(a, kB)) {
+            uint32_t id = 0;
+            memcpy(&id, p.data(), 4);
+            if (id < covered.size()) covered[id] = covered[id] || p == sent[id];
+        }
+        dn::Delivered d;
+        while (b.pop(nullptr, 1170, d)) {
+            uint32_t id = 0;
+            memcpy(&id, d.data.data(), 4);
+            if (id < covered.size()) covered[id] = covered[id] || d.data == sent[id];
+        }
+        return std::all_of(covered.begin(), covered.end(), [](bool c) { return c; });
+    }, 3000);
+    const size_t missing = static_cast<size_t>(std::count(covered.begin(), covered.end(), false));
+    printf("  %zu of them neither delivered nor handed back\n", missing);
+    CHECK(missing == 0);
+    b.setTestBlackhole(false);
+    CHECK(waitFor([&] { return a.canRoute(kB) && b.canRoute(kA); }, 5000));
+    CHECK(streamInOrder(a, kB, b, kA, 50));
 }
 
 void testReliableUnordered() {
@@ -1769,11 +1876,11 @@ void testAbandonAndSkip() {
 
 // A host and three clients each sending to everyone at EDF6's rate (25 packets/s per player, ~600 B)
 // for 6 s, 80% unreliable and 20% ordered reliable, with 2% loss everywhere and the host's uplink capped
-// just above what it needs, cut off entirely for 2 s in the middle. Lost packets are resent into an
-// uplink with little room left: the resends must follow what gets through, not bury it. The transport of
-// 0.4.1 fails this (wire 2.3 x payload, two of the three links dropped, two thirds of the data delivered).
+// just above what it needs. Lost packets are resent into an uplink with little room left: the resends must
+// follow what gets through, not bury it. The transport of 0.4.1 failed this (wire 2.3 x payload, two of the
+// three links dropped, two thirds of the data delivered). An outage is testLinkStopsAnswering's.
 void testBottleneckDoesNotCollapse() {
-    printf("direct: a capped host uplink with loss and an outage carries the game without resends burying it\n");
+    printf("direct: a capped host uplink with loss carries the game without resends burying it\n");
     dn::DirectOptions ho = hostOptions(0, 0.02);
     // Host sends ~54 KB/s of its own, relays ~108 KB/s and acknowledges ~11 KB/s: ~175 KB/s.
     ho.testUplinkBytesPerSecond = 200 * 1024;
@@ -1825,7 +1932,6 @@ void testBottleneckDoesNotCollapse() {
     auto start = std::chrono::steady_clock::now();
     bool linksUp = true;
     for (uint32_t tick = 0; tick < 150; ++tick) {  // 6 s of 40 ms ticks
-        host.setTestBlackhole(tick >= 50 && tick < 100);
         for (size_t from = 0; from < n; ++from) {
             for (size_t to = 0; to < n; ++to) {
                 if (from == to) continue;
@@ -1842,7 +1948,6 @@ void testBottleneckDoesNotCollapse() {
         drain();
         std::this_thread::sleep_until(start + std::chrono::milliseconds(40 * (tick + 1)));
     }
-    host.setTestBlackhole(false);
     auto reliableDone = [&] {
         drain();
         for (size_t from = 0; from < n; ++from)
@@ -1875,9 +1980,8 @@ void testBottleneckDoesNotCollapse() {
     // Every datagram carries ~120 bytes of header and tag on ~600 of payload and brings back an ACK.
     CHECK(ratio < 2.0);
     CHECK(delivered && inOrder && linksUp);
-    // Everything crosses the host, so the outage held a third of all traffic; what it held for less than
-    // kExpireMs is repaired (89-93% arrives in all; 0.4.1 delivered 64-68%).
-    CHECK(share > 80.0);
+    // Loss is repaired within kExpireMs.
+    CHECK(share > 97.0);
 }
 
 void testLobbyStatusHold() {
@@ -2023,9 +2127,8 @@ void testLobbyOwnerPin() {
 }
 
 void testRosterDropsQuietMember() {
-    printf("direct: other joiners learn within seconds that a member's link went quiet\n");
+    printf("direct: other joiners learn within seconds that a member's link stopped answering\n");
     dn::DirectOptions ho = hostOptions(0, 0);
-    ho.rosterFreshMs = 1500;
     ho.linkTimeoutMs = 60000;  // long: the roster, not the timeout, must tell them
     dn::DirectNet host;
     CHECK(host.start(ho));
@@ -2038,8 +2141,8 @@ void testRosterDropsQuietMember() {
     b.setLocalUser(kB);
     CHECK(waitFor([&] { return b.linkAlive(kA, 5000) && a.linkAlive(kB, 5000); }, 10000));
     a.setTestBlackhole(true);
-    CHECK(waitFor([&] { return !b.linkAlive(kA, 5000) && b.linkAlive(kHost, 5000); }, 6000));
-    CHECK(host.canRoute(kA));  // the host still holds the link (it only times out after 60 s)
+    CHECK(waitFor([&] { return !b.linkAlive(kA, 5000) && !b.canRoute(kA) && b.linkAlive(kHost, 5000); }, 3000));
+    CHECK(!host.canRoute(kA));  // the host sends it nothing more, though it keeps the link (60 s timeout)
     a.setTestBlackhole(false);
     CHECK(waitFor([&] { return b.linkAlive(kA, 5000); }, 6000));
 }
@@ -2069,7 +2172,7 @@ void testLinksFollowTheRoom() {
 }
 
 void testReceiveStateFollowsSession() {
-    printf("direct: queued packets and recent traffic belong to the local room/user session\n");
+    printf("direct: queued packets belong to the local room/user session\n");
     for (int transition = 0; transition < 3; ++transition) {
         dn::DirectNet host, joiner;
         CHECK(host.start(hostOptions(0, 0)));
@@ -2080,9 +2183,7 @@ void testReceiveStateFollowsSession() {
         const auto payload = payloadFor(42);
         CHECK(host.send(kA, "EDF6", 1, 1, payload.data(), payload.size()));
         CHECK(joiner.send(kHost, "EDF6", 1, 1, payload.data(), payload.size()));
-        CHECK(waitFor([&] {
-            return host.heardFromRecently(kA, 10000) && joiner.heardFromRecently(kHost, 10000);
-        }, 5000));  // wait for delivery into both inboxes without draining either
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));  // delivered into both inboxes, not drained
 
         // Repeated observations of the same room/user must preserve unread packets.
         host.setActive(true);
@@ -2110,17 +2211,15 @@ void testReceiveStateFollowsSession() {
             host.stop();
             joiner.stop();
         }
-        CHECK(!host.pop(nullptr, 1170, out));
-        CHECK(!joiner.pop(nullptr, 1170, out));
-        CHECK(!host.heardFromRecently(kA, 10000));
-        CHECK(!joiner.heardFromRecently(kHost, 10000));
+        // Leaving the room or signing in as someone else drops what was not read. A stopped instance (AutoJoin
+        // retiring it) keeps it for the game: retire() hands it over.
+        CHECK(host.pop(nullptr, 1170, out) == (transition == 2));
+        CHECK(joiner.pop(nullptr, 1170, out) == (transition == 2));
 
         if (transition == 0) {
             host.setActive(true);
             joiner.setActive(true);
             CHECK(waitFor([&] { return host.canRoute(kA) && joiner.canRoute(kHost); }, 5000));
-            CHECK(!host.heardFromRecently(kA, 10000));
-            CHECK(!joiner.heardFromRecently(kHost, 10000));
             CHECK(streamInOrder(host, kA, joiner, kHost, 3));
             CHECK(streamInOrder(joiner, kHost, host, kA, 3));
         }
@@ -2200,9 +2299,17 @@ void testDisconnectHold() {
     auto direct = [&](const std::string& r) { return directUp && r == kB; };
     CHECK(autoHold.poll(100000, direct).empty() && autoHold.isHeld(kB));
     CHECK(autoHold.poll(200000, direct).empty() && autoHold.isHeld(kB));
+    // Its EOS reconnect is asked only every kAliveReacceptMs meanwhile: the game's traffic goes direct.
+    const int before = reaccepts;
+    autoHold.poll(210000, direct);
+    CHECK(reaccepts == before);
+    autoHold.poll(200000 + dn::DisconnectHold::kAliveReacceptMs, direct);
+    CHECK(reaccepts == before + 1);
+    // Another close while held (a reconnect that failed) is absorbed: one event, forwarded once.
+    CHECK(autoHold.offer(kB, 7, true, false, 230000, fwd, re) && autoHold.heldCount() == 1);
     directUp = false;  // direct link lost too: the normal grace applies from the last time it was alive
-    CHECK(autoHold.poll(229999, direct).empty());
-    CHECK(autoHold.poll(230000, direct).size() == 1 && forwarded == 2);
+    CHECK(autoHold.poll(259999, direct).empty());
+    CHECK(autoHold.poll(260000, direct).size() == 1 && forwarded == 2);
 }
 
 void testKeyMismatch() {
@@ -2477,6 +2584,12 @@ void testConfigParsing() {
     for (const std::string& w : c.warnings) mentionsPort = mentionsPort || w.find("ListenPort=abc") != std::string::npos;
     CHECK(mentionsPort);
 
+    // A misspelt choice keeps the default and says so; a value in another case is no misspelling.
+    putFile(path, "[DirectNet]\r\nMode=hots\r\n[EOS]\r\nRelay=NoRelay\r\n[Resilience]\r\nHoldDisconnects=always\r\n");
+    c = dn::loadConfig(path);
+    CHECK(c.direct.mode == dn::Mode::Off && c.eosRelay == 0 && c.hold == dn::Config::Hold::Auto);
+    CHECK(c.warnings.size() == 2 && c.warnings[0].find("Mode=hots is not one of off/host/join; using off") != std::string::npos);
+
     // A missing file is written with the defaults, which read back with nothing to warn about.
     DeleteFileW(path.c_str());
     c = dn::loadConfig(path);
@@ -2497,207 +2610,9 @@ void testConfigParsing() {
     DeleteFileW(path.c_str());
 }
 
-// --- Netcode rewrite W1: the joiners' direct links (mesh) and the paths between them ---
-
-struct Mesh {
-    dn::DirectNet host, a, b;
-    std::string port;
-    bool start(double drop = 0.0) {
-        dn::DirectOptions ho = hostOptions(0, drop);
-        if (!host.start(ho)) return false;
-        host.setLocalUser(kHost);
-        port = std::to_string(host.boundPort());
-        dn::DirectOptions ao = joinOptions("127.0.0.1:" + port, drop), bo = joinOptions("127.0.0.1:" + port, drop);
-        const std::string id = dn::processIdentity()->commitment();
-        ao.memberIds = bo.memberIds = {{kHost, id}, {kA, id}, {kB, id}};
-        if (!a.start(ao) || !b.start(bo)) return false;
-        a.setLocalUser(kA);
-        b.setLocalUser(kB);
-        return waitFor([&] { return a.canRoute(kB) && b.canRoute(kA); }, 10000);
-    }
-};
-
-// Sends `count` datagrams of `cls` from `from` to `toId` every `everyMs`, and returns what `to` got, in order of
-// arrival, and the longest gap between two arrivals.
-struct Arrivals {
-    std::vector<uint32_t> ids;
-    uint64_t longestGapMs = 0;
-};
-Arrivals stream(dn::DirectNet& from, const std::string& toId, dn::DirectNet& to, uint8_t cls, uint32_t count,
-                uint32_t everyMs, const std::function<void(uint32_t)>& each = nullptr) {
-    Arrivals got;
-    uint64_t last = 0;
-    auto drain = [&] {
-        dn::Delivered d;
-        uint8_t ch = 1;
-        while (to.pop(&ch, 1170, d)) {
-            uint32_t id = 0;
-            memcpy(&id, d.data.data(), 4);
-            got.ids.push_back(id);
-            const uint64_t now = GetTickCount64();
-            if (last) got.longestGapMs = std::max(got.longestGapMs, now - last);
-            last = now;
-        }
-    };
-    for (uint32_t i = 0; i < count; ++i) {
-        if (each) each(i);
-        std::vector<uint8_t> p(100, static_cast<uint8_t>(i));
-        memcpy(p.data(), &i, 4);
-        from.sendClassified(toId, "EDF6", 1, 0, p.data(), p.size(), cls);
-        std::this_thread::sleep_for(std::chrono::milliseconds(everyMs));
-        drain();
-    }
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    drain();
-    return got;
-}
-
-void testMeshLinksJoiners() {
-    printf("mesh: two joiners link directly; state goes over the direct link, not through the host\n");
-    Mesh m;
-    CHECK(m.start());
-    CHECK(m.a.pathTo(kB) == dn::Path::Relay);  // until the direct link is up and proven
-    auto p = payloadFor(1);
-    m.a.sendClassified(kB, "EDF6", 1, 0, p.data(), p.size(), 1);  // the first datagram asks for the link
-    CHECK(waitFor([&] { return m.a.peerLinked(kB) && m.b.peerLinked(kA); }, 10000));
-    CHECK(waitFor([&] { return m.a.pathTo(kB) == dn::Path::Direct; }, 5000));
-    dn::Delivered first;
-    while (m.b.pop(nullptr, 1170, first)) {}  // the datagram that asked for the link
-    m.host.takeWireTraffic();
-    const Arrivals got = stream(m.a, kB, m.b, 1, 100, 10);
-    printf("  %zu of 100 state datagrams arrived\n", got.ids.size());
-    CHECK(got.ids.size() == 100);
-    const dn::WireTraffic hostSaw = m.host.takeWireTraffic();
-    CHECK(hostSaw.relayed == 0);  // the host relayed none of it
-    CHECK(m.a.takeWireTraffic().direct > 0);
-    CHECK(m.a.linkBudget(kB) >= dn::RateController::kMinRate);
-    CHECK(m.a.statusLine().find("direct-to-joiners=1") != std::string::npos);
-}
-
-void testMeshBlockedFromTheStart() {
-    printf("mesh: joiners that cannot reach each other stay on the relay, and lose nothing\n");
-    Mesh m;
-    m.a.setTestBlockPeers(0, UINT64_MAX);
-    m.b.setTestBlockPeers(0, UINT64_MAX);
-    CHECK(m.start());
-    const Arrivals got = stream(m.a, kB, m.b, 1, 200, 10);
-    printf("  %zu of 200 state datagrams arrived through the host\n", got.ids.size());
-    CHECK(got.ids.size() == 200);
-    CHECK(!m.a.peerLinked(kB) && m.a.pathTo(kB) == dn::Path::Relay);
-    CHECK(m.host.takeWireTraffic().relayed > 0);
-}
-
-void testMeshFailsOverAndBack() {
-    printf("mesh: the direct link breaks and comes back - state keeps flowing, events arrive once each\n");
-    Mesh m;
-    CHECK(m.start());
-    auto p = payloadFor(1);
-    m.a.sendClassified(kB, "EDF6", 1, 0, p.data(), p.size(), 1);
-    CHECK(waitFor([&] { return m.a.pathTo(kB) == dn::Path::Direct; }, 10000));
-    std::vector<dn::Path> paths;
-    // 400 datagrams 10 ms apart (4 s); from the 50th on (0.5 s) the direct link loses everything for 1.5 s.
-    const Arrivals got = stream(m.a, kB, m.b, 1, 400, 10, [&](uint32_t i) {
-        if (i == 50) {
-            m.a.setTestBlockPeers(0, 1500);
-            m.b.setTestBlockPeers(0, 1500);
-        }
-        if (i % 20 == 0) paths.push_back(m.a.pathTo(kB));
-    });
-    const bool wentRelay = std::find(paths.begin(), paths.end(), dn::Path::Relay) != paths.end();
-    printf("  %zu of 400 arrived, longest gap %llu ms, went through the host %s, back on the direct link %s\n",
-           got.ids.size(), static_cast<unsigned long long>(got.longestGapMs), wentRelay ? "yes" : "NO",
-           m.a.pathTo(kB) == dn::Path::Direct ? "yes" : "NO");
-    CHECK(wentRelay);
-    CHECK(waitFor([&] { return m.a.pathTo(kB) == dn::Path::Direct; }, 5000));
-    // Lost only until the direct link turned suspect (two pings' time) and the relay took copies: a gap of well
-    // under a second, against 1.5 s of outage.
-    CHECK(got.ids.size() >= 400 - 80);
-    CHECK(got.longestGapMs < 900);
-    // Events: both paths, the receiver gets two copies of each while both work (the filter drops the second).
-    dn::DuplicateFilter filter;
-    uint32_t firsts = 0, copies = 0;
-    for (uint32_t i = 0; i < 50; ++i) {
-        std::vector<uint8_t> e(60, 0xE0);
-        memcpy(e.data(), &i, 4);
-        const dn::SendReport r = m.a.sendClassified(kB, "EDF6", 1, 0, e.data(), e.size(), 2);
-        CHECK(r.sent && r.paths == 2);
-    }
-    waitFor(
-        [&] {
-            dn::Delivered d;
-            uint8_t ch = 1;
-            while (m.b.pop(&ch, 1170, d)) (filter.first(d.src, d.data.data(), d.data.size(), GetTickCount64()) ? firsts : copies)++;
-            return firsts + copies >= 100;
-        },
-        5000);
-    printf("  events: %u delivered once, %u copies dropped\n", firsts, copies);
-    CHECK(firsts == 50 && copies == 50);
-}
-
-void testMeshAndShedSwitches() {
-    printf("mesh: [Netcode] ShedState and Mesh act after start\n");
-    Mesh m;
-    CHECK(m.start());
-    std::vector<uint8_t> big(1000, 0x33);
-    auto burst = [&] {
-        m.host.takeWireTraffic();
-        for (int i = 0; i < 300; ++i) m.host.sendClassified(kA, "EDF6", 1, 0, big.data(), big.size(), 1);  // 300 KB at once
-        return m.host.takeWireTraffic().stateShed;
-    };
-    const uint64_t shedOn = burst();
-    printf("  a 300 KB burst of state over a fresh path: %llu dropped for its budget\n", static_cast<unsigned long long>(shedOn));
-    CHECK(shedOn > 0);
-    m.host.setShedState(false);
-    CHECK(burst() == 0);
-    // Mesh: linked, then switched off - the direct link closes, the relay carries.
-    auto p = payloadFor(1);
-    m.a.sendClassified(kB, "EDF6", 1, 0, p.data(), p.size(), 1);
-    CHECK(waitFor([&] { return m.a.peerLinked(kB); }, 10000));
-    m.a.setMesh(false);
-    m.b.setMesh(false);
-    CHECK(!m.a.peerLinked(kB) && m.a.pathTo(kB) == dn::Path::Relay);
-    m.a.sendClassified(kB, "EDF6", 1, 0, p.data(), p.size(), 1);
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    CHECK(!m.a.peerLinked(kB));  // no new link while off
-}
-
-void testRosterPages() {
-    printf("wire: member lists of large rooms go in pages\n");
-    dn::Message m;
-    m.type = dn::MsgType::Roster;
-    m.roster.hostNonce = 3;
-    for (int i = 0; i < 32; ++i) m.roster.roster.push_back("member" + std::to_string(i));
-    m.roster.version = 9;
-    m.roster.total = 1000;
-    m.roster.offset = 960;
-    auto dg = dn::encode(m, "");
-    dn::DecodeError err;
-    auto back = dn::decode(dg.data(), dg.size(), "", &err);
-    CHECK(back && back->roster.total == 1000 && back->roster.offset == 960 && back->roster.version == 9 &&
-          back->roster.roster.size() == 32);
-    m.roster.offset = 980;  // runs past the list: no valid sender writes it
-    dg = dn::encode(m, "");
-    CHECK(!dn::decode(dg.data(), dg.size(), "", &err) && err == dn::DecodeError::Malformed);
-    dn::Message q;
-    q.type = dn::MsgType::PeerInfo;
-    q.peer = {kB, "[2001:db8::1]:27015"};
-    dg = dn::encode(q, "");
-    back = dn::decode(dg.data(), dg.size(), "", &err);
-    CHECK(back && back->peer.puid == kB && back->peer.address == q.peer.address);
-}
-
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
-    if (argc == 2 && std::wstring(argv[1]) == L"--mesh") {
-        testRosterPages();
-        testMeshLinksJoiners();
-        testMeshBlockedFromTheStart();
-        testMeshFailsOverAndBack();
-        testMeshAndShedSwitches();
-        printf("\n%d checks, %d failures\n", g_checks, g_failures);
-        return g_failures == 0 ? 0 : 1;
-    }
     if (argc == 2 && std::wstring(argv[1]) == L"--receive-lifecycle") {
         testReceiveStateFollowsSession();
         printf("\n%d checks, %d failures\n", g_checks, g_failures);
@@ -2727,7 +2642,8 @@ int wmain(int argc, wchar_t** argv) {
     testLinksFollowTheRoom();
     testReceiveStateFollowsSession();
     testHostRestart();
-    testStalledLinkSurvives();
+    testLinkStopsAnswering();
+    testRelayReturnsUndelivered();
     testReplyFromOtherAddress();
     testHelloCannotHijackLiveLink();
     testHelloFloodIsBounded();
@@ -2738,6 +2654,7 @@ int wmain(int argc, wchar_t** argv) {
     testUnacknowledgedLinkIsDropped();
     testNoReflectionToSender();
     testIdentityCrypto();
+    testCryptoKnownAnswers();
     testHelloNeedsCookieAndIdentity();
     testIdentityPublishedLate();
     testJunkHellosDoNotBlockPlayers();
@@ -2748,11 +2665,6 @@ int wmain(int argc, wchar_t** argv) {
     testReplayWindow();
     testWelcomeProvesTheRoomOwner();
     testLinkPacketsAuthenticated();
-    testRosterPages();
-    testMeshLinksJoiners();
-    testMeshBlockedFromTheStart();
-    testMeshFailsOverAndBack();
-    testMeshAndShedSwitches();
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;
 }

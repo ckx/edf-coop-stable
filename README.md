@@ -128,13 +128,15 @@ EDF6 reads every EOS packet it receives as game data, so the plugin cannot send 
 
 - Attribute present and the connection was up before: grace, asking EOS to reconnect every 2 s.
 - No attribute: handled as in the original game.
-- Direct-link member: grace for as long as the direct link answers (it pings every second, in menus too); its game data does not go through EOS anyway.
+- Direct-link member: grace for as long as the direct link answers (it pings four times a second, in menus too); its game data does not go through EOS anyway.
 - Epic's lobby service reports a member as disconnected (`DISCONNECTED`: it lost Epic's lobby service, not the game) while that member's direct link answers: hidden from the game. When EOS lists the member again (`JOINED`), both events are dropped. The game hears of it only once the direct link has been silent for `GraceSeconds`, or the member leaves or is kicked. The same applies to yourself.
 - The other player left the lobby: the game is told at once.
 
 ### Direct link
 
 The host writes the member attribute `EDF6DN_ADDR` (a space-separated address list). Other members read it every 2 s and try each address for 10 s, IPv4 before IPv6; if all fail they try again after 60 s. The transport is a UDP protocol of its own: selective acknowledgement, rate-limited resends, per-link keys. `IP_UNICAST_IF` binds it to the physical adapter.
+
+A link carries game data only while the other side answers: it pings four times a second, and a link that has had no answer (a pong or an acknowledgement) for about 1.5 s stops carrying. What it had not delivered goes over EOS, reliably, and so does the game's data from then on, until the link has answered again for a second. The host relays between joiners; what it cannot deliver to a joiner goes back to the sender, which sends it over EOS, and the other joiners stop sending to that joiner through the host.
 
 Every player with the plugin also writes `EDF6DN_ID`: the SHA-256 fingerprint of an ECDSA P-256 key made for this game session. Connecting starts with a cookie round trip: the host answers a hello with a cookie bound to the sender's address and keeps nothing until it comes back, so forged addresses and hello floods achieve nothing. The joiner repeats the hello with the cookie, signed with its key. The host accepts it for EOS ID X only if X is in the room and published that key's fingerprint; a signed hello from an earlier session is rejected as a replay. The joiner accepts the host's welcome only if the room owner's published key signed it. Hello and welcome carry fresh ECDH keys under those signatures, so every link has keys of its own (with `Key` mixed in when set), and every packet carries a tag and a counter: altered, injected or replayed packets are dropped. There is no encryption. Players whose direct-link protocols differ ignore each other's packets and stay on EOS with each other.
 
@@ -158,6 +160,7 @@ Every player publishes its netcode protocol and the features it has on (`EDF6NET
 - `RESILIENCE ... lost Epic's lobby service but the direct link is up` / `back in Epic's lobby service`: Epic's lobby service dropped a player and let them back in; the game never saw it.
 - `NETCODE features in room ... off: ...`: someone in the room runs another protocol or has a feature off; the log names who. `NETCODE REFUSED`: as host you removed a player of another protocol.
 - `STATS last 60s: ...`: one line per minute while the game sends or receives: what the game sends (kbps), what the direct link uses on the wire (`wire up` / `down`, resends included, and what the host relays for others), direct and EOS packet counts, how many went to EOS reliably, send failures, fragments, and per link the resend state. If `send-failures` is not 0, please attach your log.
+- `DIRECT ... has not answered for ... ms: game data goes over EOS` / `answers again`: the direct link stopped working for a moment and EOS carried the game meanwhile. `... packets the link to ... had not delivered: ... go over EOS` names what was handed over. In the STATS line such a link shows `NOT ANSWERING`.
 - `DIRECT ... timed out: nothing received for ...`: the other side went silent. `DIRECT ... stalled: a packet the game sent reliably is unacknowledged ...`: the other side answers, but one packet the game needs never got through.
 - `DIRECT refused hello for ...`: someone tried to connect as a player and could not prove it. `published no direct-link identity` for a second or two after a player joins is normal (their room info has not reached the host yet). `not signed by the identity that player published` means someone else claimed to be that player and was turned away.
 - `DIRECT ... speaks direct-link protocol N, we speak M`: that player runs another version. There is no direct link between you; the game keeps working over EOS.
@@ -224,7 +227,7 @@ Release packages are built on a machine with the game, so every test against the
 - Joining in the middle of a mission is not possible (the game has no such feature).
 - Only desync caused by packet loss is fixed; desync in the game logic itself needs concrete symptoms before it can be reverse-engineered.
 - During the disconnect grace period other players may wait at a sync point, for at most `GraceSeconds`.
-- The host relays the direct link: when a joiner's direct link reconnects, the little data the host was relaying for them that was not yet acknowledged is lost (the game then falls back to EOS).
+- The host relays between joiners: when both the host's link to the receiver and its link to the sender fail at once, what the host was relaying between them is lost.
 - Direct-link traffic is authenticated, not encrypted: someone on the network path can read it and can always drop it (the game then falls back to EOS).
 - UPnP mappings are not removed when the game exits (there is no safe point for network calls then). The plugin removes its mapping at the next start that does not host (`Mode` not `host`, or `UPnP=0`), and `UNINSTALL.bat` removes it too. It never touches mappings of other devices. You can also delete the mapping named `EDF6DirectNet` in your router's admin page.
 - Nothing can be hidden when the direct link itself is down: if a player's own internet is gone for longer than `GraceSeconds`, the game handles it as usual.

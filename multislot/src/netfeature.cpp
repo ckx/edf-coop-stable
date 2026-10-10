@@ -273,8 +273,6 @@ bool StartNetFeature(bool lobbyGlue) {
     PublishMemberText(kNetCapsKey, caps);
     WatchMemberTexts({kNetProtocolKey, kNetCapsKey, kNetSeenKey}, &Observe);
     WatchLobbyTexts({kNetRoomCapsKey});
-    // The direct link says the same in every hello; a host refuses another protocol there too.
-    dn::setNetcodeIdentity(static_cast<std::uint32_t>(settings.protocol), settings.caps, settings.rejectMismatched);
     dn::setRoomCapQuery(&RoomCap);
     started = true;
     return true;

@@ -27,7 +27,6 @@
 #include "fragment.h"
 
 namespace dn {
-DirectOptions withNetcode(DirectOptions o);  // with the netcode API at the end of the file
 namespace {
 
 constexpr const char* kEosDll = "EOSSDK-Win64-Shipping.dll";
@@ -106,6 +105,7 @@ struct AutoJoin {
     std::vector<std::string> candidates;  // that list, best first
     size_t next = 0;                      // next candidate to try
     std::string hostPuid;
+    std::string address;  // the candidate the current attempt dials
     std::shared_ptr<DirectNet> net;  // other threads may still hold a copy; see retire()
     uint64_t attemptMs = 0;
     bool connected = false;  // the current attempt reached the host; DirectNet reconnects by itself
@@ -154,8 +154,10 @@ struct State {
     NetcodeOptions netcode;
     std::atomic<RoomCapQuery> roomCaps{nullptr};
     std::atomic<bool> testLoopbackHosts{false};
-    std::atomic<uint32_t> netProtocol{0}, netCaps{0};
-    std::atomic<bool> refuseOtherProtocols{false};
+    // Game data a retired direct transport had not delivered (DirectNet::takeStranded), for the next send to take
+    // over EOS.
+    std::mutex strandedMutex;
+    std::vector<Stranded> stranded;
     // Fragments (fragment.h): ours going out get ids from here, theirs come together here (receive thread only).
     std::atomic<uint32_t> fragmentIds{0};
     // This process's fragment id epoch (fragment.h): random, so ids of a restarted sender never repeat its last run's.
@@ -221,7 +223,7 @@ EOS_ProductUserId idHandle(const std::string& s) {
 }
 
 // A held peer stays hidden while its direct link answers: the game's traffic to it no longer flows over
-// EOS, so what EOS says about it does not matter. The link pings every second, also in menus where
+// EOS, so what EOS says about it does not matter. The link pings four times a second, also in menus where
 // the game itself sends next to nothing. A peer whose game stopped does not linger: leaving the room
 // reaches us as a lobby "left" (which releases it), and its plugin closes the link with it.
 constexpr uint64_t kLinkAliveMs = 5000;
@@ -603,12 +605,27 @@ void hookJoinLobby(EOS_HLobby h, const EOS_Lobby_JoinLobbyOptionsHead* o, void* 
     g.api.gameJoinLobby(h, o, new LobbyCall{cb, clientData, h, o->LocalUserId, false}, lobbyEnteredWrapper);
 }
 
+bool takeArrival(const std::string& src, const std::string& socket, uint8_t channel, const uint8_t* data, uint32_t size);
+
 // Stops a replaced AutoJoin instance off the game thread: its worker may sit in a blocking DNS lookup
 // of the host's name, and joining it here would freeze the game. A hook that copied the pointer just
 // before the swap finishes its call on the stopped instance (it fails, the game falls back to EOS);
-// the last copy to go frees it.
+// the last copy to go frees it. What its links had not delivered goes over EOS, and what arrived for the game
+// still reaches it.
 void retire(std::shared_ptr<DirectNet> net) {
-    std::thread([net = std::move(net)] { net->stop(); }).detach();
+    std::thread([net = std::move(net)] {
+        net->stop();
+        std::vector<Stranded> left = net->takeStranded();
+        if (!left.empty()) {
+            std::lock_guard<std::mutex> lock(g.strandedMutex);
+            g.stranded.insert(g.stranded.end(), std::make_move_iterator(left.begin()), std::make_move_iterator(left.end()));
+        }
+        for (Delivered d; net->pop(nullptr, UINT32_MAX, d);) {
+            if (!takeArrival(d.src, d.socketName, d.channel, d.data.data(), static_cast<uint32_t>(d.data.size()))) continue;
+            std::lock_guard<std::mutex> lock(g.fragmentMutex);
+            g.ready.push_back({std::move(d.src), std::move(d.socketName), d.channel, std::move(d.data)});
+        }
+    }).detach();
 }
 
 // Stops an AutoJoin link: we left the room, or its host cannot be reached directly.
@@ -695,7 +712,7 @@ std::pair<std::string, std::string> roomOwnerIdentity() {
 
 void startAutoJoinAttemptLocked(uint64_t now) {
     AutoJoin& a = g.autoJoin;
-    DirectOptions o = withNetcode(g.config.direct);
+    DirectOptions o = g.config.direct;
     o.mode = Mode::Join;
     o.listenPort = 0;
     o.hostAddress = a.candidates[a.next++];
@@ -715,6 +732,7 @@ void startAutoJoinAttemptLocked(uint64_t now) {
     g.net.store(net);
     if (old) retire(std::move(old));
     a.attemptMs = now;
+    a.address = o.hostAddress;
     a.connected = false;
     logf("DIRECT auto-connecting to the room host %s at %s", shortId(a.hostPuid).c_str(), o.hostAddress.c_str());
 }
@@ -750,14 +768,22 @@ void autoJoinTick(uint64_t now) {
     }
     a.noAddressSinceMs = 0;
     if (advertised != a.advertised) {  // new room, or the host's address list changed
+        std::vector<std::string> candidates = orderHostCandidates(advertised);
+        if (g.testLoopbackHosts && candidates.empty())
+            candidates.push_back(advertised.substr(0, advertised.find(' ')));  // tests: a loopback host
+        const bool sameHost = a.hostPuid == idString(owner);
         a.advertised = advertised;
-        a.candidates = orderHostCandidates(advertised);
-        if (g.testLoopbackHosts && a.candidates.empty())
-            a.candidates.push_back(advertised.substr(0, advertised.find(' ')));  // tests: a loopback host
-        a.next = 0;
+        a.candidates = std::move(candidates);
         a.retryAtMs = 0;
         a.hostPuid = idString(owner);
         logf("DIRECT room host %s advertises %s", shortId(a.hostPuid).c_str(), advertised.c_str());
+        // A host that adds an address (its IPv4 once UPnP mapped it) keeps a link that works on the one we dial.
+        auto current = std::find(a.candidates.begin(), a.candidates.end(), a.address);
+        if (sameHost && a.net && a.connected && current != a.candidates.end()) {
+            a.next = static_cast<size_t>(current - a.candidates.begin()) + 1;
+            return;
+        }
+        a.next = 0;
         if (!a.candidates.empty()) startAutoJoinAttemptLocked(now);
         return;
     }
@@ -959,20 +985,21 @@ EOS_EResult sendOverEos(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, uint8_t 
     return g.api.send(h, &copy);
 }
 
-// A message above EOS's packet size, in fragments (fragment.h): reliably over the direct link when it reaches
-// `remote`, otherwise reliably over EOS. EOS_Success once every fragment left.
-EOS_EResult sendFragments(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, const std::string& remote, uint16_t tag,
-                          const uint8_t* data, size_t size) {
-    const auto parts = splitIntoFragments(g.fragmentEpoch | ++g.fragmentIds, 0, tag, data, size);
+// A datagram above EOS's packet size, in fragments (fragment.h): reliably over the direct link when it reaches
+// `remote`, otherwise reliably over EOS. Unordered: the reassembly takes them in any order, and an ordered one would
+// wait behind every lost packet before it. EOS_Success once every fragment left.
+EOS_EResult sendFragments(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, const std::string& remote, const uint8_t* data,
+                          size_t size) {
+    const auto parts = splitIntoFragments(g.fragmentEpoch | ++g.fragmentIds, o.Channel, data, size);
     if (parts.empty()) return EOS_LimitExceeded;
     std::shared_ptr<DirectNet> net = g.net.load();
     const bool direct = net && net->canRoute(remote);
     for (const auto& part : parts) {
-        bool sent = direct && net->send(remote, socketName(o.SocketId), kFragmentChannel, EOS_PR_ReliableOrdered,
+        bool sent = direct && net->send(remote, socketName(o.SocketId), kFragmentChannel, EOS_PR_ReliableUnordered,
                                         part.data(), part.size());
         if (!sent) {
             EOS_EResult r = sendOverEos(h, o, kFragmentChannel, part.data(), static_cast<uint32_t>(part.size()),
-                                        EOS_PR_ReliableOrdered);
+                                        EOS_PR_ReliableUnordered);
             if (r != EOS_Success) return r;
         }
         ++g.fragmentsOut;
@@ -980,10 +1007,43 @@ EOS_EResult sendFragments(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, const 
     return EOS_Success;
 }
 
+// Game data the direct link did not deliver (DirectNet::takeStranded), sent over EOS as the game's own send would
+// go: reliably, and queued while EOS builds the connection (the game may never have used EOS with that member). Sent
+// from the game's send call, the thread the game calls EOS from.
+void sendStranded(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, const std::shared_ptr<DirectNet>& net) {
+    std::vector<Stranded> left = net ? net->takeStranded() : std::vector<Stranded>();
+    {
+        std::lock_guard<std::mutex> lock(g.strandedMutex);
+        if (!g.stranded.empty()) left.insert(left.begin(), std::make_move_iterator(g.stranded.begin()), std::make_move_iterator(g.stranded.end()));
+        g.stranded.clear();
+    }
+    if (left.empty()) return;
+    size_t failed = 0;
+    for (const Stranded& s : left) {
+        EOS_P2P_SocketId socket{1, {}};
+        strncpy_s(socket.SocketName, s.socketName.c_str(), _TRUNCATE);
+        EOS_P2P_SendPacketOptions copy = o;
+        copy.RemoteUserId = idHandle(s.dst);
+        copy.SocketId = &socket;
+        copy.Channel = s.channel;
+        copy.Data = s.data.data();
+        copy.DataLengthBytes = static_cast<uint32_t>(s.data.size());
+        copy.Reliability = s.reliability == EOS_PR_ReliableOrdered ? EOS_PR_ReliableOrdered : EOS_PR_ReliableUnordered;
+        if (o.ApiVersion >= 3) copy.bAllowDelayedDelivery = 1;
+        failed += !copy.RemoteUserId || g.api.send(h, &copy) != EOS_Success;
+    }
+    g.eosOut += left.size();
+    if (failed)
+        logRateLimited("stranded-refused", 10000, "EOS refused %zu of %zu packets the direct link had not delivered",
+                       failed, left.size());
+}
+
 EOS_EResult hookSendPacket(EOS_HP2P h, const EOS_P2P_SendPacketOptions* o) {
     if (g_shutdown || !o) return g.api.send(h, o);
     configureHandle(h);
     noteLocalUser(h, o->LocalUserId);
+    std::shared_ptr<DirectNet> net = g.net.load();
+    sendStranded(h, *o, net);
     const std::string remote = idString(o->RemoteUserId);
     if (o->Data) g.gameBytesOut += o->DataLengthBytes;
     // EOS refuses anything above its packet limit, and so does the direct link (its receivers' games read
@@ -991,14 +1051,13 @@ EOS_EResult hookSendPacket(EOS_HP2P h, const EOS_P2P_SendPacketOptions* o) {
     // reads fragments.
     if (o->Data && o->DataLengthBytes > EOS_P2P_MAX_PACKET_SIZE && !remote.empty() && netcodeOptions().fragments &&
         roomCap(kCapFragments))
-        return sendFragments(h, *o, remote, o->Channel, static_cast<const uint8_t*>(o->Data), o->DataLengthBytes);
+        return sendFragments(h, *o, remote, static_cast<const uint8_t*>(o->Data), o->DataLengthBytes);
     if (o->DataLengthBytes > EOS_P2P_MAX_PACKET_SIZE)
         logRateLimited("oversize", 10000,
                        "GAME sends a %u-byte packet (channel %u) to %s: over the %u-byte packet limit, so it cannot be "
                        "delivered; the game retries for about 26 s and then disbands the room",
                        o->DataLengthBytes, static_cast<unsigned>(o->Channel), peerLabel(o->RemoteUserId).c_str(),
                        static_cast<unsigned>(EOS_P2P_MAX_PACKET_SIZE));
-    std::shared_ptr<DirectNet> net = g.net.load();
     if (net && o->Data && o->DataLengthBytes <= EOS_P2P_MAX_PACKET_SIZE && !remote.empty() &&
         net->send(remote, socketName(o->SocketId), o->Channel, static_cast<uint8_t>(o->Reliability),
                   static_cast<const uint8_t*>(o->Data), o->DataLengthBytes)) {
@@ -1040,7 +1099,7 @@ bool takeArrival(const std::string& src, const std::string& socket, uint8_t chan
     std::optional<FragmentMessage> done;
     std::lock_guard<std::mutex> lock(g.fragmentMutex);
     done = g.reassembler.add(src, data, size, GetTickCount64());
-    if (done) g.ready.push_back({src, socket, static_cast<uint8_t>(done->tag), std::move(done->bytes)});
+    if (done) g.ready.push_back({src, socket, static_cast<uint8_t>(done->channel), std::move(done->bytes)});
     return false;
 }
 
@@ -1223,29 +1282,12 @@ void setNetcodeOptions(const NetcodeOptions& options) {
     if (g.netcode.statsIntervalMs < 1000) g.netcode.statsIntervalMs = 1000;
 }
 
-// A direct transport made later (AutoJoin) starts with the netcode identity.
-DirectOptions withNetcode(DirectOptions o) {
-    o.netProtocol = g.netProtocol;
-    o.netCaps = g.netCaps;
-    o.refuseOtherProtocols = g.refuseOtherProtocols;
-    o.mesh = false;
-    return o;
-}
-
 NetcodeOptions netcodeOptions() {
     std::lock_guard<std::mutex> lock(g.netcodeMutex);
     return g.netcode;
 }
 
 void setRoomCapQuery(RoomCapQuery query) { g.roomCaps = query; }
-
-void setNetcodeIdentity(uint32_t protocol, uint32_t caps, bool refuseOthers) {
-    g.netProtocol = protocol;
-    g.netCaps = caps;
-    g.refuseOtherProtocols = refuseOthers;
-    for (std::shared_ptr<DirectNet> net : {g.baseNet.load(), g.net.load()})
-        if (net) net->setNetcode(protocol, caps, refuseOthers);
-}
 
 void setTestLoopbackHosts(bool on) { g.testLoopbackHosts = on; }
 

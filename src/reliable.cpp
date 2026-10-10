@@ -152,6 +152,16 @@ void ReliableSender::poll(uint64_t nowMs, const std::function<bool(std::vector<u
     if (held) limitedMs_ += elapsed;
 }
 
+std::vector<std::vector<uint8_t>> ReliableSender::strand() {
+    std::vector<std::vector<uint8_t>> out;
+    for (auto& [seq, p] : pending_) out.push_back(std::move(p.datagram));
+    abandoned_ += pending_.size();
+    forwardNow_ = forwardNow_ || !pending_.empty();
+    pending_.clear();
+    pendingBytes_ = 0;
+    return out;
+}
+
 std::optional<uint32_t> ReliableSender::forwardDue(uint64_t nowMs) {
     uint32_t f = floor();
     // Below the floor everything is acknowledged or given up. The peer's cumulative point stops short of it

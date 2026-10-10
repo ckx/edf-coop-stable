@@ -314,7 +314,18 @@ Config loadConfig(const std::wstring& iniPath) {
     Ini ini(iniPath);
     const wchar_t* s = L"DirectNet";
     c.enabled = readBool(ini, s, L"Enabled", true, w);
-    std::wstring mode = lower(readString(ini, s, L"Mode", L"off"));
+    // A value none of these names keeps the default, with a warning: `Mode=hots` must not quietly mean off.
+    auto pick = [&](const wchar_t* section, const wchar_t* key, const wchar_t* def,
+                    std::initializer_list<const wchar_t*> names) {
+        std::wstring v = lower(readString(ini, section, key, def));
+        if (std::find_if(names.begin(), names.end(), [&](const wchar_t* n) { return v == n; }) != names.end()) return v;
+        std::wstring all;
+        for (const wchar_t* n : names) all += (all.empty() ? L"" : L"/") + std::wstring(n);
+        w.push_back("CONFIG [" + toUtf8(section) + "] " + toUtf8(key) + "=" + toUtf8(v) + " is not one of " + toUtf8(all) +
+                    "; using " + toUtf8(def));
+        return std::wstring(def);
+    };
+    std::wstring mode = pick(s, L"Mode", L"off", {L"off", L"host", L"join"});
     c.direct.mode = mode == L"host" ? Mode::Host : mode == L"join" ? Mode::Join : Mode::Off;
     c.direct.listenPort = static_cast<uint16_t>(readInt(ini, s, L"ListenPort", 27015, 0, 65535, w));
     if (c.direct.mode == Mode::Join && readString(ini, s, L"ListenPort", L"").empty()) c.direct.listenPort = 0;
@@ -329,15 +340,17 @@ Config loadConfig(const std::wstring& iniPath) {
     c.bindPhysicalInterface = readBool(ini, s, L"BindPhysicalInterface", true, w);
 
     c.eosFixedPort = static_cast<uint16_t>(readInt(ini, L"EOS", L"FixedPort", 0, 0, 65535, w));
-    std::wstring relay = lower(readString(ini, L"EOS", L"Relay", L"default"));
+    std::wstring relay = pick(L"EOS", L"Relay", L"default", {L"default", L"norelay", L"allow", L"force"});
     c.eosRelay = relay == L"norelay" ? 0 : relay == L"allow" ? 1 : relay == L"force" ? 2 : -1;
 
-    std::wstring hold = lower(readString(ini, L"Resilience", L"HoldDisconnects", L"auto"));
+    std::wstring hold = pick(L"Resilience", L"HoldDisconnects", L"auto", {L"auto", L"off", L"0", L"all"});
     c.hold = hold == L"all" ? Config::Hold::All : (hold == L"off" || hold == L"0") ? Config::Hold::Off : Config::Hold::Auto;
     c.reliableGameTraffic = readBool(ini, L"Sync", L"ReliableGameTraffic", true, w);
     c.direct.upgradeUnreliable = c.reliableGameTraffic;
     c.graceMs =
         static_cast<uint32_t>(std::clamp(readInt(ini, L"Resilience", L"GraceSeconds", 30, 0, 999999999, w), 1, 600)) * 1000u;
+    c.direct.testOutageAfterMs = static_cast<uint64_t>(readInt(ini, L"Test", L"DirectOutageAfterMs", 0, 0, 999999999, w));
+    c.direct.testOutageForMs = static_cast<uint64_t>(readInt(ini, L"Test", L"DirectOutageForMs", 0, 0, 999999999, w));
     return c;
 }
 

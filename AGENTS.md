@@ -8,7 +8,7 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 
 ## Layout
 
-- `src/`: the transport part, formerly EDF6DirectNet. EOS import-table hooks (`eos_hooks.cpp`, `iat.*`), reliable sending and queue sizing, disconnect hold (`hold.*`), lobby markers, the direct link (`direct_net.*`, `wire.*`, `auth.*`, `reliable.*`, `fragment.*`, `congestion.*`, `netclass.*`), UPnP, config.
+- `src/`: the transport part, formerly EDF6DirectNet. EOS import-table hooks (`eos_hooks.cpp`, `iat.*`), reliable sending and queue sizing, disconnect hold (`hold.*`), lobby markers, the direct link (`direct_net.*`, `wire.*`, `auth.*`, `reliable.*`), fragments (`fragment.*`), UPnP, config.
 - `multislot/src/`: the game part, first written as EDF6MultiSlot by momotori01. In-memory patches to `EDF.dll` (weapon guard, peer timeout), the netcode version gate (`netfeature*`), player sync (`netplayer*`), hit authority (`hitauth*`), the crash log and the log. `plugin.cpp` is the EDFModLoader entry point for the whole DLL.
 - `multislot/CMakeLists.txt` builds both parts into one DLL and holds the one version number (`project(EDF6Coop VERSION x.y.z)`).
 - `tests/` covers the transport part; `multislot/tests/` covers the game part, and `multislot/tests/gamenet/` runs multi-process rooms against the real `EDF.dll` with a fake EOS.

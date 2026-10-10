@@ -128,13 +128,15 @@ EDF6 把收到的每个 EOS 包都当游戏数据读，插件没法通过 P2P �
 
 - 有属性且之前连接成功过：给宽限，每 2 秒请 EOS 重连。
 - 没有属性：按原版处理。
-- 直连成员：只要直连还有回应就给宽限（每秒 ping 一次，菜单里也是）；它的游戏数据本来就不走 EOS。
+- 直连成员：只要直连还有回应就给宽限（每秒 ping 四次，菜单里也是）；它的游戏数据本来就不走 EOS。
 - Epic 大厅服务报告某成员断开（`DISCONNECTED`：它断开的是 Epic 大厅服务，不是游戏），而该成员的直连还有回应：对游戏瞒住。EOS 再次列出该成员（`JOINED`）时，两个事件都丢掉。直连沉默满 `GraceSeconds`，或者该成员真的离开或被踢，游戏才会知道。对你自己也一样。
 - 对方离开了大厅：立刻告诉游戏。
 
 ### 直连
 
 房主写入成员属性 `EDF6DN_ADDR`（空格分隔的地址列表）。其他成员每 2 秒读一次，对每个地址尝试 10 秒，先 IPv4 后 IPv6；全部失败的话 60 秒后再试。传输是自己的 UDP 协议：选择性确认、限速重发、每条链路独立的密钥。`IP_UNICAST_IF` 把它绑定到物理网卡。
+
+直连只在对方有回应时承载游戏数据：每秒 ping 四次，大约 1.5 秒收不到回应（pong 或确认）就不再承载。它还没送达的数据改走 EOS（可靠发送），之后游戏的数据也走 EOS，直到直连重新回应满一秒。房主在加入者之间转发；送不到某个加入者的数据会退回给发送方，由发送方改走 EOS，其他加入者也不再经房主发给那个加入者。
 
 每个装了插件的玩家还会写 `EDF6DN_ID`：本次游戏会话生成的 ECDSA P-256 密钥的 SHA-256 指纹。连接从一次 cookie 往返开始：房主对 hello 回一个绑定发送方地址的 cookie，在它回来之前不保存任何东西，所以伪造地址和 hello 洪泛都没有用。加入者带着 cookie 重发 hello，并用自己的密钥签名。只有当 X 在房间里并公布了该密钥的指纹时，房主才接受它作为 EOS ID X；之前会话的已签名 hello 会被当作重放拒绝。加入者只接受由房主公布的密钥签名的 welcome。hello 和 welcome 在这些签名下携带新的 ECDH 密钥，所以每条链路都有自己的密钥（设了 `Key` 时混入），每个包都带标签和计数器：被篡改、注入或重放的包会被丢弃。没有加密。直连协议不同的玩家会忽略彼此的包，互相之间留在 EOS 上。
 
@@ -158,6 +160,7 @@ EDF6 把收到的每个 EOS 包都当游戏数据读，插件没法通过 P2P �
 - `RESILIENCE ... lost Epic's lobby service but the direct link is up` / `back in Epic's lobby service`：Epic 大厅服务把某玩家断开又放了回来，游戏完全没看到。
 - `NETCODE features in room ... off: ...`：房间里有人运行别的协议或关了某个功能，日志会写出是谁。`NETCODE REFUSED`：你作为房主移除了一个协议不同的玩家。
 - `STATS last 60s: ...`：游戏有收发时每分钟一行：游戏发送量（kbps）、直连在线路上的实际用量（`wire up` / `down`，含重发，以及房主为别人转发的量）、直连和 EOS 的包数、以可靠方式发给 EOS 的包数、发送失败数、拆包数，以及每条链路的重发状态。`send-failures` 不为 0 时请附上日志。
+- `DIRECT ... has not answered for ... ms: game data goes over EOS` / `answers again`：直连暂时不通，期间由 EOS 承载游戏。`... packets the link to ... had not delivered: ... go over EOS` 写出转交了多少。STATS 行里这样的链路显示 `NOT ANSWERING`。
 - `DIRECT ... timed out: nothing received for ...`：对方不再发来任何数据。`DIRECT ... stalled: a packet the game sent reliably is unacknowledged ...`：对方还在回应，但游戏需要的某个包一直没送到。
 - `DIRECT refused hello for ...`：有人想以某玩家身份直连却证明不了。玩家刚进房后一两秒内出现 `published no direct-link identity` 是正常的（他的房间信息还没传到房主）。`not signed by the identity that player published` 表示有人冒充该玩家，已被拒绝。
 - `DIRECT ... speaks direct-link protocol N, we speak M`：该玩家运行的是别的版本。你们之间没有直连，游戏继续走 EOS。
@@ -224,7 +227,7 @@ Python 工具在 `build.sh` 于 `.venv` 中创建的虚拟环境里运行。发�
 - 不能在任务中途加入（游戏本身没有这个功能）。
 - 只修复丢包导致的不同步；游戏逻辑本身的不同步需要具体症状才能逆向。
 - 断线宽限期间其他玩家可能会在同步点等待，最多 `GraceSeconds` 秒。
-- 直连由房主转发：加入者的直连重连的那一刻，房主正在为他转发、尚未确认的少量数据会丢失（游戏随后回到 EOS）。
+- 房主在加入者之间转发：房主到接收方和到发送方的链路同时断开时，房主正在两者之间转发的数据会丢失。
 - 直连流量有认证但没有加密：网络路径上的人能读到，也总能丢弃它（游戏随后回到 EOS）。
 - 游戏退出时不会删除 UPnP 映射（那时没有安全的时机做网络调用）。插件会在下一次不当房主的启动时删除它（`Mode` 不是 `host`，或 `UPnP=0`），`UNINSTALL.bat` 也会删除。它从不碰其他设备的映射。也可以在路由器管理页面删除名为 `EDF6DirectNet` 的映射。
 - 直连本身断了时什么都瞒不住：某个玩家自己的网络断开超过 `GraceSeconds`，游戏会照常处理。

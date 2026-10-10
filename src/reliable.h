@@ -65,6 +65,9 @@ public:
     // The floor to send in a Forward now, if the peer has to learn that we gave packets up: it has not
     // acknowledged up to the floor yet. Repeated every RTO until an acknowledgement shows it arrived.
     std::optional<uint32_t> forwardDue(uint64_t nowMs);
+    // Takes every pending packet out, given up as far as this link goes (the peer learns it from a Forward): the
+    // link stopped answering, and the caller sends them another way.
+    std::vector<std::vector<uint8_t>> strand();
     // The socket refused a datagram (its send buffer is full): congestion on our side. Retransmissions
     // wait until acknowledgements earn new credit.
     void sendRefused() { credit_ = 0.0; }

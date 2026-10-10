@@ -7,8 +7,7 @@ namespace dn {
 namespace {
 
 constexpr uint8_t kMagic[4] = {'E', 'D', 'F', 'G'};
-constexpr uint8_t kAckMagic[4] = {'E', 'D', 'F', 'A'};
-constexpr uint8_t kVersion = 2;
+constexpr uint8_t kVersion = 3;
 
 template <typename T>
 void put(uint8_t* at, T value) {
@@ -25,8 +24,7 @@ size_t fragmentsFor(size_t total) { return (total + kFragmentPayload - 1) / kFra
 
 }  // namespace
 
-std::vector<std::vector<uint8_t>> splitIntoFragments(uint64_t id, uint8_t flags, uint16_t tag, const uint8_t* data,
-                                                     size_t size) {
+std::vector<std::vector<uint8_t>> splitIntoFragments(uint64_t id, uint16_t channel, const uint8_t* data, size_t size) {
     std::vector<std::vector<uint8_t>> out;
     if (!data || size == 0 || size > kMaxFragmentedBytes) return out;
     const size_t count = fragmentsFor(size);
@@ -36,8 +34,7 @@ std::vector<std::vector<uint8_t>> splitIntoFragments(uint64_t id, uint8_t flags,
         std::vector<uint8_t>& f = out.emplace_back(kFragmentHeader + n);
         memcpy(f.data(), kMagic, 4);
         f[4] = kVersion;
-        f[5] = flags;
-        put<uint16_t>(f.data() + 6, tag);
+        put<uint16_t>(f.data() + 6, channel);
         put<uint64_t>(f.data() + 8, id);
         put<uint32_t>(f.data() + 16, static_cast<uint32_t>(size));
         put<uint16_t>(f.data() + 20, static_cast<uint16_t>(i));
@@ -45,23 +42,6 @@ std::vector<std::vector<uint8_t>> splitIntoFragments(uint64_t id, uint8_t flags,
         memcpy(f.data() + kFragmentHeader, data + at, n);
     }
     return out;
-}
-
-std::vector<uint8_t> fragmentAck(uint64_t id) {
-    std::vector<uint8_t> out(kFragmentAckBytes);
-    memcpy(out.data(), kAckMagic, 4);
-    put<uint64_t>(out.data() + 4, id);
-    return out;
-}
-
-bool parseFragmentAck(const uint8_t* data, size_t size, uint64_t& id) {
-    if (!data || size != kFragmentAckBytes || memcmp(data, kAckMagic, 4) != 0) return false;
-    id = get<uint64_t>(data + 4);
-    return true;
-}
-
-uint64_t Reassembler::idOf(const uint8_t* data, size_t size) {
-    return isFragment(data, size) ? get<uint64_t>(data + 8) : 0;
 }
 
 bool isFragment(const uint8_t* data, size_t size) {
@@ -77,23 +57,24 @@ void Reassembler::drop(Map::iterator it) {
 void Reassembler::expire(uint64_t nowMs) {
     for (auto it = partial_.begin(); it != partial_.end();) {
         auto next = std::next(it);
-        if (nowMs - it->second.lastMs > kTimeoutMs) drop(it);
+        if (nowMs > it->second.lastMs + kTimeoutMs) drop(it);  // two threads' clocks may be read out of order
         it = next;
     }
 }
 
 std::optional<FragmentMessage> Reassembler::add(const std::string& src, const uint8_t* data, size_t size,
-                                                uint64_t nowMs, bool* again) {
+                                                uint64_t nowMs) {
     expire(nowMs);
-    if (again) *again = false;
-    for (auto it = completed_.begin(); it != completed_.end();)
-        it = nowMs - it->second > kCompletedMs ? completed_.erase(it) : std::next(it);
-    if (!isFragment(data, size) || data[4] != kVersion) {
+    while (!completedOrder_.empty() &&
+           (completedOrder_.size() > kCompletedKept || nowMs > completedOrder_.front().second + kCompletedMs)) {
+        completed_.erase(completedOrder_.front().first);
+        completedOrder_.pop_front();
+    }
+    if (!isFragment(data, size) || data[4] != kVersion || data[5] != 0) {
         ++malformed_;
         return std::nullopt;
     }
-    const uint8_t flags = data[5];
-    const uint16_t tag = get<uint16_t>(data + 6);
+    const uint16_t channel = get<uint16_t>(data + 6);
     const uint64_t id = get<uint64_t>(data + 8);
     const uint32_t total = get<uint32_t>(data + 16);
     const uint16_t index = get<uint16_t>(data + 20);
@@ -107,10 +88,7 @@ std::optional<FragmentMessage> Reassembler::add(const std::string& src, const ui
         return std::nullopt;
     }
     const auto key = std::make_pair(src, id);
-    if (completed_.count(key)) {  // arrived whole already: a resend or a copy
-        if (again) *again = true;
-        return std::nullopt;
-    }
+    if (completed_.count(key)) return std::nullopt;  // arrived whole already: a copy
     auto it = partial_.find(key);
     if (it == partial_.end()) {
         size_t mine = 0;
@@ -127,8 +105,7 @@ std::optional<FragmentMessage> Reassembler::add(const std::string& src, const ui
             drop(first);
         }
         Partial p;
-        p.flags = flags;
-        p.tag = tag;
+        p.channel = channel;
         p.total = total;
         p.count = count;
         p.firstMs = nowMs;
@@ -139,7 +116,7 @@ std::optional<FragmentMessage> Reassembler::add(const std::string& src, const ui
         it = partial_.emplace(key, std::move(p)).first;
     }
     Partial& p = it->second;
-    if (p.total != total || p.count != count || p.flags != flags || p.tag != tag) {
+    if (p.total != total || p.count != count || p.channel != channel) {
         ++malformed_;  // another message under the same id: the sender's ids wrapped, or it lies
         return std::nullopt;
     }
@@ -149,29 +126,18 @@ std::optional<FragmentMessage> Reassembler::add(const std::string& src, const ui
     p.lastMs = nowMs;
     memcpy(p.bytes.data() + size_t{index} * kFragmentPayload, data + kFragmentHeader, n);
     if (p.have < p.count) return std::nullopt;
-    FragmentMessage done{p.flags, p.tag, std::move(p.bytes)};
+    FragmentMessage done{p.channel, std::move(p.bytes)};
     buffered_ -= total;
     partial_.erase(it);
-    if (completed_.size() >= kCompletedKept) completed_.erase(completed_.begin());
-    completed_[key] = nowMs;
+    completed_.insert(key);
+    completedOrder_.emplace_back(key, nowMs);
     return done;
-}
-
-uint64_t Reassembler::pending(const std::string& src, uint8_t flags, uint16_t tag, uint64_t nowMs, size_t* total) {
-    expire(nowMs);
-    auto oldest = partial_.end();
-    for (auto it = partial_.lower_bound({src, 0}); it != partial_.end() && it->first.first == src; ++it)
-        if (it->second.flags == flags && it->second.tag == tag &&
-            (oldest == partial_.end() || it->second.firstMs < oldest->second.firstMs))
-            oldest = it;
-    if (oldest == partial_.end()) return 0;
-    if (total) *total = oldest->second.total;
-    return oldest->first.second;
 }
 
 void Reassembler::clear() {
     partial_.clear();
     completed_.clear();
+    completedOrder_.clear();
     buffered_ = 0;
 }
 

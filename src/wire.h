@@ -18,13 +18,9 @@
 // 256 after its cumulative point), carries the game's own reliability (0 = sent unreliably, carried
 // with a sequence number but given up after a deadline) and adds Forward, which moves the receiver
 // past packets the sender gave up. Peers of different protocols reject each other's datagrams
-// (BadProtocol) and so keep using EOS with each other. Protocol 6 adds Room: the host tells its joiners
-// who its game has in the room, which every member's game follows (a player can come back into a room
-// without Epic's lobby service, see room_view.h). Protocol 7 (the netcode rewrite, netcode.h) adds the guests'
-// links to each other: PeerQuery (a guest asks the host where another guest is), PeerInfo (the host tells both
-// where the other one is, as it sees them), Punch (opens a guest's NAT towards another one; read by nobody), and
-// Data carries the datagram's traffic class (netclass.h). Roster and Room come in pages (`total`, `offset`) for
-// rooms larger than one datagram holds.
+// (BadProtocol) and so keep using EOS with each other. Protocols 6 and 7 (EDF6Coop 2.2 to 2.5) added the host's
+// room list, links between joiners and traffic classes. Protocol 8 drops them again: a star around the host, which
+// relays between joiners, and Data's last byte says whether the host handed it back to its sender undelivered.
 #pragma once
 #include <array>
 #include <cstdint>
@@ -37,7 +33,7 @@
 namespace dn {
 
 constexpr uint32_t kMagic = 0x314E4445;  // "EDN1"
-constexpr uint16_t kProtocol = 7;
+constexpr uint16_t kProtocol = 8;
 constexpr uint8_t kFlagTagged = 1;
 constexpr size_t kTagBytes = 8;
 // Longest id / socket name on the wire. Decoding rejects longer ones instead of reading a string the
@@ -63,14 +59,11 @@ enum class MsgType : uint8_t {
     // a joiner acts on it only when its link has gone quiet anyway.
     Reset = 10,
     Forward = 11,  // sender -> receiver: every sequence number below this is acknowledged or given up
-    Room = 12,     // host -> clients: who the host's game has in the room
-    PeerQuery = 13,  // client -> host: where is this member (to link with it directly)
-    PeerInfo = 14,   // host -> client: this member is at this address (both get told about each other)
-    Punch = 15,      // client -> client: opens our NAT towards it before its hello; ignored on arrival
 };
 
-// Members one Roster or Room page names (the 32 a Welcome holds). Larger lists go in several pages.
-constexpr size_t kRosterPage = 32;
+// Members a Welcome or Roster names at most, the host included. A Welcome of 32 EOS ids is 1306 bytes with a Key
+// tag; the game's rooms hold four.
+constexpr size_t kMaxRoster = 32;
 
 struct HelloMsg {
     uint32_t nonce = 0;
@@ -80,10 +73,6 @@ struct HelloMsg {
     PublicKey publicKey{};
     PublicKey ecdh{};  // the client's ephemeral key for this session
     Signature signature{};  // over helloDigest()
-    // The sender's netcode protocol and features (multislot netfeature.h): what a host checks of a member that is
-    // not in Epic's lobby (rooms above its 64), whose lobby entry nobody can read. 0: not said.
-    uint32_t netProtocol = 0;
-    uint32_t netCaps = 0;
 };
 
 struct ChallengeMsg {
@@ -101,29 +90,11 @@ struct WelcomeMsg {
     Signature signature{};  // over welcomeDigest()
 };
 
+// The members the host reaches now (the host included): a joiner sends them its game data through the host. A
+// newer link counter supersedes an older list.
 struct RosterMsg {
     uint32_t hostNonce = 0;
-    std::vector<std::string> roster;  // this page's members
-    // The whole list has `total` members; this page holds those from `offset` on. A list of one page: 0 and its
-    // size. `version` tells one list's pages from the next one's.
-    uint32_t version = 0;
-    uint16_t total = 0;
-    uint16_t offset = 0;
-};
-
-// The host's game's members (the host included), as RoomView keeps them. Like Roster it carries the
-// host's nonce, and a newer link counter supersedes an older list.
-struct RoomMsg {
-    uint32_t hostNonce = 0;
-    std::vector<std::string> members;  // this page's (see RosterMsg)
-    uint32_t version = 0;
-    uint16_t total = 0;
-    uint16_t offset = 0;
-};
-
-struct PeerMsg {
-    std::string puid;
-    std::string address;  // PeerInfo: "1.2.3.4:5" / "[v6]:5", as the host sees that member
+    std::vector<std::string> roster;
 };
 
 struct DataMsg {
@@ -136,7 +107,9 @@ struct DataMsg {
     // unreliable packet carried reliably until a deadline (DirectOptions::upgradeUnreliable).
     uint8_t reliability = 0;
     std::vector<uint8_t> payload;
-    uint8_t cls = 0;  // TrafficClass (netclass.h): how the hops carry it
+    // The host could not deliver it (the link to `dst` stopped answering) and hands it back to `src`, which sends
+    // it over EOS instead.
+    bool returned = false;
 };
 
 // Sequence numbers first .. first + count - 1, all received.
@@ -184,8 +157,6 @@ struct Message {
     ChallengeMsg challenge;
     WelcomeMsg welcome;
     RosterMsg roster;
-    RoomMsg room;
-    PeerMsg peer;  // PeerQuery, PeerInfo
     DataMsg data;
     AckMsg ack;
     ForwardMsg forward;
@@ -195,8 +166,7 @@ struct Message {
 // Messages sent only on an established link, authenticated with its keys (see sealLink()).
 inline bool isLinkScoped(MsgType t) {
     return t == MsgType::Data || t == MsgType::Ack || t == MsgType::Forward || t == MsgType::Ping ||
-           t == MsgType::Pong || t == MsgType::Roster || t == MsgType::Bye || t == MsgType::Room ||
-           t == MsgType::PeerQuery || t == MsgType::PeerInfo;
+           t == MsgType::Pong || t == MsgType::Roster || t == MsgType::Bye;
 }
 
 inline uint32_t linkEpoch(uint32_t clientNonce, uint32_t hostNonce) {

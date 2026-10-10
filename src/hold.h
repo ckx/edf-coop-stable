@@ -41,7 +41,8 @@ public:
 
     // Offers a close event. Returns true when it is held; `forward` then runs later only if the
     // connection does not come back, `reaccept` runs periodically to ask EOS to reconnect.
-    // A non-transient close supersedes (discards) events already held for `remote`.
+    // A non-transient close supersedes (discards) events already held for `remote`; another transient one
+    // while `remote` is held (a reconnect that failed) is absorbed by the one held.
     bool offer(const std::string& remote, int32_t reason, bool directPeer, bool pluginPeer, uint64_t nowMs,
                std::function<void()> forward, std::function<void()> reaccept);
 
@@ -58,7 +59,9 @@ public:
     size_t heldCount() const;
 
     // Runs reaccept timers and forwards expired events. Events of peers for which `directAlive`
-    // returns true never expire. Returns the remotes whose events were forwarded.
+    // returns true never expire, and their reconnect is asked only every kAliveReacceptMs: the game's
+    // traffic goes over the direct link meanwhile. Returns the remotes whose events were forwarded.
+    static constexpr uint64_t kAliveReacceptMs = 30000;
     std::vector<std::string> poll(uint64_t nowMs, const std::function<bool(const std::string&)>& directAlive);
 
 private:

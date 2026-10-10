@@ -22,9 +22,6 @@ NetcodeOptions netcodeOptions();
 using RoomCapQuery = bool (*)(uint32_t cap);
 void setRoomCapQuery(RoomCapQuery query);
 
-// Our netcode protocol and features, said in every direct-link hello; a host refuses another protocol when
-// `refuseOthers`.
-void setNetcodeIdentity(uint32_t protocol, uint32_t caps, bool refuseOthers);
 // Tests only ([Test] LoopbackHosts): a room host may advertise a loopback address (gamenet runs on one machine).
 void setTestLoopbackHosts(bool on);
 

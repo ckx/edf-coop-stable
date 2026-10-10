@@ -42,6 +42,7 @@ bool DisconnectHold::offer(const std::string& remote, int32_t reason, bool direc
         return false;
     }
     // A first handshake that fails must reach the game, so plain EOS peers need a prior connection.
+    if (std::any_of(held_.begin(), held_.end(), [&](const Held& h) { return h.remote == remote; })) return true;
     bool eligible = directPeer || ((pluginPeer || opt_.holdAll) && established_.count(remote));
     if (!eligible) return false;
     Held h;
@@ -126,14 +127,16 @@ std::vector<std::string> DisconnectHold::poll(uint64_t nowMs,
     {
         std::lock_guard<std::mutex> lock(mu_);
         for (auto it = held_.begin(); it != held_.end();) {
-            if (alive.count(it->remote)) it->heldAtMs = nowMs;  // still reachable directly: never expire
+            const bool direct = alive.count(it->remote) != 0;
+            if (direct) it->heldAtMs = nowMs;  // still reachable directly: never expire
             if (nowMs - it->heldAtMs >= opt_.graceMs) {
                 established_.erase(it->remote);
                 due.push_back(std::move(*it));
                 it = held_.erase(it);
                 continue;
             }
-            if (it->reaccept && (!it->reacceptedOnce || nowMs - it->lastReacceptMs >= opt_.reacceptIntervalMs)) {
+            const uint64_t interval = direct ? kAliveReacceptMs : opt_.reacceptIntervalMs;
+            if (it->reaccept && (!it->reacceptedOnce || nowMs - it->lastReacceptMs >= interval)) {
                 it->reacceptedOnce = true;
                 it->lastReacceptMs = nowMs;
                 reaccepts.push_back(it->reaccept);

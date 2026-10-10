@@ -170,7 +170,7 @@ inline std::map<std::string, Counts> Reported(const Spawned& machine, const std:
 // Every record one machine sent another, counted at both ends. Reliable records arrive exactly once (the game's own
 // resends included); state records arrive all (`allStates`, what the reliable upgrade is for) or at least some.
 // Returns the state records lost over the whole room.
-inline std::size_t CheckEveryRecord(const std::vector<Spawned>& machines, bool allStates) {
+inline std::size_t CheckEveryRecord(const std::vector<Spawned>& machines, bool allStates, std::size_t maxGapMs = 1000) {
     std::size_t lost = 0;
     for (const auto& to : machines) {
         const auto got = Reported(to, "got-from");
@@ -190,8 +190,8 @@ inline std::size_t CheckEveryRecord(const std::vector<Spawned>& machines, bool a
             Check(allStates ? g->second.states == s->second.states : g->second.states > 0,
                   pair + states + (allStates ? ", all of them" : ", some of them"));
             if (allStates)
-                Check(g->second.gapMs <= 1000, pair + "state never stopped for more than 1000 ms (longest gap " +
-                                                   std::to_string(g->second.gapMs) + " ms)");
+                Check(g->second.gapMs <= maxGapMs, pair + "state never stopped for more than " + std::to_string(maxGapMs) +
+                                                       " ms (longest gap " + std::to_string(g->second.gapMs) + " ms)");
             lost += s->second.states > g->second.states ? s->second.states - g->second.states : 0;
         }
     }
@@ -234,6 +234,23 @@ inline void CheckDirect(const std::vector<Spawned>& machines, const gamenet::Net
     std::printf("INFO: %zu state datagrams crossed EOS instead of the direct link\n", StateDatagrams(network).size());
 }
 
+// The direct link of the first guest loses everything it sends for 2.5 s mid-game: both ends stop routing over it
+// within about 1.5 s, what it had not delivered goes over EOS, it carries again once it answers, and every record
+// still arrives exactly once.
+inline void CheckDirectOutage(const std::vector<Spawned>& machines, const gamenet::Network& network) {
+    CheckRoom(machines, network);
+    // State stops for as long as the link takes to count as not answering (direct_net.cpp kAnswerMs) and a round
+    // of the role's sends.
+    CheckEveryRecord(machines, true, 2000);
+    for (std::size_t i : {std::size_t{0}, std::size_t{1}}) {
+        const std::string& log = machines[i].text;
+        Check(log.find("has not answered for") != std::string::npos && log.find("answers again") != std::string::npos,
+              machines[i].user + " stopped routing over the link and took it up again");
+    }
+    Check(machines[1].text.find("had not delivered") != std::string::npos,
+          machines[1].user + " handed what its link had not delivered on");
+}
+
 inline const std::vector<Scenario>& Scenarios() {
     static const std::vector<Scenario> all = {
         {"room", Seats(2, "room", BaseIni()), 60000, &CheckRoom},
@@ -251,6 +268,13 @@ inline const std::vector<Scenario>& Scenarios() {
         {"netstatsunreliable", Seats(3, "netstats", BaseIni("[Sync]\r\nReliableGameTraffic=0\r\n")), 90000,
          &CheckNetStatsUnreliable, {{"EDF6NET_SECONDS", "6"}, {"EDF6NET_DROP", "80:40"}}},
         {"direct", DirectSeats(3, "netstats"), 120000, &CheckDirect, {{"EDF6NET_SECONDS", "8"}}},
+        {"directoutage",
+         [] {
+             auto seats = DirectSeats(3, "netstats");
+             seats[1].ini += "[Test]\r\nDirectOutageAfterMs=6000\r\nDirectOutageForMs=2500\r\n";
+             return seats;
+         }(),
+         120000, &CheckDirectOutage, {{"EDF6NET_SECONDS", "10"}}},
     };
     return all;
 }
