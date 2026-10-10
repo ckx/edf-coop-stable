@@ -10,6 +10,7 @@
 #include "hitauth.h"
 #include "log.h"
 #include "netfeature.h"
+#include "netplayer.h"
 
 namespace multislot {
 namespace {
@@ -23,7 +24,6 @@ constexpr std::uint32_t kStreamDestroy = 0x760180;
 constexpr std::uint32_t kWriteSmall = 0x12B5790;        // a small int (-14..15) in one byte
 constexpr std::uint32_t kWriteBlock = 0x12B5200;        // a byte block (0xA0 | len >> 8, len, bytes)
 constexpr std::uint32_t kReadValue = 0x12B4660;         // the reader of anything the int writers wrote
-constexpr std::uint32_t kReadBlock = 0x12B4900;         // a block into another stream
 constexpr std::uint32_t kStreamMark = 0x12B48A0;        // the read position (577C4D, 6325D4)
 constexpr std::uint32_t kStreamRewind = 0x12B4FD0;      // back to it (577C6E, 63260D)
 constexpr std::uint32_t kPartsReserve = 0x124190;       // GDI+0x70: the constructor's reserve(4) (22FE27)
@@ -428,9 +428,10 @@ HitMessage PeekHitEventMessage(void* stream, DamageEvent& out) {
     Fn<void(__fastcall*)(void*, std::int64_t*)>(kStreamMark)(stream, &mark);
     HitMessage result = HitMessage::Other;
     if (Fn<std::int64_t(__fastcall*)(void*)>(kReadValue)(stream) == kHitEventTag) {
-        GameStream block;
-        result = Fn<bool(__fastcall*)(void*, void*)>(kReadBlock)(stream, block.get()) &&
-                         ReadDamageEvent(block.data(), block.size(), out)
+        // Bounded: the game's own block reader (12B4900) copies the length a peer wrote without a check.
+        std::uint8_t block[kDamageEventBytes];
+        std::size_t size = 0;
+        result = ReadBinElement(stream, block, sizeof(block), size) && ReadDamageEvent(block, size, out)
                      ? HitMessage::Event
                      : HitMessage::Malformed;
     }

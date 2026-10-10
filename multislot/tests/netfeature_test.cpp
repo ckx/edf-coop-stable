@@ -129,6 +129,17 @@ void TestCaps() {
 
 }  // namespace
 
+// A feature whose hooks did not go in is not among what this machine publishes; the others stay.
+void TestWithdraw() {
+    InitNetFeature(L"Z:\\no\\such\\EDF6Coop.ini");  // no file: every feature on
+    Check(NetFeatureEnabledLocally(NetFeature::HitAuthority) && NetFeatureEnabledLocally(NetFeature::PlayerSync),
+          "without a settings file every feature is on");
+    WithdrawNetFeature(NetFeature::HitAuthority);
+    Check(!NetFeatureEnabledLocally(NetFeature::HitAuthority) && NetFeatureEnabledLocally(NetFeature::PlayerSync) &&
+              NetFeatureEnabledLocally(NetFeature::Fragments),
+          "a feature that did not start is withdrawn, the others stay");
+}
+
 int main() {
     TestHostSaysWhatTheRoomRuns();
     TestRoomAgrees();
@@ -136,6 +147,7 @@ int main() {
     TestMismatchedProtocol();
     TestSelfListed();
     TestCaps();
+    TestWithdraw();
     std::printf("%d checks, %d failures\n", checks, failures);
     return failures == 0 && checks > 0 ? 0 : 1;
 }

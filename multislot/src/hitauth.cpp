@@ -220,8 +220,11 @@ HitReject CheckEvent(const DamageEvent& event, const HitView& view, const HitLim
     const float radius = std::max(0.0f, event.radius);
     if (!Finite3(view.targetPos) || Distance(event.point, view.targetPos) > limits.maxHitOffset + radius)
         return HitReject::Offset;
-    // The attacker as this machine has it when it knows it; otherwise as the sender said.
-    const float* from = view.attackerKnown && Finite3(view.attackerPos) ? view.attackerPos : event.attackerPos;
+    // The attacker as this machine has it when it knows it; otherwise as the sender said. A sender that had no live
+    // attacker (attackerRef -1) said no position: there is nothing to measure from.
+    const bool known = view.attackerKnown && Finite3(view.attackerPos);
+    if (!known && event.attackerRef == -1) return HitReject::None;
+    const float* from = known ? view.attackerPos : event.attackerPos;
     if (Distance(from, event.point) > limits.maxRange + radius) return HitReject::Range;
     return HitReject::None;
 }

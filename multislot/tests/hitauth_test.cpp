@@ -352,6 +352,14 @@ void TestCheck() {
     Check(CheckEvent(d, known, limits) == HitReject::None, "the owner's own view of the attacker wins");
     known.attackerPos[0] = e.point[0] + limits.maxRange + e.radius + 1.0f;
     Check(CheckEvent(e, known, limits) == HitReject::Range, "the owner sees the attacker too far away");
+    // A hit far from the origin whose attacker neither side has (it despawned): not measured from the origin.
+    d = e;
+    d.attackerRef = -1;
+    d.attackerPos[0] = d.attackerPos[1] = d.attackerPos[2] = 0.0f;
+    for (float& c : d.point) c += limits.maxRange + e.radius + 1.0f;
+    HitView distant = v;
+    for (int i = 0; i < 3; ++i) distant.targetPos[i] = d.point[i];
+    Check(CheckEvent(d, distant, limits) == HitReject::None, "an unknown attacker is not placed at the origin");
 }
 
 void TestGate() {
@@ -560,6 +568,22 @@ void TestGameCode() {
     ToReader(junk, junkReader);
     Check(PeekHitEventMessage(junkReader.bytes, out) == HitMessage::Malformed && Position(junkReader) == 0,
           "a tagged block that is not an event is malformed");
+    // Our tag and a block that claims 4095 bytes of the 1000 there are (a hostile member): read with a bound, never
+    // copied past the event's size.
+    Stream lying;
+    Fn<void*(__fastcall*)(void*, int)>(kStreamConstruct)(lying.bytes, 0x40);
+    Fn<bool(__fastcall*)(void*, std::int8_t)>(kWriteSmall)(lying.bytes, kHitEventTag);
+    std::size_t end = 0;
+    std::memcpy(&end, lying.bytes + 0x5F0, 8);
+    lying.bytes[0x10 + end] = 0xAF;
+    lying.bytes[0x10 + end + 1] = 0xFF;
+    std::memset(lying.bytes + 0x10 + end + 2, 0x41, 1000);
+    end += 2 + 1000;
+    std::memcpy(lying.bytes + 0x5F0, &end, 8);
+    Stream lyingReader;
+    ToReader(lying, lyingReader);
+    Check(PeekHitEventMessage(lyingReader.bytes, out) == HitMessage::Malformed && Position(lyingReader) == 0,
+          "a block longer than what follows it is malformed");
 
     // The receive hook on a copy that is not the owner: counted, not dealt (nothing of the game's is touched).
     SetHitRuleForTest(true, true);

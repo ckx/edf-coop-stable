@@ -261,6 +261,14 @@ void InitNetFeature(const wchar_t* iniPath) {
         FormatCaps(caps).c_str(), settings.rejectMismatched ? 1 : 0);
 }
 
+void WithdrawNetFeature(NetFeature feature) {
+    const auto bit = static_cast<std::uint32_t>(feature);
+    if (!(settings.caps & bit)) return;
+    settings.caps &= ~bit;
+    Log("NETCODE %s did not start on this machine: not published, so rooms with this machine run without it",
+        FormatCaps(bit).c_str());
+}
+
 bool StartNetFeature(bool lobbyGlue) {
     if (!lobbyGlue) {
         Log("NETCODE UNAVAILABLE: the lobby glue is not in, so what the room runs cannot be read; every netcode feature "

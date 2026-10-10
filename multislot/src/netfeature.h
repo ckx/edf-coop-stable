@@ -97,6 +97,9 @@ std::string FormatCaps(std::uint32_t caps);
 // Reads [Netcode] (the features this machine has on, RejectMismatched, StatsSeconds, ...) and hands the
 // transport its options (src/netcode.h). Before StartNetFeature.
 void InitNetFeature(const wchar_t* iniPath);
+// `feature` could not start on this machine (its hooks did not go in): it is not published, so the room runs
+// without it instead of the others counting on a part this machine does not play. Before StartNetFeature.
+void WithdrawNetFeature(NetFeature feature);
 // Publishes our protocol and features and watches everyone's, once the lobby glue (InstallLobbyTexts) is in. False
 // without it: then no feature is ever active (we cannot tell what the room runs).
 bool StartNetFeature(bool lobbyGlue);

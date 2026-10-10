@@ -348,6 +348,18 @@ void TestReviewFixes() {
         AcceptSample(fast2, s, 0.0, p);
         Check(StepRemote(fast2, {-11, 0, 0}, 0.0, p).warp, "40 m/s, 11 m off: warp");
     }
+    // 4. A copy whose own position went NaN gets nothing added: the NaN would end up in the game's position.
+    {
+        NetPlayerParams p;
+        RemoteTrack t;
+        PlayerSample s;
+        s.seq = 1;
+        s.velocity = {5, 0, 0};
+        AcceptSample(t, s, 0.0, p);
+        const RemoteStep step = StepRemote(t, {std::nanf(""), 0, 0}, 16.0, p);
+        Check(!step.warp && step.add.x == 0.0f && step.add.y == 0.0f && step.add.z == 0.0f,
+              "a NaN copy position: nothing added, no warp");
+    }
 }
 
 void TestRoomTrackCapacity() {

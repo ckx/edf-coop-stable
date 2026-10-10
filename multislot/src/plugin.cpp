@@ -174,14 +174,16 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
         keepRoom ? "when the P2P handshake with someone who joined after you times out, you stay in the room and they "
                    "stay unconnected (the game makes every member but the host leave)"
                  : "a timed-out P2P handshake makes this machine leave the room, as the game does");
-    // The netcode version gate reads and publishes lobby member attributes through its own lobby wrappers.
-    InitNetFeature(iniPath);
-    StartNetFeature(InstallLobbyTexts(game, &dn::patchImport));
     // Hit authority and player sync: hooks and thunk pages of their own, so a site that is not the expected code
-    // leaves only that part off and the game does as it always did.
-    InstallHitAuthority(base);
-    if (!InstallPlayerSync(base, ReadPlayerSyncSettings(iniPath)))
+    // leaves only that part off and the game does as it always did. A part that did not start is not published.
+    InitNetFeature(iniPath);
+    if (!InstallHitAuthority(base)) WithdrawNetFeature(NetFeature::HitAuthority);
+    if (!InstallPlayerSync(base, ReadPlayerSyncSettings(iniPath))) {
         Log("PLAYER sync: not installed; every player keeps the game's own sync");
+        WithdrawNetFeature(NetFeature::PlayerSync);
+    }
+    // The netcode version gate reads and publishes lobby member attributes through its own lobby wrappers.
+    StartNetFeature(InstallLobbyTexts(game, &dn::patchImport));
     if (GetPrivateProfileIntW(L"Log", L"CrashLog", 1, iniPath) != 0) {
         // A dump holds process memory (room name, chat text), so it is written only when the INI asks for one.
         const bool crashDump = GetPrivateProfileIntW(L"Log", L"CrashDump", 0, iniPath) != 0;

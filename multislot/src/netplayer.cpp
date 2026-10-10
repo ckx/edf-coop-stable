@@ -171,6 +171,10 @@ void ResetSteps(RemoteTrack& track) {
 RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetPlayerParams& params) {
     RemoteStep step;
     step.target = EstimatePosition(track, nowMs, params);
+    if (!Finite(current)) {  // the copy's own position is broken: adding to it would spread the NaN, so add nothing
+        ResetSteps(track);
+        return step;
+    }
     const Vec3 error = step.target - current;
     if (Length(error) > WarpDistance(track, params)) {
         step.warp = true;
