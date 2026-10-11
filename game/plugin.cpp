@@ -22,6 +22,7 @@
 #include "netplayer_game.h"
 #include "patches.h"
 #include "peertimeout.h"
+#include "radar.h"
 #include "weaponguard.h"
 #include "src/config.h"
 #include "src/dn_part.h"
@@ -156,8 +157,8 @@ bool Apply(unsigned char* base, bool keepRoom) {
     return true;
 }
 
-// The game part: the weapon guard, KeepRoomOnPeerTimeout, the netcode version gate, hit authority, player sync and
-// the crash log. Returns whether it runs; when it does not, it has changed nothing and started nothing.
+// The game part: the weapon guard, KeepRoomOnPeerTimeout, radar item colors, the netcode version gate, hit authority,
+// player sync and the crash log. Returns whether it runs; when it does not, it has changed nothing and started nothing.
 bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     const auto base = reinterpret_cast<unsigned char*>(game);
     if (!SupportedImage(base)) {
@@ -174,6 +175,9 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
         keepRoom ? "when the P2P handshake with someone who joined after you times out, you stay in the room and they "
                    "stay unconnected (the game makes every member but the host leave)"
                  : "a timed-out P2P handshake makes this machine leave the room, as the game does");
+    // Only this machine's radar: nothing goes over the network.
+    if (GetPrivateProfileIntW(L"Display", L"RadarItemColors", 1, iniPath) != 0) InstallRadarItemColors(base);
+    else Log("RadarItemColors=0: every pickup on the radar stays green");
     // Hit authority and player sync: hooks and thunk pages of their own, so a site that is not the expected code
     // leaves only that part off and the game does as it always did. A part that did not start is not published.
     InitNetFeature(iniPath);

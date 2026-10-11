@@ -1,7 +1,7 @@
 // Loads the built plugin the way EDFModLoader does, against the real EDF.dll mapped without running its
 // initialisation, and checks which of the game's sites it took over. The plugin sits in <work-folder>\<mode>\Mods\Plugins,
 // as in a game folder.
-//   PluginLoadTests EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced
+//   PluginLoadTests EDF.dll EDF6Coop.dll work-folder on|off|fresh|optionsoff|replaced
 #include <windows.h>
 #include "late_fault.h"
 
@@ -23,6 +23,7 @@
 #include "../../game/hitauthgame.h"
 #include "../../game/midhook.h"
 #include "../../game/patches.h"
+#include "../../game/radar.h"
 
 using namespace multislot;
 
@@ -135,7 +136,7 @@ void ThrowAndCatch() {
 
 int wmain(int argc, wchar_t** argv) {
     if (argc < 5) {
-        std::printf("usage: PluginLoadTests EDF.dll EDF6Coop.dll work-folder on|off|fresh|keeproomoff|replaced\n");
+        std::printf("usage: PluginLoadTests EDF.dll EDF6Coop.dll work-folder on|off|fresh|optionsoff|replaced\n");
         return 2;
     }
     const std::wstring mode = argv[4];
@@ -165,9 +166,9 @@ int wmain(int argc, wchar_t** argv) {
     DeleteFileW(replaced.c_str());
     DeleteFileW((replaced + L".disabled").c_str());
     if (mode == L"replaced") std::ofstream(std::filesystem::path(replaced), std::ios::binary) << "MZ not loaded";
-    if (mode == L"off" || mode == L"keeproomoff" || mode == L"on") {
+    if (mode == L"off" || mode == L"optionsoff" || mode == L"on") {
         const char* ini = mode == L"off"           ? "[DirectNet]\r\nEnabled=0\r\n"
-                          : mode == L"keeproomoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n"
+                          : mode == L"optionsoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n[Display]\r\nRadarItemColors=0\r\n"
                                                    : "[Log]\r\nCrashLog=1\r\n";
         std::ofstream(std::filesystem::path(iniPath), std::ios::binary | std::ios::trunc) << ini;
     }
@@ -188,6 +189,8 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& call : PeerTimeoutCalls())
             Check(CallTargets(base + call.rva, call.rva, call.target), "Enabled=0 leaves the room-leave check alone");
         for (const auto& hook : HitAuthorityHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves the hit sites alone");
+        Check(CallTargets(base + RadarItemDotsCall().rva, RadarItemDotsCall().rva, RadarItemDotsCall().target),
+              "Enabled=0 leaves the radar alone");
         Check(Contains(log, "Enabled=0"), "Enabled=0 is logged");
         FreeLibrary(plugin);  // what EDFModLoader does with a plugin that refuses
         Check(GetModuleHandleW(dll.c_str()) == nullptr, "the refused plugin is unloaded completely");
@@ -199,18 +202,23 @@ int wmain(int argc, wchar_t** argv) {
                   info.version.patch == EDF6COOP_VERSION_PATCH && info.version.build == 0,
               "PluginInfo carries the project version");
         for (const auto& hook : guard) Check(HookedInto(base, hook, plugin), hook.name);
-        const bool keepRoom = mode != L"keeproomoff";
+        // optionsoff turns off the patches a setting can turn off.
+        const bool keepRoom = mode != L"optionsoff";
         for (const auto& hook : PeerTimeoutHooks())
             Check(keepRoom ? HookedInto(base, hook, plugin) : SiteUntouched(base, hook), hook.name);
         for (const auto& call : PeerTimeoutCalls())
             Check(keepRoom ? RedirectedInto(base + call.rva, plugin) : CallTargets(base + call.rva, call.rva, call.target),
                   call.name);
         Check(Contains(log, keepRoom ? "KeepRoomOnPeerTimeout=1:" : "KeepRoomOnPeerTimeout=0:"), "KeepRoomOnPeerTimeout is logged");
+        const CallSite radar = RadarItemDotsCall();
+        Check(keepRoom ? RedirectedInto(base + radar.rva, plugin) : CallTargets(base + radar.rva, radar.rva, radar.target),
+              radar.name);
         Check(Contains(log, "Crash log armed"), "the crash log is armed");
         if (mode == L"fresh") {
             const std::string written = ReadIniText(iniPath);
             Check(ReadText(iniPath).rfind("\xFF\xFE", 0) == 0, "the INI is written as UTF-16LE with a BOM");
             Check(Contains(written, "[DirectNet]") && Contains(written, "[Resilience]") && Contains(written, "[Netcode]") &&
+                      Contains(written, "[Display]") &&
                       Contains(written, "[Log]") && Contains(written, "CrashDump=0\r\n"),
                   "a missing INI is written with every section, crash dumps off");
         }

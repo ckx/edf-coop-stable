@@ -123,6 +123,12 @@ const IniEntry kIniEntries[] = {
      {"房主拒绝联机协议版本不同的玩家（避免规则不一致导致不同步）。1 开 / 0 关",
       "ホストはネットコードのバージョンが違うプレイヤーを入れない（ルールの食い違いによる同期ズレを防ぐ）。1 オン / 0 オフ",
       "As host, refuse players whose netcode protocol differs (different rules would desync). 1 on / 0 off"}},
+    {"[Display]", {}},
+    {"RadarItemColors=1",
+     {"雷达上的道具按种类着色：护甲红、回复白、武器绿（原版全是绿色）。只影响自己的画面。1 开 / 0 原版",
+      "レーダー上のアイテムを種類で色分け：アーマー赤、回復白、武器緑（元のゲームは全部緑）。自分の画面だけ。1 オン / 0 元の動作",
+      "Color pickups on the radar by type: armor red, health white, weapons green (the original game shows all of them\n"
+      "  green). Only your own screen. 1 on / 0 original"}},
     {"[Log]", {}},
     {"CrashLog=1",
      {"崩溃时把地址和调用栈写进 EDF6Coop.log",

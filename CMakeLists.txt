@@ -45,7 +45,7 @@ target_link_libraries(TransportPart PUBLIC TransportCore)
 
 # The game part: patches to EDF.dll, the netcode version gate, player sync, hit authority, the log.
 set(GAME_CORE log code midhook patches identity crashlog coop peertimeout weaponguard lobbytexts netfeature hitauth
-    hitauthgame netplayer netplayer_game)
+    hitauthgame netplayer netplayer_game radar)
 list(TRANSFORM GAME_CORE PREPEND "game/")
 list(TRANSFORM GAME_CORE APPEND ".cpp")
 add_library(GameCore STATIC ${GAME_CORE})
@@ -124,7 +124,7 @@ add_executable(PluginLoadTests tests/game/load_test.cpp)
 target_include_directories(PluginLoadTests PRIVATE ${MODLOADER_INCLUDE})
 target_link_libraries(PluginLoadTests PRIVATE GameCore)
 add_dependencies(PluginLoadTests EDF6Coop)
-foreach(mode on off fresh keeproomoff replaced)
+foreach(mode on off fresh optionsoff replaced)
     game_test(PluginLoad_${mode} PluginLoadTests "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>" "${CMAKE_BINARY_DIR}/loadtest" ${mode})
 endforeach()
 
