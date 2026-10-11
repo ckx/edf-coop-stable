@@ -61,10 +61,6 @@ $newestSource = Get-ChildItem (Join-Path $root 'src'), (Join-Path $root 'game'),
 if ((Get-Item -LiteralPath $sources['Mods/Plugins/EDF6Coop.dll']).LastWriteTime -lt $newestSource.LastWriteTime) {
     throw "EDF6Coop.dll is older than $($newestSource.FullName); run build.ps1 first"
 }
-foreach ($readme in 'README_EDF6Coop.txt', 'README_EDF6Coop_zh.txt', 'README_EDF6Coop_ja.txt') {
-    $first = Get-Content -LiteralPath $sources[$readme] -TotalCount 1 -Encoding UTF8
-    if ($first -notmatch "EDF6Coop $([regex]::Escape($version))\b") { throw "dist/$readme does not say EDF6Coop $version on its first line" }
-}
 
 # Every deletion target stays below release/.
 $releaseFull = [IO.Path]::GetFullPath($release).TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar

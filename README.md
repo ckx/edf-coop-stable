@@ -55,7 +55,7 @@ The zip has README_EDF6Coop.txt (English), README_EDF6Coop_zh.txt (中文) and R
 
 Upgrade: install the newer release the same way. Your settings are kept. There is no automatic update.
 
-Uninstall: double-click `UNINSTALL.bat` (on Linux, `bash install.sh --uninstall`). It removes the plugin, settings, log, leftovers of older versions, and the UPnP mapping the plugin made on your router (only one that points to this PC and is named `EDF6DirectNet`). EDFModLoader and other mods stay, including a loader the installer upgraded and its backup `winmm.dll.bak-official`. If you added the firewall rule, run `UNINSTALL.bat` as administrator to remove it too; without administrator rights it shows the command.
+Uninstall: double-click `UNINSTALL.bat` (on Linux, `bash install.sh --uninstall`). It removes the plugin, settings, log, leftovers of older versions, and the UPnP mapping the plugin made on your router (only one that points to this PC and is named `EDF6DirectNet`). EDFModLoader and other mods stay, including a loader the installer upgraded and its backup `winmm.dll.bak-official`. On Linux the UPnP mapping stays until the next game start that does not host, or until you delete the entry named `EDF6DirectNet` on the router. If you added the firewall rule, run `UNINSTALL.bat` as administrator to remove it too; without administrator rights it shows the command.
 
 ## Host: the direct link (optional)
 
@@ -200,7 +200,7 @@ The Python tools run from a virtual environment `build.sh` makes in `~/.local/sh
 
 Release packages are built on a machine with the game, so every test against the game's code runs. GitHub Actions runs the other tests (`.github/workflows/ci.yml`).
 
-1. Bump the version: `project(EDF6Coop VERSION x.y.z)` in `CMakeLists.txt` and the first line of the three bundled readmes `dist/README_EDF6Coop*.txt`.
+1. Bump the version: `project(EDF6Coop VERSION x.y.z)` in `CMakeLists.txt`.
 2. Write the release notes `release-notes/<version>.md` (the body of the Release page and `RELEASE_NOTES_EDF6Coop.md` in the package).
 3. Commit to `main`, tag it and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 4. On the machine with the game, at that commit: `powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`. It runs `build.ps1 -Test -RequireGame` and `package.ps1`, then creates a **draft** Release with `EDF6Coop-<version>.zip` and its `.sha256` (without `-Upload` it only stages them in `release\upload-<version>\`).

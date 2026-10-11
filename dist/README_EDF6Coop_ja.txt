@@ -1,4 +1,4 @@
-EDF6Coop 2.5.0 - 地球防衛軍6 のオンライン協力プレイを安定させるプラグイン
+EDF6Coop - 地球防衛軍6 のオンライン協力プレイを安定させるプラグイン
 プロジェクトページ：https://github.com/hajisensai/edf-coop-stable
 English: README_EDF6Coop.txt / 中文: README_EDF6Coop_zh.txt
 問題があれば Issue を作り、Mods\Plugins\EDF6Coop.log を添付してください。
@@ -31,7 +31,8 @@ EDF6DirectNet / EDF6MultiSlot からの更新：Mods\Plugins にあるそれら�
 更新：新しい版を同じ方法で入れてください。設定は残ります。
 削除：UNINSTALL.bat をダブルクリックします（管理者として実行するとファイアウォールの規則も消します）。
 EDF6Coop のファイル・設定・ログ・UPnP の設定を消します。EDFModLoader とほかの MOD はそのままです。Linux では
-"bash install.sh --uninstall" を実行してください。
+"bash install.sh --uninstall" を実行してください。UPnP の設定は残ります。ホストしない次のゲーム起動で
+消えるか、ルーターで EDF6DirectNet という項目を消してください。
 
 ■ 直接接続（任意、ホストだけ）
 あなたの部屋に入った人があなたへ直接つなぎます。INI のコメント（Windows の表示言語に合わせて中国語・日本語・

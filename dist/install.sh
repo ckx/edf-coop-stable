@@ -47,8 +47,11 @@ files=(Mods/Plugins/EDF6Coop.dll README_EDF6Coop.txt README_EDF6Coop_zh.txt READ
 if [ $uninstall = 1 ]; then
     # The loader's license stays with the loader.
     for f in "${files[@]}"; do [ "$f" = EDFModLoader_LICENSE.txt ] || rm -f "$game/$f"; done
+    # As UNINSTALL.bat: settings, logs, the crash dump, the UPnP records and what the auto-updater of 2.5.0 and older
+    # left next to the DLL.
     rm -f "$plugins"/EDF6Coop.ini "$plugins"/EDF6Coop.log "$plugins"/EDF6Coop.log.1 "$plugins"/EDF6Coop.log.queue \
-          "$plugins"/EDF6Coop-crash.dmp "$plugins"/EDF6Coop.upnp
+          "$plugins"/EDF6Coop-crash.dmp "$plugins"/EDF6Coop.upnp "$plugins"/EDF6DirectNet.upnp \
+          "$plugins"/EDF6Coop.dll.{old,trial,bad,rolledback} "$plugins"/EDF6Coop.dll.new*
     echo "EDF6Coop removed. EDFModLoader and other mods were left untouched."
     echo "A UPnP mapping the plugin made stays on the router until a game start that does not host; you can also"
     echo "delete the entry named EDF6DirectNet in the router's port-forwarding page."

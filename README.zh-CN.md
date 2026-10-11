@@ -55,7 +55,7 @@ zip 里有 README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 
 升级：用同样的方法安装新版本，设置会保留。没有自动更新。
 
-卸载：双击 `UNINSTALL.bat`（Linux 上运行 `bash install.sh --uninstall`）。它会删除插件、设置、日志、旧版本的残留，以及插件在路由器上建立的 UPnP 映射（只删指向本机、名为 `EDF6DirectNet` 的那条）。EDFModLoader 和其他 MOD 不会动，包括安装程序升级过的加载器及其备份 `winmm.dll.bak-official`。如果添加过防火墙规则，用管理员身份运行 `UNINSTALL.bat` 会一并删除；没有管理员权限时它会显示删除命令。
+卸载：双击 `UNINSTALL.bat`（Linux 上运行 `bash install.sh --uninstall`）。它会删除插件、设置、日志、旧版本的残留，以及插件在路由器上建立的 UPnP 映射（只删指向本机、名为 `EDF6DirectNet` 的那条）。EDFModLoader 和其他 MOD 不会动，包括安装程序升级过的加载器及其备份 `winmm.dll.bak-official`。Linux 上 UPnP 映射会保留，直到下次不当房主启动游戏，或者你在路由器上删掉名为 `EDF6DirectNet` 的条目。如果添加过防火墙规则，用管理员身份运行 `UNINSTALL.bat` 会一并删除；没有管理员权限时它会显示删除命令。
 
 ## 房主：直连（可选）
 
@@ -200,7 +200,7 @@ Python 工具在 `build.sh` 于 `~/.local/share/edf6coop-venv`（可用 `EDF6COO
 
 发布包在装有游戏的机器上构建，这样针对游戏代码的测试都会运行。GitHub Actions 运行其余测试（`.github/workflows/ci.yml`）。
 
-1. 改版本号：`CMakeLists.txt` 里的 `project(EDF6Coop VERSION x.y.z)`，以及三份附带说明 `dist/README_EDF6Coop*.txt` 的第一行。
+1. 改版本号：`CMakeLists.txt` 里的 `project(EDF6Coop VERSION x.y.z)`。
 2. 写发布说明 `release-notes/<版本>.md`（Release 页面的正文，也是安装包里的 `RELEASE_NOTES_EDF6Coop.md`）。
 3. 提交到 `main`，打标签并推送标签：`git tag vX.Y.Z && git push origin vX.Y.Z`。
 4. 在装有游戏的机器上、在那个提交处运行：`powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`。它运行 `build.ps1 -Test -RequireGame` 和 `package.ps1`，然后创建一个**草稿** Release，附上 `EDF6Coop-<版本>.zip` 及其 `.sha256`（不带 `-Upload` 时只把它们放到 `release\upload-<版本>\`）。

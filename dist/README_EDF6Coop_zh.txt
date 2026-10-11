@@ -1,4 +1,4 @@
-EDF6Coop 2.5.0 - 地球防卫军6 联机稳定插件
+EDF6Coop - 地球防卫军6 联机稳定插件
 项目主页：https://github.com/hajisensai/edf-coop-stable
 English: README_EDF6Coop.txt / 日本語: README_EDF6Coop_ja.txt
 遇到问题请提 Issue，并附上 Mods\Plugins\EDF6Coop.log。
@@ -28,7 +28,8 @@ winmm.dll.bak-official。
 会在第一次启动时删除；其他 MOD 的同名文件不动。
 升级：用同样的方法安装新版本，设置会保留。
 卸载：双击 UNINSTALL.bat（用管理员身份运行可同时删除防火墙规则）。它会删除 EDF6Coop 的文件、设置、日志和
-它建立的 UPnP 映射；EDFModLoader 和其他 MOD 不会动。Linux 上运行 "bash install.sh --uninstall"。
+它建立的 UPnP 映射；EDFModLoader 和其他 MOD 不会动。Linux 上运行 "bash install.sh --uninstall"；
+UPnP 映射会保留，下次不当房主启动游戏时删除，也可以在路由器上删掉名为 EDF6DirectNet 的条目。
 
 [直连（可选，只需房主设置）]
 进你房间的玩家会直接连到你。INI 里的注释（按 Windows 显示语言写成中文 / 日文 / 英文）解释了每一项设置。

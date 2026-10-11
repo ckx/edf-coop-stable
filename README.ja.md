@@ -55,7 +55,7 @@ ZIP には README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 
 更新：新しい版を同じ方法で入れてください。設定は残ります。自動更新はありません。
 
-削除：`UNINSTALL.bat` をダブルクリックします（Linux では `bash install.sh --uninstall`）。プラグイン、設定、ログ、古い版の残り、プラグインがルーターに作った UPnP の設定（この PC 向けで名前が `EDF6DirectNet` のものだけ）を消します。EDFModLoader とほかの MOD はそのままで、インストーラーが更新したローダーとそのバックアップ `winmm.dll.bak-official` も残ります。ファイアウォールの規則を追加していた場合は、`UNINSTALL.bat` を管理者として実行すると一緒に消します。管理者権限がなければ消すためのコマンドを表示します。
+削除：`UNINSTALL.bat` をダブルクリックします（Linux では `bash install.sh --uninstall`）。プラグイン、設定、ログ、古い版の残り、プラグインがルーターに作った UPnP の設定（この PC 向けで名前が `EDF6DirectNet` のものだけ）を消します。EDFModLoader とほかの MOD はそのままで、インストーラーが更新したローダーとそのバックアップ `winmm.dll.bak-official` も残ります。Linux では UPnP の設定が残ります。ホストしない次のゲーム起動で消えるか、ルーターで `EDF6DirectNet` という項目を消してください。ファイアウォールの規則を追加していた場合は、`UNINSTALL.bat` を管理者として実行すると一緒に消します。管理者権限がなければ消すためのコマンドを表示します。
 
 ## ホスト：直接接続（任意）
 
@@ -200,7 +200,7 @@ Python のツールは `build.sh` が `~/.local/share/edf6coop-venv`（`EDF6COOP
 
 リリース用パッケージは、ゲームのコードに対するテストがすべて動くよう、ゲームのあるマシンで作ります。そのほかのテストは GitHub Actions が動かします（`.github/workflows/ci.yml`）。
 
-1. 版を上げます：`CMakeLists.txt` の `project(EDF6Coop VERSION x.y.z)` と、同梱の説明書 `dist/README_EDF6Coop*.txt` 3つの1行目。
+1. 版を上げます：`CMakeLists.txt` の `project(EDF6Coop VERSION x.y.z)`。
 2. リリースノート `release-notes/<バージョン>.md` を書きます（Release ページの本文、パッケージの `RELEASE_NOTES_EDF6Coop.md`）。
 3. `main` にコミットし、タグを付けて push します：`git tag vX.Y.Z && git push origin vX.Y.Z`。
 4. ゲームのあるマシンでそのコミットにして：`powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`。`build.ps1 -Test -RequireGame` と `package.ps1` を実行し、`EDF6Coop-<バージョン>.zip` とその `.sha256` を付けた**下書き**の Release を作ります（`-Upload` なしなら `release\upload-<バージョン>\` に置くだけ）。

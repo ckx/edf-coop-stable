@@ -1,4 +1,4 @@
-EDF6Coop 2.5.0 - steadier online co-op for EARTH DEFENSE FORCE 6
+EDF6Coop - steadier online co-op for EARTH DEFENSE FORCE 6
 Project page: https://github.com/hajisensai/edf-coop-stable
 中文: README_EDF6Coop_zh.txt / 日本語: README_EDF6Coop_ja.txt
 If something goes wrong, open an Issue and attach Mods\Plugins\EDF6Coop.log.
@@ -32,7 +32,8 @@ same name stays.
 Upgrade: install the newer release the same way; your settings are kept.
 Uninstall: double-click UNINSTALL.bat (as administrator to remove the firewall rule too). It removes
 EDF6Coop's files, settings, log and its UPnP mapping. EDFModLoader and other mods stay. On Linux run
-"bash install.sh --uninstall".
+"bash install.sh --uninstall"; it leaves the UPnP mapping, which goes at the next game start that does not
+host, or delete the entry named EDF6DirectNet on the router.
 
 [Direct link (optional, host only)]
 Players joining your room connect straight to you. The ini comments (Chinese / Japanese / English, after
