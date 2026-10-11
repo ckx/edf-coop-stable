@@ -134,6 +134,11 @@ foreach(mode on off fresh keeproomoff replaced)
     game_test(PluginLoad_${mode} PluginLoadTests "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>" "${CMAKE_BINARY_DIR}/loadtest" ${mode})
 endforeach()
 
+if(EDF6_SHIELD_TRACE)
+    game_test(PluginLoad_diagnostics PluginLoadTests "${EDF_DLL}" "$<TARGET_FILE:EDF6Coop>"
+        "${CMAKE_BINARY_DIR}/loadtest" diagnostics)
+endif()
+
 # Rooms played by several processes, each running the real EDF.dll and the real EDF6Coop.dll with a fake EOS
 # between them (tests/gamenet). The fake is named as Epic's SDK and sits next to GameMachine.exe, where the loader
 # looks first. Skipped (77) without the game.

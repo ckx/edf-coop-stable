@@ -149,6 +149,8 @@ PlayerTracks<PlayerDiagnostic> diagnostics;
 unsigned diagnosticLines = 0;
 
 void TracePlayerFrame(void* soldier, double now, bool active) {
+    // Remote soldiers include NPCs; admitting them would evict every player before its window ends.
+    if (!IsPlayer(soldier)) return;
     auto& d = *diagnostics.Find(soldier, now, true);
     if (!d.start) d.start = now;
     if (now - d.start >= 5000.0 && diagnosticLines < 3600) {
@@ -222,14 +224,16 @@ void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
         const bool accepted = AcceptSample(*track, sample, now, params);
         counters.received += accepted ? 1 : 0;
 #ifdef EDF6_SHIELD_TRACE
-        auto& d = *diagnostics.Find(soldier, now, true);
-        if (accepted) {
-            ++d.accepted;
-            d.maxArrivalGap = (std::max)(d.maxArrivalGap, arrivalGap);
-            d.maxSenderGap = (std::max)(d.maxSenderGap, senderGap);
-            d.maxSpeed = (std::max)(d.maxSpeed, Length(sample.velocity));
-        } else {
-            ++d.rejected;
+        if (IsPlayer(soldier)) {
+            auto& d = *diagnostics.Find(soldier, now, true);
+            if (accepted) {
+                ++d.accepted;
+                d.maxArrivalGap = (std::max)(d.maxArrivalGap, arrivalGap);
+                d.maxSenderGap = (std::max)(d.maxSenderGap, senderGap);
+                d.maxSpeed = (std::max)(d.maxSpeed, Length(sample.velocity));
+            } else {
+                ++d.rejected;
+            }
         }
 #endif
     }
@@ -258,9 +262,10 @@ void UpdateHook(void* soldier) {
     const bool drive = track && TrackFresh(*track, now, params);
 #ifdef EDF6_SHIELD_TRACE
     if (track && track->have) {
-        auto& diagnostic = *diagnostics.Find(soldier, now, true);
-        diagnostic.maxAge = (std::max)(diagnostic.maxAge, SampleAgeMs(*track, now));
-        diagnostic.fresh += drive ? 1 : 0;
+        if (auto* diagnostic = diagnostics.Find(soldier, now, false)) {
+            diagnostic->maxAge = (std::max)(diagnostic->maxAge, SampleAgeMs(*track, now));
+            diagnostic->fresh += drive ? 1 : 0;
+        }
     }
 #endif
     if (track && !drive) ResetSteps(*track);
@@ -289,11 +294,12 @@ void UpdateHook(void* soldier) {
     ++counters.driven;
     counters.warps += step.warp ? 1 : 0;
 #ifdef EDF6_SHIELD_TRACE
-    auto& d = *diagnostics.Find(soldier, now, true);
-    ++d.driven;
-    d.warps += step.warp ? 1 : 0;
-    d.maxError = (std::max)(d.maxError, Length(step.target - current));
-    d.maxCorrection = (std::max)(d.maxCorrection, Length(step.add));
+    if (auto* d = diagnostics.Find(soldier, now, false)) {
+        ++d->driven;
+        d->warps += step.warp ? 1 : 0;
+        d->maxError = (std::max)(d->maxError, Length(step.target - current));
+        d->maxCorrection = (std::max)(d->maxCorrection, Length(step.add));
+    }
 #endif
     ReleaseSRWLockExclusive(&lock);
     if (step.warp) {
@@ -393,7 +399,7 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
         }
     }
 #ifdef EDF6_SHIELD_TRACE
-    Log("PLAYER diagnostic build 3: five-second per-object windows; limited to 3600 lines per process");
+    Log("PLAYER diagnostic build 4: five-second per-object windows; limited to 3600 lines per process");
 #endif
     Log("PLAYER sync: hooks installed (%zu vtable slots%s). Players send position, velocity and time every %d sync "
         "frame(s); remote players with that data are extrapolated (up to %.0f ms) and converge in %.0f ms (warp above "

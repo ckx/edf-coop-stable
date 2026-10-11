@@ -18,10 +18,10 @@ $root = $PSScriptRoot
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 if ($cmake -notmatch 'project\(EDF6Coop VERSION (\d+\.\d+\.\d+)[\s)]') { throw 'project(EDF6Coop VERSION x.y.z) not found in CMakeLists.txt' }
 $version = $Matches[1]
-$notes = Join-Path $root "release-notes/$version-shield-diag3.md"
+$notes = Join-Path $root "release-notes/$version-shield-diag4.md"
 
 $built = Join-Path $root 'out'
-$name = "EDF6Coop-$version-shield-diag3-full"
+$name = "EDF6Coop-$version-shield-diag4-full"
 $release = Join-Path $root 'release'
 $out = Join-Path $release $name
 $zip = Join-Path $release "$name.zip"
@@ -56,8 +56,8 @@ if ($loaderHash -ne 'BE94E1FAC0CA12C41B6924E2EB168851641C999CE951D2A5A9FAEA5161B
 # The DLL must be this version.
 $pluginText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($sources['Mods/Plugins/EDF6Coop.dll']))
 if ($pluginText.IndexOf("EDF6COOP_VERSION=$version`0") -lt 0) { throw "EDF6Coop.dll is not version $version; rebuild with build.ps1" }
-if ($pluginText.IndexOf('SHIELD diagnostic build 3:') -lt 0 -or $pluginText.IndexOf('PLAYER diagnostic build 3:') -lt 0) {
-    throw 'The DLL is not diagnostic 3; rebuild this source tag with EDF6_SHIELD_TRACE enabled'
+if ($pluginText.IndexOf('SHIELD diagnostic build 4:') -lt 0 -or $pluginText.IndexOf('PLAYER diagnostic build 4:') -lt 0) {
+    throw 'The DLL is not diagnostic 4; rebuild this source tag with EDF6_SHIELD_TRACE enabled'
 }
 # A DLL older than its sources would ship something else than the tag says.
 $newestSource = Get-ChildItem (Join-Path $root 'src'), (Join-Path $root 'game'), (Join-Path $root 'CMakeLists.txt') -File |

@@ -1,4 +1,4 @@
-EDF6Coop shield and player jitter diagnostic 3
+EDF6Coop shield and player jitter diagnostic 4
 
 Windows prerequisites
 Visual Studio with Desktop development with C++, including CMake and Ninja.
@@ -19,7 +19,7 @@ Both builds write out/EDF6Coop.dll and the fixed loader.
 Package after building:
   powershell -ExecutionPolicy Bypass -File package.ps1
 On Linux install PowerShell and use pwsh -File package.ps1.
-Output: release/EDF6Coop-3.0.1-shield-diag3-full.zip and its SHA-256 file.
+Output: release/EDF6Coop-3.0.1-shield-diag4-full.zip and its SHA-256 file.
 
 Tests
 Set EDF6_GAME_DIR to the folder containing EDF.dll before building.

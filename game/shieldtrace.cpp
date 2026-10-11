@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 
 #include "code.h"
@@ -71,7 +72,7 @@ struct Child {
     float frame = 0, position[3]{}, umbraCenter[3]{}, umbraRadius = 0, emitterTime = 0, particleCenter[3]{},
           particleExtent[3]{};
     std::uint32_t emitterDuration = 0, matchedModules = 0;
-    bool readable = false;
+    bool readable = false, particlesKnown = false;
 };
 
 // Reads one EfsObject. Layout from 0x2ED6E0 (constructor), 0x2EE1E0 (OnSyncRender: particle bounds to Umbra through
@@ -98,6 +99,7 @@ void ReadChild(Child& child) {
     child.passMask = Field<std::uint32_t>(child.effect, 0x128);
     const auto head = Field<std::uintptr_t>(child.effect, 0x30);
     bool first = true;
+    unsigned buffers = 0;
     auto node = Field<std::uintptr_t>(head, 0);
     for (int e = 0; node && node != head && e < 8; ++e, node = Field<std::uintptr_t>(node, 0)) {
         const auto emitter = Field<std::uintptr_t>(node, 0x10);
@@ -121,6 +123,7 @@ void ReadChild(Child& child) {
             const auto shared = Field<std::uintptr_t>(Field<std::uintptr_t>(begin, 0x48), slot * 0x10);
             if (!shared) continue;
             const auto live = Field<std::uint64_t>(shared, 0x90);
+            ++buffers;
             child.particles += live;
             if (first && live) {
                 first = false;
@@ -131,6 +134,7 @@ void ReadChild(Child& child) {
             }
         }
     }
+    child.particlesKnown = buffers > 0;
 }
 
 bool Sampled(std::uint32_t age) {
@@ -187,15 +191,17 @@ void TraceUpdate(void* object, void* context) {
             readable ? 1 : 0);
         for (std::uint64_t i = 0; i < count && i < 8; ++i) {
             const auto& c = children[i];
+            char particles[32] = "unknown";
+            if (c.particlesKnown) std::snprintf(particles, sizeof(particles), "%llu", static_cast<unsigned long long>(c.particles));
             Log("SHIELD child=%llu object=%p vtable=%p refs=%d readable=%d scene=%08X render=%08X effect=%p "
                 "emitters=%llu pending=%llu frame=%.2f remaining=%d pass=%X draws=%u instances=%llu "
-                "matchedModules=%u particles=%llu emitterTime=%.2f/%u position=%.2f,%.2f,%.2f umbra=%.2f,%.2f,%.2f r=%.2f "
+                "matchedModules=%u particles=%s emitterTime=%.2f/%u position=%.2f,%.2f,%.2f umbra=%.2f,%.2f,%.2f r=%.2f "
                 "particleBox=%.2f,%.2f,%.2f+-%.2f,%.2f,%.2f",
                 static_cast<unsigned long long>(i), reinterpret_cast<void*>(c.object),
                 reinterpret_cast<void*>(c.vtable), c.strongRefs, c.readable ? 1 : 0, c.sceneFlags, c.renderFlags,
                 reinterpret_cast<void*>(c.effect), static_cast<unsigned long long>(c.emitters),
                 static_cast<unsigned long long>(c.pending), c.frame, c.remaining, c.passMask, c.draws,
-                static_cast<unsigned long long>(c.instances), c.matchedModules, static_cast<unsigned long long>(c.particles),
+                static_cast<unsigned long long>(c.instances), c.matchedModules, particles,
                 c.emitterTime, c.emitterDuration, c.position[0], c.position[1], c.position[2], c.umbraCenter[0],
                 c.umbraCenter[1], c.umbraCenter[2], c.umbraRadius, c.particleCenter[0], c.particleCenter[1],
                 c.particleCenter[2], c.particleExtent[0], c.particleExtent[1], c.particleExtent[2]);
@@ -220,7 +226,7 @@ bool InstallShieldTrace(unsigned char* base) {
     if (!WriteCode(base + kDrawSlot, reinterpret_cast<const unsigned char*>(&drawHook), sizeof(drawHook)) ||
         !WriteCode(base + kUpdateSlot, reinterpret_cast<const unsigned char*>(&hook), sizeof(hook)))
         return false;
-    Log("SHIELD diagnostic build 3: native behavior unchanged; visibility snapshots limited to 512 per process");
+    Log("SHIELD diagnostic build 4: native behavior unchanged; visibility snapshots limited to 512 per process");
     return true;
 }
 

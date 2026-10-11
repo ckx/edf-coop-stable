@@ -5,6 +5,7 @@
 #include <windows.h>
 #include "late_fault.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -20,6 +21,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 
+#include "../../game/code.h"
 #include "../../game/hitauthgame.h"
 #include "../../game/midhook.h"
 #include "../../game/patches.h"
@@ -124,6 +126,45 @@ bool SiteUntouched(const unsigned char* base, const MidSite& site) {
     return std::memcmp(base + site.rva, site.original.data(), site.original.size()) == 0;
 }
 
+// Exercise the installed plugin's update hook and EDF.dll's real IsPlayer predicate.
+// Native movement alone is stubbed: this fixture has no initialized physics world.
+void TestPlayerDiagnostics(unsigned char* base, HMODULE plugin, const std::wstring& logPath) {
+    using Update = void (*)(void*);
+    Update update = nullptr;
+    std::memcpy(&update, base + 0x17D2690, sizeof(update));
+    Check(InModule(reinterpret_cast<std::uintptr_t>(update), plugin), "diagnostic fixture calls the installed hook");
+    if (!InModule(reinterpret_cast<std::uintptr_t>(update), plugin)) return;
+    const unsigned char saved = base[0x596130], ret = 0xC3;
+    const bool stubbed = WriteCode(base + 0x596130, &ret, 1);
+    Check(stubbed, "native movement stub installed");
+    if (!stubbed) return;
+    std::array<std::array<unsigned char, 0x2000>, 11> objects{};
+    const auto vtable = reinterpret_cast<std::uintptr_t>(base + 0x17D24D8);
+    for (std::size_t i = 0; i < objects.size(); ++i) {
+        auto& object = objects[i];
+        std::memcpy(object.data(), &vtable, sizeof(vtable));
+        object[0x128] = 1;  // remote soldier, both players and NPCs
+        if (i < 3) {
+            const auto control = reinterpret_cast<std::uintptr_t>(object.data());
+            std::memcpy(object.data() + 0x340, &control, sizeof(control));
+        }
+    }
+    const ULONGLONG start = GetTickCount64();
+    do {
+        for (auto& object : objects) update(object.data());
+        Sleep(16);
+    } while (GetTickCount64() - start < 5500);
+    Check(WriteCode(base + 0x596130, &saved, 1), "native movement restored");
+    Sleep(300);  // the plugin's asynchronous log writer drains every 200 ms
+    const std::string text = ReadText(logPath);
+    for (std::size_t i = 0; i < objects.size(); ++i) {
+        char prefix[100]{};
+        std::snprintf(prefix, sizeof(prefix), "PLAYER diagnostic object=%p ", static_cast<void*>(objects[i].data()));
+        const bool present = Contains(text, prefix);
+        Check(i < 3 ? present : !present, i < 3 ? "player summary survives repeated NPC updates" : "NPC has no player summary");
+    }
+}
+
 void ThrowAndCatch() {
     try {
         throw std::runtime_error("thrown and caught outside EDF.dll");
@@ -219,6 +260,7 @@ int wmain(int argc, wchar_t** argv) {
                       GetFileAttributesW((replaced + L".disabled").c_str()) != INVALID_FILE_ATTRIBUTES,
                   "a replaced plugin is renamed .disabled");
         }
+        if (mode == L"diagnostics") TestPlayerDiagnostics(const_cast<unsigned char*>(base), plugin, logPath);
         if (mode == L"on") {
             ThrowAndCatch();
             LateFault(0x10);
