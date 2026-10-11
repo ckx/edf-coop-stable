@@ -12,7 +12,8 @@ namespace multislot {
 // function (`mov [rsp+0x10], rbx`, displaced and run after the handler):
 //
 //   54AA50  GameObjectBase slot 10, the message pre-filter every class derived from GameObjectBase shares (rcx the
-//           object, rdx u32* message, r8 void** payload). For a damage message it decides (DecideHit): a hit that
+//           object, rdx u32* message, r8 void** payload). Enemies keep native damage with its collision parts.
+//           For a damage message it decides (DecideHit): a hit that
 //           is not ours to decide, or that goes to its owner as an event, is rewritten to 0x4000004 - the value the
 //           game itself gives damage it drops (774260) - so the class's handler and slot 11 leave it alone.
 //   54D770  GameObjectBase NetworkObject slot 17, the receive of the messages one machine sends an object's copies
@@ -42,10 +43,12 @@ HitMessage PeekHitEventMessage(void* stream, DamageEvent& out);
 
 // What the hooks did since load (the 30-second summary line says the same).
 struct HitCounters {
+    // dealt counts completed replays; healthReduced/noHealthChange report their observed HP result.
     std::uint64_t forwarded = 0, forwardFailed = 0, dropped = 0, received = 0, dealt = 0, malformed = 0;
     std::uint64_t ownerRule = 0;  // events for a target this machine still deals remote hits on itself (OwnerTakesEvent)
     std::uint64_t refused = 0;  // events the owner refused (not counting the copies that are not the owner)
     std::uint64_t notOwner = 0;
+    std::uint64_t native = 0, healthReduced = 0, noHealthChange = 0;
 };
 HitCounters HitAuthorityCounters();
 

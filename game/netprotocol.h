@@ -10,6 +10,7 @@ namespace multislot {
 //   1: the first gate, transport classes, mesh, fragments, compression.
 //   2: hit events carry their sender, enemy dice carry their sender, fragment ids carry the sender's epoch.
 //   3: this fork: no traffic classes, mesh, compression, world authority or bulk messages; rooms of four.
-constexpr std::int64_t kNetProtocol = 3;
+//   4: preserve native shooter-side enemy damage and collision parts; forward only player/vehicle hits.
+constexpr std::int64_t kNetProtocol = 4;
 
 }  // namespace multislot

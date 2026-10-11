@@ -1,5 +1,20 @@
 # 命中与伤害：原版怎么判、怎么同步，以及 W3 的开枪方判定
 
+## 3.0.1 修正，协议 4
+
+下文的全目标转发方案记录的是 3.0.0。3.0.1 对 slot 34 接受本机攻击者的远端目标保留原版伤害路径，
+直接使用开枪者的完整 GDI 并广播原版 HP 差。玩家和载具仍将事件发给目标所属机器。载具驾驶员被判为
+本机攻击者时，GDI 的归属覆盖也传给原版伤害检查，避免再次按载具的注册拥有者拒绝伤害。
+
+原因已从游戏代码确认：事件没有保存 GDI+0x70 的碰撞部位容器。GeneratorPoll 的 slot 16 `0x401200`
+读取 GDI+0x78 的数组和 +0x88 的数量，空数组在 `0x401247` 跳到拒绝路径 `0x4013DB`。
+Jormungand 部件的 slot 17 `0x393380` 直接读取第一项的部件编号。因此旧日志的 `dealt` 仅表示通过
+插件校验并调用重放，不能证明游戏扣了血。新日志分别统计完成重放、扣血和未扣血；未扣血也可能符合
+装甲、无敌或友伤规则。协议升级防止新旧伤害规则混用。
+
+`TestNativeEnemyHits` 使用真实 slot 34 验证直击和爆炸保留敌人的原始 GDI，而玩家和载具仍各转发一次；
+同时执行 GeneratorPoll 的真实空部位拒绝路径。实战 Plasma Cannon 的问题还需双机验证，日志没有武器名。
+
 EDF.dll TimeDateStamp `0x678CCB46`，地址都是 RVA。纯静态分析（capstone，all-forces 的 `tools/edfre.py`），没有起游戏，没有两机实测。
 置信度：**H** = 指令里直接读到；**M** = 有代码证据的推断；**L** = 推测。
 W3 = 开枪方判定（`game/hitauth*`），W1 = 联机协议版本门（`game/netfeature*`）。相关：all-forces `docs/bullet-pass-re.md`、`decoy-blast-re.md`、`swarm-team-re.md`、`online-re.md` §10。

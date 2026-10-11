@@ -10,6 +10,10 @@ of sync or ending when a connection drops:
 - a guest stays in the room when the P2P handshake with a later joiner never completes;
 - an optional direct link to the host when Epic's relay is slow or NAT traversal fails;
 - with everyone on this version: the shooter decides hits, and player positions carry velocity.
+Enemy/object hits keep the game's complete collision data on the shooter's machine, including armor and weak
+points. Hits on other players/vehicles go to their owners. NetHit logs separate replayed events from HP reductions;
+armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.1 uses netcode protocol 4; update
+everyone in the room together to use these fixes.
 It plays the game's own rooms of up to four players. The bigger rooms (Player MOD), room screen, weapon pages,
 room weapon files, armor copy and automatic updates of 2.5.0 and earlier are gone; whoever needs them stays
 on 2.5.0. Everyone in a room should run the same version: a host refuses a player whose netcode protocol

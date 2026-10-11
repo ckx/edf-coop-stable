@@ -22,12 +22,11 @@ namespace multislot {
 // were already decided where the shooter is; players and vehicles were decided where the victim is, against the
 // shooter's bullet as it arrived late on the victim's machine: "I hit him, he did not get hit".
 //
-// With this feature every class is decided where the shooter is, and the damage itself is dealt where the target is:
-// the shooter's machine turns a hit on someone else's object into a damage event sent to that object's owner, and
-// drops it locally (the game's own drop: slot 10 rewrites the message to 0x4000004, which no handler takes). The
-// owner checks the event and deals it through the same three virtuals, so the target's own reactions (knockback,
-// stagger, death) run on the machine that owns it and the game's own HP broadcast carries the result to everyone.
-// A copy of someone else's bullet hitting our object is dropped here: its shooter's machine sends the event.
+// Enemies, NPCs and objects keep the shooter's original GDI and the game's HP broadcast. Reconstructing their
+// damage at the owner loses collision parts needed for armor and weak-point checks. For remote players and
+// vehicles, whose slot 34 rejects our shot on this copy, the shooter instead sends a damage event to the owner
+// and drops it locally. The owner checks the event and deals it through the same three virtuals. Remote bullet
+// copies are dropped while the rule is settled: the shooter either deals native damage or sends the event.
 
 // GDI fields (decoy-blast-re.md section 1.2, 76B3A0 for the ones the game itself sends with a kill).
 constexpr std::size_t kGdiBytes = 0x90;
@@ -62,10 +61,11 @@ struct HitInput {
     float damage = 0.0f;
     NetOwner attacker = NetOwner::Unregistered;
     NetOwner target = NetOwner::Unregistered;
+    bool targetAcceptsLocal = false;  // its slot 34 accepts a local attacker on this copy
 };
 enum class HitVerdict : std::uint8_t {
     Vanilla,  // not ours to decide: the game's own rule
-    Deal,     // dealt here (and the game deals it too)
+    Deal,     // dealt here with the original GDI and a local-attacker override
     Drop,     // someone else's shot: its machine decides
     Forward,  // our shot at someone else's object: an event to its owner, dropped here
 };

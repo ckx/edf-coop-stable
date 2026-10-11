@@ -27,6 +27,8 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 
 ## Test design
 
+- During hotfixes and other routine work, skip the transport and log stress tests (`DirectNet` and `LogFileCap`). Reserve them for confirmed fixed release validation. Run the remaining suite with `ctest --test-dir build-mingw -E '^(DirectNet|LogFileCap)$' --output-on-failure --timeout 600 -j4` under the test Wine prefix.
+
 - Before adding a test, name the plausible defect, the production path it exercises and the observable result that would fail. Prefer the smallest existing fixture that reaches that path. Do not copy the implementation into a test helper or mock the behaviour under test.
 - Cover state transitions, stale identities, reconnect and retry, malformed peer input, format boundaries and regressions. Transport and sync tests that exercise loss, reordering, host change and version mismatch are the most valuable tests in the repo.
 - Skip tests that restate constants or defaults, pin source spelling, or check trivial wrappers. Delete such tests when you find them, with any helper they leave unused.

@@ -111,6 +111,9 @@ void TestDecision() {
     Check(DecideHit(in) == HitVerdict::Deal, "our shot at our object is dealt here");
     in.target = NetOwner::Remote;
     Check(DecideHit(in) == HitVerdict::Forward, "our shot at another machine's object goes to its owner");
+    in.targetAcceptsLocal = true;
+    Check(DecideHit(in) == HitVerdict::Deal, "a remote enemy keeps the shooter's original hit data");
+    in.targetAcceptsLocal = false;
     in.attacker = NetOwner::Remote;
     Check(DecideHit(in) == HitVerdict::Drop, "a copy of someone else's shot at another's object is dropped");
     in.target = NetOwner::Local;
@@ -204,6 +207,7 @@ int TimesDealt(bool sForwarding, bool sDropping, bool rForwarding, bool rDroppin
     s.damage = 10.0f;
     s.attacker = NetOwner::Local;
     s.target = NetOwner::Remote;
+    s.targetAcceptsLocal = !ownerDecides;
     switch (DecideHit(s)) {
         case HitVerdict::Forward: dealt += OwnerTakesEvent(rDropping, ownerDecides); break;
         case HitVerdict::Vanilla:
@@ -228,7 +232,7 @@ int TimesDealt(bool sForwarding, bool sDropping, bool rForwarding, bool rDroppin
 void TestSwitchWindow() {
     for (bool od : {true, false}) {
         const char* what = od ? " (a player or vehicle)" : " (an enemy)";
-        // a: the shooter switched on, the owner's gate is still off: it deals the event.
+        // a: the shooter switched on, the owner's gate is still off: native damage or the event still deals once.
         Check(TimesDealt(true, false, false, false, od) == 1, std::string("a: shooter on, owner off: once") + what);
         // b: the shooter is off, the owner on but not settled: the owner keeps the game's rule.
         Check(TimesDealt(false, false, true, false, od) == 1, std::string("b: shooter off, owner on: once") + what);
@@ -688,10 +692,14 @@ void TestPreFilter() {
     };
     std::uint64_t netTable[20]{};
     netTable[0x80 / 8] = reinterpret_cast<std::uint64_t>(&FakeSend);
+    std::uint64_t targetTable[40]{};
+    targetTable[34] = reinterpret_cast<std::uint64_t>(base + 0x6347C0);
     for (const auto& c : cases) {
         SetHitRuleForTest(c.forwarding, c.dropping);
         fakeSendResult = c.sendWorks;
         alignas(16) std::uint8_t object[0x800]{};
+        const void* targetTablePtr = targetTable;
+        std::memcpy(object, &targetTablePtr, 8);
         const void* netTablePtr = netTable;
         std::memcpy(object + 0x120, &netTablePtr, 8);  // its NetworkObject's vtable: the send
         std::memcpy(object + 0x128, &c.targetFlags, 4);
@@ -769,6 +777,8 @@ void TestForwardReferenceOwnership() {
     std::uint64_t netTable[20]{};
     netTable[0x80 / 8] = reinterpret_cast<std::uint64_t>(&FakeSend);
     alignas(16) std::uint8_t target[0x800]{};
+    const void* targetTable = base + 0x17D8B50;
+    std::memcpy(target, &targetTable, sizeof(targetTable));
     const void* table = netTable;
     const std::uint32_t remote = 1;
     std::memcpy(target + 0x120, &table, sizeof(table));
@@ -798,6 +808,69 @@ void TestForwardReferenceOwnership() {
     ClearHitRuleForTest();
     std::memcpy(address, &previous, sizeof(previous));
     VirtualProtect(address, sizeof(singleton), old, &old);
+}
+
+// Forwarding an enemy hit used to discard its collision parts and its immediate result. Run the production
+// pre-filter with the game's acceptance rules: a joiner's direct hit and blast must reach native damage intact,
+// while a player/vehicle hit still travels to its owner. No session or reference manager is needed for this path.
+void TestNativeEnemyHits() {
+    std::uint64_t netTable[20]{};
+    netTable[16] = reinterpret_cast<std::uint64_t>(&FakeSend);
+    alignas(16) std::uint8_t target[0x2000]{};
+    const void* net = netTable;
+    std::memcpy(target + 0x120, &net, sizeof(net));
+    const std::uint32_t remote = 1;
+    std::memcpy(target + 0x128, &remote, sizeof(remote));
+    // SoldierBase's slot 34 reads this to distinguish a player from an NPC.
+    const std::uint64_t player = 1;
+    std::memcpy(target + 0x1ED0, &player, sizeof(player));
+    const int sends = fakeSends;
+    const auto before = HitAuthorityCounters();
+    SetHitRuleForTest(true, true);
+    fakeSendResult = true;
+    for (const std::uint32_t accept : {0x54F8D0u, 0x5A3600u, 0x6347C0u}) {
+        std::uint64_t table[40]{};
+        table[34] = reinterpret_cast<std::uint64_t>(base + accept);
+        const void* vtable = table;
+        std::memcpy(target, &vtable, sizeof(vtable));
+        for (const float radius : {0.0f, 20.0f}) {
+            alignas(16) std::uint8_t gdi[kGdiBytes]{};
+            DamageEvent event;
+            event.damage = 150.0f;
+            event.radius = radius;
+            EventToGdi(event, gdi);
+            alignas(16) std::uint8_t parts[0x30]{};
+            const void* partData = parts;
+            const std::size_t partCount = 1;
+            std::memcpy(gdi + 0x78, &partData, sizeof(partData));
+            std::memcpy(gdi + 0x88, &partCount, sizeof(partCount));
+            std::uint8_t original[kGdiBytes];
+            std::memcpy(original, gdi, sizeof(original));
+            std::uint32_t message = kDamageMessage;
+            void* payload = gdi;
+            CpuContext ctx{};
+            ctx.rcx = reinterpret_cast<std::uint64_t>(target);
+            ctx.rdx = reinterpret_cast<std::uint64_t>(&message);
+            ctx.r8 = reinterpret_cast<std::uint64_t>(&payload);
+            HitPreFilterHandler(&ctx);
+            Check(message == (accept == 0x54F8D0 ? kDamageMessage : kDroppedMessage),
+                  "direct hits and blasts stay native for enemies and forward for players/vehicles");
+            Check(payload == gdi && !std::memcmp(gdi, original, sizeof(gdi)),
+                  "native hits retain the original collision parts and damage payload");
+        }
+    }
+    Check(fakeSends == sends + 4 && HitAuthorityCounters().native == before.native + 2,
+          "enemy hits send no replacement events; player and vehicle hits send exactly once");
+
+    // GeneratorPoll's real slot 16 refuses an empty parts list. This is the data loss in an event replay,
+    // independently of the feature gate, transport and owner's event-validation counters.
+    alignas(16) std::uint8_t replay[kGdiBytes]{};
+    DamageEvent event;
+    event.damage = 150.0f;
+    EventToGdi(event, replay);
+    Check(!Fn<bool(__fastcall*)(void*, void*)>(0x401200)(target, replay),
+          "the game's damage check refuses a replay that discarded the collision parts");
+    ClearHitRuleForTest();
 }
 
 // Execute the production attacker lookup with real RTTI, weak locking, host lookup and vehicle runner code.
@@ -838,6 +911,7 @@ void TestVehicleSeatAuthority() {
     SetHitRuleForTest(true, true);
     int deciders = 0;
     for (int state = 0; state < 6; ++state) {
+        gdi[kGdiOverride] = 0;
         const bool host = state == 0 || state == 4;
         pointer(lobby + 0x18, host ? nullptr : lobby);  // local member is null: equal only on the host
         Check(Fn<bool(__fastcall*)(const void*)>(0x784210)(nullptr) == host, "native host lookup matches the machine snapshot");
@@ -859,6 +933,9 @@ void TestVehicleSeatAuthority() {
         if (state < 2) deciders += decides;
         Check(decides == (state < 4 ? host : state == 5),
               "only a live registered driver replaces the host as vehicle damage authority");
+        if (decides)
+            Check(gdi[kGdiOverride] && !gdi[kGdiOverrideRemote],
+                  "the game's damage check receives the vehicle driver's local authority");
         Check(vehicleControl.uses == 1 && vehicleControl.weaks == 2, "the native attacker lookup balances its references");
     }
     Check(deciders == 1, "host Dummy plus client empty seat has exactly one damage authority");
@@ -902,6 +979,7 @@ int main(int argc, char** argv) {
         TestGameCode();
         TestPreFilter();
         TestForwardReferenceOwnership();
+        TestNativeEnemyHits();
         TestVehicleSeatAuthority();
     }
     std::printf("%d checks, %d failed\n", checks, failures);

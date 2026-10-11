@@ -171,6 +171,7 @@ HitRuleClock rule;
 bool ruleForced = false, forcedForwarding = false, forcedDropping = false;
 struct Stats {
     std::uint64_t forwarded = 0, forwardFailed = 0, dropped = 0, dealt = 0, received = 0, malformed = 0, ownerRule = 0;
+    std::uint64_t native = 0, healthReduced = 0, noHealthChange = 0;
     std::uint64_t rejected[9]{};
     std::uint64_t lastLogMs = 0;
 } stats;
@@ -178,7 +179,7 @@ thread_local const std::uint8_t* replaying = nullptr;
 
 void Summarize(std::uint64_t now) {
     if (now - stats.lastLogMs < 30000) return;
-    if (!stats.forwarded && !stats.dropped && !stats.received && !stats.forwardFailed) return;
+    if (!stats.forwarded && !stats.dropped && !stats.received && !stats.forwardFailed && !stats.native) return;
     stats.lastLogMs = now;
     char reasons[256]{};
     int used = 0;
@@ -187,8 +188,10 @@ void Summarize(std::uint64_t now) {
             used += FormatText(reasons + used, sizeof(reasons) - used, "%s%s %llu", used ? ", " : "",
                                 HitRejectName(static_cast<HitReject>(i)), stats.rejected[i]);
     Log("NetHit: sent %llu hits to their owners (%llu not sent), dropped %llu copies of others' hits; received %llu, "
-        "dealt %llu (%llu unreadable, %llu left to this machine's own copy of the hit)%s%s",
-        stats.forwarded, stats.forwardFailed, stats.dropped, stats.received, stats.dealt, stats.malformed,
+        "replayed %llu (%llu reduced HP, %llu no HP change), kept %llu hits on the shooter's enemy/object copies "
+        "(%llu unreadable, %llu left to this machine's own copy of the hit)%s%s",
+        stats.forwarded, stats.forwardFailed, stats.dropped, stats.received, stats.dealt,
+        stats.healthReduced, stats.noHealthChange, stats.native, stats.malformed,
         stats.ownerRule, used > 0 ? "; refused: " : "", reasons);
 }
 
@@ -214,7 +217,7 @@ DWORD WINAPI SampleRule(void*) {
         const RuleNow r{rule.Forwarding(now), rule.Dropping(now)};
         ReleaseSRWLockExclusive(&lock);
         if (r.forwarding != said.forwarding || r.dropping != said.dropping) {
-            Log("NetHit: %s our hits on others' objects to their owners; %s others' hits on ours to their machines",
+            Log("NetHit: %s our hits on remote players/vehicles to their owners; %s others' hits on ours to their machines",
                 r.forwarding ? "sending" : "not sending", r.dropping ? "leaving" : "dealing (as the game does)");
             said = r;
         }
@@ -257,7 +260,7 @@ bool Forward(std::uint8_t* target, const std::uint8_t* gdi) {
 // The owner deals an event through the target's own message trio, as the bullet code does (543920), with the
 // attacker counted as ours (EventToGdi's override) so that every class's slot 34 takes it and slot 11 broadcasts
 // the result and queues the kill message, as for a hit this machine decided itself.
-void Deal(std::uint8_t* target, const DamageEvent& event, GameRef& attacker) {
+bool Deal(std::uint8_t* target, const DamageEvent& event, GameRef& attacker) {
     alignas(16) std::uint8_t gdi[kGdiBytes]{};
     SetField<float>(gdi, kGdiExtra68, 1.0f);
     Fn<bool(__fastcall*)(void*, std::size_t)>(kPartsReserve)(gdi + kGdiParts, 4);
@@ -293,6 +296,7 @@ void Deal(std::uint8_t* target, const DamageEvent& event, GameRef& attacker) {
         attacker = {};
     }
     Fn<void(__fastcall*)(void*)>(kPartsRelease)(gdi + kGdiParts);
+    return Field<float>(target, kHealth) < before;
 }
 
 void Received(std::uint8_t* target, const DamageEvent& event) {
@@ -326,11 +330,22 @@ void Received(std::uint8_t* target, const DamageEvent& event) {
             Log("NetHit: refused a hit on %p from attacker %d (seq %u, %.0f damage): %s", static_cast<void*>(target),
                 event.attackerRef, event.seq, event.damage, HitRejectName(reject));
     }
-    if (reject == HitReject::None) ++stats.dealt;
+    ReleaseSRWLockExclusive(&lock);
+    if (reject == HitReject::None) {
+        const bool reduced = Deal(target, event, attacker);
+        AcquireSRWLockExclusive(&lock);
+        ++stats.dealt;
+        if (reduced) ++stats.healthReduced;
+        else if (stats.noHealthChange++ < 3)
+            Log("NetHit: replay changed no HP on %p (attacker %d, seq %u, kind %u, %.0f damage, radius %.1f, flags %X)",
+                static_cast<void*>(target), event.attackerRef, event.seq, event.kind, event.damage, event.radius,
+                static_cast<unsigned>(event.flags));
+        ReleaseSRWLockExclusive(&lock);
+    }
+    ReleaseWeak(attacker);
+    AcquireSRWLockExclusive(&lock);
     Summarize(now);
     ReleaseSRWLockExclusive(&lock);
-    if (reject == HitReject::None) Deal(target, event, attacker);
-    ReleaseWeak(attacker);
 }
 
 }  // namespace
@@ -376,6 +391,9 @@ HitCounters HitAuthorityCounters() {
     c.dealt = stats.dealt;
     c.malformed = stats.malformed;
     c.ownerRule = stats.ownerRule;
+    c.native = stats.native;
+    c.healthReduced = stats.healthReduced;
+    c.noHealthChange = stats.noHealthChange;
     for (int i = 1; i < 9; ++i)
         if (i != static_cast<int>(HitReject::NotOwner)) c.refused += stats.rejected[i];
     c.notOwner = stats.rejected[static_cast<int>(HitReject::NotOwner)];
@@ -391,7 +409,7 @@ void HitPreFilterHandler(CpuContext* context) {
     const RuleNow now = ReadRule(GetTickCount64());
     if (!now.forwarding && !now.dropping) return;
     auto* target = reinterpret_cast<std::uint8_t*>(context->rcx);
-    const std::uint8_t* gdi = *payload;
+    std::uint8_t* gdi = *payload;
     HitInput input;
     input.forwarding = now.forwarding;
     input.dropping = now.dropping;
@@ -403,7 +421,26 @@ void HitPreFilterHandler(CpuContext* context) {
     if (input.replaying || input.fromNetwork || !(input.damage > 0.0f) || input.target == NetOwner::Unregistered)
         return;
     input.attacker = AttackerOwner(gdi);
+    if (input.forwarding && input.attacker == NetOwner::Local && input.target == NetOwner::Remote) {
+        const auto table = *reinterpret_cast<const std::uint8_t* const*>(target);
+        input.targetAcceptsLocal =
+            reinterpret_cast<bool(__fastcall*)(const void*, bool, bool)>(Field<void*>(table, kAcceptSlot))(
+                target, false, false);
+    }
     const HitVerdict verdict = DecideHit(input);
+    if (verdict == HitVerdict::Deal) {
+        // A vehicle's current driver can own the shot while its NetworkObject still belongs to the host.
+        // Carry AttackerOwner's decision through the game's own acceptance check.
+        gdi[kGdiOverride] = 1;
+        gdi[kGdiOverrideRemote] = 0;
+        if (input.target == NetOwner::Remote) {
+            AcquireSRWLockExclusive(&lock);
+            ++stats.native;
+            Summarize(GetTickCount64());
+            ReleaseSRWLockExclusive(&lock);
+        }
+        return;
+    }
     if (verdict != HitVerdict::Drop && verdict != HitVerdict::Forward) return;
     // A hit that could not be sent stays the game's: dealt here as it would be (or not, by its own rule).
     const bool sent = verdict == HitVerdict::Forward && Forward(target, gdi);
@@ -500,7 +537,7 @@ bool InstallHitAuthority(unsigned char* base) {
     }
     if (HANDLE sampler = CreateThread(nullptr, 0, &SampleRule, nullptr, 0, nullptr)) CloseHandle(sampler);
     else Log("NetHit: no thread to watch the room's gate (error %lu); hits stay decided as the game does", GetLastError());
-    Log("NetHit: hits are decided by the shooter's machine and dealt by the target's owner (%s); hooks at EDF+%X "
+    Log("NetHit: shooter handles enemies/objects with native hit data; player/vehicle hits go to their owners (%s); hooks at EDF+%X "
         "and EDF+%X",
         NetFeatureActive(NetFeature::HitAuthority) ? "on" : "off for now", kHitPreFilter, kHitObjectReceive);
     return true;

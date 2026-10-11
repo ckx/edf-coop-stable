@@ -76,10 +76,13 @@ HitVerdict DecideHit(const HitInput& input) {
     // Without a network identity on either side there is no owner to send to, and every machine has the object as
     // its own: the game's rule (the plugins' objects, docs/net-re/damage.md section 6).
     if (input.attacker == NetOwner::Unregistered || input.target == NetOwner::Unregistered) return HitVerdict::Vanilla;
-    // Someone else's shot: its machine forwards it (HitRuleClock: dropping implies every sender forwards). Not yet
+    // Someone else's shot: its machine deals it natively or forwards it (HitRuleClock). Not yet
     // dropping: the game's rule (a remote shot at our player or vehicle is dealt here, at anything else not at all).
     if (input.attacker == NetOwner::Remote) return input.dropping ? HitVerdict::Drop : HitVerdict::Vanilla;
     if (input.target == NetOwner::Local) return HitVerdict::Deal;  // the game takes our shot at our object anyway
+    // Enemies already accept the shooter's damage and broadcast its HP delta. Keep the original GDI, including
+    // collision parts used by armor and weak-point checks, instead of replacing it with an incomplete event.
+    if (input.forwarding && input.targetAcceptsLocal) return HitVerdict::Deal;
     return input.forwarding ? HitVerdict::Forward : HitVerdict::Vanilla;
 }
 
