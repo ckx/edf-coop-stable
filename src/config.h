@@ -17,7 +17,7 @@ struct Config {
     bool upnp = true;
     bool bindPhysicalInterface = true;
     uint16_t eosFixedPort = 0;  // 0 = leave EOS on random ports
-    int eosRelay = -1;          // -1 = leave default, 0 = no relays, 1 = allow, 2 = force
+    int eosRelay = 0;           // -1 = leave the game's setting, 0 = no relays, 1 = allow, 2 = force
     // Hide transient EOS connection loss from the game while reconnecting (see hold.h):
     // off, auto (direct-link members and members carrying the lobby marker), all (every member runs the plugin).
     enum class Hold { Off, Auto, All } hold = Hold::Auto;

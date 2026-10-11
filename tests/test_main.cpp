@@ -2481,7 +2481,7 @@ void testConfig() {
     DeleteFileW(path.c_str());
     dn::Config def = dn::loadConfig(path);
     CHECK(GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES);  // default file written
-    CHECK(def.enabled && def.direct.mode == dn::Mode::Off && def.direct.listenPort == 27015 && def.eosRelay == -1);
+    CHECK(def.enabled && def.direct.mode == dn::Mode::Off && def.direct.listenPort == 27015 && def.eosRelay == 0);
     CHECK(def.hold == dn::Config::Hold::Auto && def.graceMs == 30000 && def.direct.linkTimeoutMs == 60000);
     CHECK(def.reliableGameTraffic && def.direct.upgradeUnreliable);
     CHECK(def.autoJoin && def.publicAddress.empty());
@@ -2515,20 +2515,20 @@ void testConfig() {
         fwrite(text.data(), 1, text.size(), w);
         fclose(w);
         dn::Config d = dn::loadConfig(path);
-        CHECK(d.enabled && d.direct.mode == dn::Mode::Off && d.direct.listenPort == 27015 && d.eosRelay == -1);
+        CHECK(d.enabled && d.direct.mode == dn::Mode::Off && d.direct.listenPort == 27015 && d.eosRelay == 0);
         CHECK(d.hold == dn::Config::Hold::Auto && d.graceMs == 30000 && d.autoJoin && d.publicAddress.empty());
     }
 
     FILE* f = _wfopen(path.c_str(), L"wb");
     fputs("[DirectNet]\r\nMode= Join \r\nHostAddress=[2408:8207::5]:30000\r\nKey=abc\r\n"
           "PublicAddress= 1.2.3.4:40000 \r\nAutoJoin=0\r\n"
-          "[EOS]\r\nFixedPort=27100\r\nRelay=NoRelay\r\n[Resilience]\r\nHoldDisconnects=ALL\r\nGraceSeconds=45\r\n", f);
+          "[EOS]\r\nFixedPort=27100\r\nRelay=Allow\r\n[Resilience]\r\nHoldDisconnects=ALL\r\nGraceSeconds=45\r\n", f);
     fclose(f);
     dn::Config c = dn::loadConfig(path);
     CHECK(c.direct.mode == dn::Mode::Join);
     CHECK(c.direct.hostAddress == "[2408:8207::5]:30000");
     CHECK(c.direct.listenPort == 0);  // join without ListenPort binds any port
-    CHECK(c.direct.key == "abc" && c.eosFixedPort == 27100 && c.eosRelay == 0);
+    CHECK(c.direct.key == "abc" && c.eosFixedPort == 27100 && c.eosRelay == 1);
     CHECK(c.hold == dn::Config::Hold::All && c.graceMs == 45000);
     CHECK(c.publicAddress == "1.2.3.4:40000" && !c.autoJoin);
     DeleteFileW(path.c_str());
@@ -2592,9 +2592,9 @@ void testConfigParsing() {
     CHECK(mentionsPort);
 
     // A misspelt choice keeps the default and says so; a value in another case is no misspelling.
-    putFile(path, "[DirectNet]\r\nMode=hots\r\n[EOS]\r\nRelay=NoRelay\r\n[Resilience]\r\nHoldDisconnects=always\r\n");
+    putFile(path, "[DirectNet]\r\nMode=hots\r\n[EOS]\r\nRelay=Default\r\n[Resilience]\r\nHoldDisconnects=always\r\n");
     c = dn::loadConfig(path);
-    CHECK(c.direct.mode == dn::Mode::Off && c.eosRelay == 0 && c.hold == dn::Config::Hold::Auto);
+    CHECK(c.direct.mode == dn::Mode::Off && c.eosRelay == -1 && c.hold == dn::Config::Hold::Auto);
     CHECK(c.warnings.size() == 2 && c.warnings[0].find("Mode=hots is not one of off/host/join; using off") != std::string::npos);
 
     // A missing file is written with the defaults, which read back with nothing to warn about.

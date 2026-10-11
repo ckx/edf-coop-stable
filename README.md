@@ -102,7 +102,7 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `BindPhysicalInterface` | `1` | Keep direct-link traffic on the physical network adapter, so the TUN adapter of Clash, a VPN or a game accelerator cannot capture it |
 | `LinkTimeoutMs` | `60000` | How long without data from the other side before a direct link counts as lost (3000 to 300000) |
 | `[EOS] FixedPort` | `0` | EOS uses the fixed UDP ports `FixedPort` to `FixedPort+7`; 0 = random |
-| `Relay` | `default` | EOS relay: `default` unchanged / `allow` / `norelay` / `force` |
+| `Relay` | `norelay` | EOS relay: `norelay` never use Epic's relay servers / `allow` / `force` / `default` the game's own setting. Set `allow` if you cannot connect: without the relay, a player whose NAT blocks a direct EOS connection gets in only through the direct link |
 | `[Sync] ReliableGameTraffic` | `1` | Reliable sending (the desync fix). `0` = original |
 | `[Resilience] HoldDisconnects` | `auto` | Disconnect grace: `auto` for players with the plugin / `off` original / `all` for everyone, no detection (only if you are sure everyone has the plugin) |
 | `GraceSeconds` | `30` | Longest a disconnect is hidden, in seconds (1 to 600) |

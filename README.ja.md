@@ -102,7 +102,7 @@ ZIP には README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 | `BindPhysicalInterface` | `1` | 直接接続の通信を物理 NIC に固定し、Clash・VPN・ゲーム加速器の TUN アダプターに横取りされないようにする |
 | `LinkTimeoutMs` | `60000` | 相手から何も届かない状態がこれだけ続いたら直接接続が切れたとみなす（3000～300000） |
 | `[EOS] FixedPort` | `0` | EOS が固定 UDP ポート `FixedPort`～`FixedPort+7` を使う。0 = ランダム |
-| `Relay` | `default` | EOS リレー：`default` 変更しない / `allow` / `norelay` / `force` |
+| `Relay` | `norelay` | EOS リレー：`norelay` Epic のリレーを使わない / `allow` / `force` / `default` ゲームの設定のまま。つながらないときは `allow` に。リレーなしでは、NAT が EOS の直接通信を通さないプレイヤーは直接接続でしか入れません |
 | `[Sync] ReliableGameTraffic` | `1` | 信頼性のある送信（同期ズレ対策）。`0` = 元の動作 |
 | `[Resilience] HoldDisconnects` | `auto` | 回線切れの猶予：`auto` プラグインを入れている人に / `off` 元の動作 / `all` 判別せず全員に（全員が入れていると確かなときだけ） |
 | `GraceSeconds` | `30` | 回線切れを隠す最大秒数（1～600） |

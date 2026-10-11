@@ -75,10 +75,13 @@ const IniEntry kIniEntries[] = {
      {"游戏原本联机的固定 UDP 端口（占用 FixedPort ~ FixedPort+7），0 = 随机。一般不用改",
       "ゲーム本来のオンライン通信の固定 UDP ポート（FixedPort ～ FixedPort+7 を使用）、0 = ランダム。通常は変更不要",
       "Fixed UDP ports for the game's own online traffic (uses FixedPort to FixedPort+7), 0 = random. Usually leave it"}},
-    {"Relay=default",
-     {"EOS 中继：default 不改 / allow 允许 / norelay 禁止 / force 强制。一般不用改",
-      "EOS リレー：default 変更しない / allow 許可 / norelay 禁止 / force 強制。通常は変更不要",
-      "EOS relay: default unchanged / allow / norelay never / force always. Usually leave it"}},
+    {"Relay=norelay",
+     {"EOS 中继：norelay 不用 Epic 中继 / allow 允许 / force 强制 / default 游戏原设置。\n"
+      "  NAT 打洞失败、直连也连不上时请改成 allow",
+      "EOS リレー：norelay Epic のリレーを使わない / allow 許可 / force 強制 / default ゲームの設定のまま。\n"
+      "  NAT 越えに失敗して直接接続もできないときは allow に",
+      "EOS relay: norelay never use Epic's relay servers / allow / force always / default the game's own setting.\n"
+      "  Set allow if you cannot connect: NAT traversal fails and there is no direct link"}},
     {"[Sync]", {}},
     {"ReliableGameTraffic=1",
      {"防不同步：联机数据丢包自动重发。1 开 / 0 原版",
@@ -340,7 +343,7 @@ Config loadConfig(const std::wstring& iniPath) {
     c.bindPhysicalInterface = readBool(ini, s, L"BindPhysicalInterface", true, w);
 
     c.eosFixedPort = static_cast<uint16_t>(readInt(ini, L"EOS", L"FixedPort", 0, 0, 65535, w));
-    std::wstring relay = pick(L"EOS", L"Relay", L"default", {L"default", L"norelay", L"allow", L"force"});
+    std::wstring relay = pick(L"EOS", L"Relay", L"norelay", {L"default", L"norelay", L"allow", L"force"});
     c.eosRelay = relay == L"norelay" ? 0 : relay == L"allow" ? 1 : relay == L"force" ? 2 : -1;
 
     std::wstring hold = pick(L"Resilience", L"HoldDisconnects", L"auto", {L"auto", L"off", L"0", L"all"});

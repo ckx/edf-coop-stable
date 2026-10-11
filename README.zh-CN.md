@@ -102,7 +102,7 @@ zip 里有 README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 | `BindPhysicalInterface` | `1` | 直连流量固定走物理网卡，不被 Clash、VPN 或加速器的 TUN 网卡劫持 |
 | `LinkTimeoutMs` | `60000` | 多久收不到对方数据就算直连断开（3000 到 300000） |
 | `[EOS] FixedPort` | `0` | EOS 使用固定 UDP 端口 `FixedPort` 到 `FixedPort+7`；0 = 随机 |
-| `Relay` | `default` | EOS 中继：`default` 不改 / `allow` / `norelay` / `force` |
+| `Relay` | `norelay` | EOS 中继：`norelay` 不用 Epic 中继 / `allow` / `force` / `default` 游戏原设置。连不上时改成 `allow`：没有中继时，NAT 不放行 EOS 直接通信的玩家只能靠直连进房 |
 | `[Sync] ReliableGameTraffic` | `1` | 可靠发送（防不同步）。`0` = 原版 |
 | `[Resilience] HoldDisconnects` | `auto` | 断线宽限：`auto` 对装了插件的人 / `off` 原版 / `all` 对所有人、不检测（确定所有人都装了插件时才用） |
 | `GraceSeconds` | `30` | 最多瞒住断线多少秒（1 到 600） |
