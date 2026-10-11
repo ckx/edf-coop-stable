@@ -194,7 +194,7 @@ export EDF6_GAME_DIR="$HOME/.local/share/Steam/steamapps/common/EARTH DEFENSE FO
 ./build.sh -t    # -> out/EDF6Coop.dll。-r は EDF.dll がないと構成を拒否する
 ```
 
-Python のツールは `build.sh` が `.venv` に作る仮想環境で動きます。リリース用パッケージは Windows で `build.ps1` と `package.ps1` で作ります。
+Python のツールは `build.sh` が `~/.local/share/edf6coop-venv`（`EDF6COOP_VENV` で変更可）に作る仮想環境で動きます。リリース用パッケージは Windows で `build.ps1` と `package.ps1` で作ります。
 
 ## リリース
 

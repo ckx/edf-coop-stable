@@ -6,6 +6,8 @@
 # EDF.dll, so no test against the game's code can pass as skipped.
 # Fedora: dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
 # The tests run in their own Wine prefix (EDF6COOP_WINEPREFIX, default ~/.local/share/wine-edf6coop-tests).
+# The Python tools run from a venv outside the tree (EDF6COOP_VENV, default ~/.local/share/edf6coop-venv), since
+# venvs need symlinks and a checkout on an SMB share has none.
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")" && pwd)
@@ -21,7 +23,7 @@ while getopts tr option; do
 done
 
 # The loader fix: pefile and capstone pinned by hash (as in CI).
-venv=$root/.venv
+venv=${EDF6COOP_VENV:-$HOME/.local/share/edf6coop-venv}
 if [ ! -x "$venv/bin/python" ]; then
     python3 -m venv "$venv"
     "$venv/bin/pip" install -q --disable-pip-version-check --require-hashes -r "$root/.github/loader-fix-requirements.txt"
