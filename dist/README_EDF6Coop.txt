@@ -1,3 +1,5 @@
+Shield and player jitter diagnostic 3. This build adds logging, not a fix. Back up your existing plugin DLL. After testing, restore it or install stable 3.0.1. All testers should use this build, note test times, then close the game and send Mods/Plugins/EDF6Coop.log. See release-notes/3.0.1-shield-diag3.md in the source, or README_SHIELD_DIAGNOSTIC.txt in the package, for the test steps. Build with BUILD.cmd on Windows or bash build.sh on Linux; see BUILDING.txt.
+
 EDF6Coop - steadier online co-op for EARTH DEFENSE FORCE 6
 Project page: https://github.com/hajisensai/edf-coop-stable
 中文: README_EDF6Coop_zh.txt / 日本語: README_EDF6Coop_ja.txt

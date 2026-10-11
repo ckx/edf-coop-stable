@@ -3,6 +3,8 @@
 #   cmake -S . -B build-mingw -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/mingw-w64.cmake
 # Fedora: dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine
 # (GCC 16 for this target stops with an internal compiler error on tests/gamenet; clang builds everything.)
+# MinGW lld does not support the GNU --dependency-file link option emitted by newer CMake.
+set(CMAKE_LINK_DEPENDS_USE_LINKER FALSE)
 set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_SYSTEM_PROCESSOR x86_64)
 

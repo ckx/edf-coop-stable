@@ -1,0 +1,32 @@
+EDF6Coop shield and player jitter diagnostic 3
+
+Windows prerequisites
+Visual Studio with Desktop development with C++, including CMake and Ninja.
+Python 3.10+ on PATH. Install the pinned loader tools from the source folder:
+  python -m pip install --require-hashes -r .github/loader-fix-requirements.txt
+Double-click BUILD.cmd or run:
+  powershell -ExecutionPolicy Bypass -File build.ps1
+
+Linux prerequisites, Fedora
+  sudo dnf install clang lld mingw64-gcc-c++ mingw64-winpthreads-static wine cmake ninja-build python3
+Build:
+  bash build.sh
+
+Use a fresh extraction of this source tag. It enables diagnostics by default.
+The build downloads the verified loader and Python dependencies as needed.
+Both builds write out/EDF6Coop.dll and the fixed loader.
+
+Package after building:
+  powershell -ExecutionPolicy Bypass -File package.ps1
+On Linux install PowerShell and use pwsh -File package.ps1.
+Output: release/EDF6Coop-3.0.1-shield-diag3-full.zip and its SHA-256 file.
+
+Tests
+Set EDF6_GAME_DIR to the folder containing EDF.dll before building.
+Use build.ps1 -RequireGame or bash build.sh -r to require it.
+Without EDF.dll the game tests are skipped. The game folder is only read.
+After building, use ctest from the compiler environment on Windows:
+  ctest --test-dir build -E "^(DirectNet|LogFileCap)$" --output-on-failure --timeout 600 -j4
+On Linux:
+  WINEPREFIX="${EDF6COOP_WINEPREFIX:-$HOME/.local/share/wine-edf6coop-tests}" WINEDEBUG=-all ctest --test-dir build-mingw -E '^(DirectNet|LogFileCap)$' --output-on-failure --timeout 600 -j4
+These commands exclude the two stress tests. See README.md for build details.

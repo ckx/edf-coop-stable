@@ -1,3 +1,5 @@
+シールドとプレイヤーの揺れを調べる診断ビルド3です。ログ収集用であり、修正版ではありません。既存のプラグインDLLをバックアップしてください。テスト参加者全員がこのビルドを使用し、テスト時刻を記録して、ゲーム終了後に Mods/Plugins/EDF6Coop.log を送ってください。終了後はバックアップを復元するか通常版3.0.1を再インストールしてください。英語のテスト手順はソース内の release-notes/3.0.1-shield-diag3.md、配布パッケージ内の README_SHIELD_DIAGNOSTIC.txt を参照してください。ビルドは Windows で BUILD.cmd、Linux で bash build.sh を実行します。必要なツールは BUILDING.txt を参照してください。
+
 EDF6Coop - 地球防衛軍6 のオンライン協力プレイを安定させるプラグイン
 プロジェクトページ：https://github.com/hajisensai/edf-coop-stable
 English: README_EDF6Coop.txt / 中文: README_EDF6Coop_zh.txt

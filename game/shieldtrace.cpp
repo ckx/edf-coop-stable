@@ -70,7 +70,7 @@ struct Child {
     std::uint64_t emitters = 0, pending = 0, particles = 0, instances = 0;
     float frame = 0, position[3]{}, umbraCenter[3]{}, umbraRadius = 0, emitterTime = 0, particleCenter[3]{},
           particleExtent[3]{};
-    std::uint32_t emitterDuration = 0;
+    std::uint32_t emitterDuration = 0, matchedModules = 0;
     bool readable = false;
 };
 
@@ -116,6 +116,7 @@ void ReadChild(Child& child) {
         for (int k = 0; m && m != modules && k < 16; ++k, m = Field<std::uintptr_t>(m, 0)) {
             const auto module = Field<std::uintptr_t>(m, 0x10);
             if (!module || Field<std::uintptr_t>(module, 0) != imageBase + kEmitterVtable) continue;
+            ++child.matchedModules;
             const auto slot = Field<std::uint32_t>(module, 0x20);
             const auto shared = Field<std::uintptr_t>(Field<std::uintptr_t>(begin, 0x48), slot * 0x10);
             if (!shared) continue;
@@ -150,10 +151,14 @@ void TraceUpdate(void* object, void* context) {
         Child children[8];
         std::uint64_t count = 0;
         std::uint32_t lifetime = 0;
-        float position[3]{};
+        float position[3]{}, drift[3]{}, damping = 0, basis[12]{};
         const bool readable = Guarded([&] {
             lifetime = Field<std::uint32_t>(shield, 0xB48);
             std::memcpy(position, reinterpret_cast<const void*>(shield + 0x90), sizeof(position));
+            // EDF+248EEA adds +ED0 to position; +248F1D multiplies it by +EE0 each update.
+            std::memcpy(drift, reinterpret_cast<const void*>(shield + 0xED0), sizeof(drift));
+            damping = Field<float>(shield, 0xEE0);
+            std::memcpy(basis, reinterpret_cast<const void*>(shield + 0x60), sizeof(basis));
             const auto owner = Field<std::uintptr_t>(shield, 0xE90);
             if (!owner) return;
             count = Field<std::uint64_t>(owner, 0x30);
@@ -175,17 +180,22 @@ void TraceUpdate(void* object, void* context) {
         Log("SHIELD trace object=%p age=%u lifetime=%u position=%.2f,%.2f,%.2f children=%llu readable=%d",
             object, age, lifetime, position[0], position[1], position[2],
             static_cast<unsigned long long>(count), readable ? 1 : 0);
+        Log("SHIELD motion object=%p age=%u driftPerFrame=%.6f,%.6f,%.6f damping=%.6f "
+            "basisX=%.4f,%.4f,%.4f basisY=%.4f,%.4f,%.4f basisZ=%.4f,%.4f,%.4f readable=%d",
+            object, age, drift[0], drift[1], drift[2], damping,
+            basis[0], basis[1], basis[2], basis[4], basis[5], basis[6], basis[8], basis[9], basis[10],
+            readable ? 1 : 0);
         for (std::uint64_t i = 0; i < count && i < 8; ++i) {
             const auto& c = children[i];
             Log("SHIELD child=%llu object=%p vtable=%p refs=%d readable=%d scene=%08X render=%08X effect=%p "
                 "emitters=%llu pending=%llu frame=%.2f remaining=%d pass=%X draws=%u instances=%llu "
-                "particles=%llu emitterTime=%.2f/%u position=%.2f,%.2f,%.2f umbra=%.2f,%.2f,%.2f r=%.2f "
+                "matchedModules=%u particles=%llu emitterTime=%.2f/%u position=%.2f,%.2f,%.2f umbra=%.2f,%.2f,%.2f r=%.2f "
                 "particleBox=%.2f,%.2f,%.2f+-%.2f,%.2f,%.2f",
                 static_cast<unsigned long long>(i), reinterpret_cast<void*>(c.object),
                 reinterpret_cast<void*>(c.vtable), c.strongRefs, c.readable ? 1 : 0, c.sceneFlags, c.renderFlags,
                 reinterpret_cast<void*>(c.effect), static_cast<unsigned long long>(c.emitters),
                 static_cast<unsigned long long>(c.pending), c.frame, c.remaining, c.passMask, c.draws,
-                static_cast<unsigned long long>(c.instances), static_cast<unsigned long long>(c.particles),
+                static_cast<unsigned long long>(c.instances), c.matchedModules, static_cast<unsigned long long>(c.particles),
                 c.emitterTime, c.emitterDuration, c.position[0], c.position[1], c.position[2], c.umbraCenter[0],
                 c.umbraCenter[1], c.umbraCenter[2], c.umbraRadius, c.particleCenter[0], c.particleCenter[1],
                 c.particleCenter[2], c.particleExtent[0], c.particleExtent[1], c.particleExtent[2]);
@@ -210,7 +220,7 @@ bool InstallShieldTrace(unsigned char* base) {
     if (!WriteCode(base + kDrawSlot, reinterpret_cast<const unsigned char*>(&drawHook), sizeof(drawHook)) ||
         !WriteCode(base + kUpdateSlot, reinterpret_cast<const unsigned char*>(&hook), sizeof(hook)))
         return false;
-    Log("SHIELD diagnostic build 2: native behavior unchanged; visibility snapshots limited to 512 per process");
+    Log("SHIELD diagnostic build 3: native behavior unchanged; visibility snapshots limited to 512 per process");
     return true;
 }
 

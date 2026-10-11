@@ -58,6 +58,7 @@ option(EDF6_SHIELD_TRACE "Build temporary Luminous Shield visibility diagnostics
 if(EDF6_SHIELD_TRACE)
     target_sources(EDF6Coop PRIVATE game/shieldtrace.cpp)
     target_compile_definitions(EDF6Coop PRIVATE EDF6_SHIELD_TRACE)
+    target_compile_definitions(GameCore PRIVATE EDF6_SHIELD_TRACE)
 endif()
 target_include_directories(EDF6Coop PRIVATE ${MODLOADER_INCLUDE})
 target_link_libraries(EDF6Coop PRIVATE GameCore)

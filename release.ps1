@@ -11,9 +11,9 @@ $root = $PSScriptRoot
 $cmake = Get-Content -LiteralPath (Join-Path $root 'CMakeLists.txt') -Raw
 if ($cmake -notmatch 'project\(EDF6Coop VERSION (\d+\.\d+\.\d+)[\s)]') { throw 'project(EDF6Coop VERSION x.y.z) not found in CMakeLists.txt' }
 $version = $Matches[1]
-$tag = "v$version"
-$notes = Join-Path $root "release-notes\$version.md"
-if (-not (Test-Path -LiteralPath $notes)) { throw "missing release-notes\$version.md: write the release text first" }
+$tag = "v$version-shield-diag3"
+$notes = Join-Path $root "release-notes\$version-shield-diag3.md"
+if (-not (Test-Path -LiteralPath $notes)) { throw "missing release-notes\$version-shield-diag3.md: write the release text first" }
 
 # gh picks its repository from the current directory, not from $root: name it explicitly, from $root's origin.
 $origin = git -C $root remote get-url origin
@@ -30,13 +30,15 @@ $tagged = git -C $root rev-parse --verify --quiet "$tag^{commit}"
 if (-not $tagged) { throw "tag $tag does not exist; tag the release commit first" }
 if ($tagged -ne $head) { throw "HEAD $head is not the commit of $tag ($tagged)" }
 
-$stage = Join-Path $root "release\upload-$version"
+$stage = Join-Path $root "release\upload-$version-shield-diag3"
 if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
 
-& (Join-Path $root 'build.ps1') -Test -RequireGame
+& (Join-Path $root 'build.ps1') -RequireGame
+cmd /c "call `"$(Join-Path $root 'tools\msvc-x64-env.cmd')`" >nul && ctest --test-dir `"$(Join-Path $root 'build')`" -E `"^(DirectNet|LogFileCap)$`" --output-on-failure --timeout 600 -j4"
+if ($LASTEXITCODE) { throw 'diagnostic tests failed' }
 & (Join-Path $root 'package.ps1') | Out-Null
-$zip = Join-Path $root "release\EDF6Coop-$version.zip"
+$zip = Join-Path $root "release\EDF6Coop-$version-shield-diag3-full.zip"
 Copy-Item -LiteralPath $zip, "$zip.sha256" -Destination $stage
 
 $files = @(Get-ChildItem -LiteralPath $stage -File | Sort-Object Name)
@@ -46,6 +48,6 @@ if (-not $Upload) {
     return
 }
 
-gh release create $tag @($files.FullName) --repo $repo --draft --verify-tag --title "EDF6Coop $version" --notes-file $notes
+gh release create $tag @($files.FullName) --repo $repo --draft --prerelease --verify-tag --title "EDF6Coop $version shield and player jitter diagnostic 3" --notes-file $notes
 if ($LASTEXITCODE) { throw 'gh release create failed' }
 "Draft Release $tag created in $repo. Check it and publish it on GitHub."

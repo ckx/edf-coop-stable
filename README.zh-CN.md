@@ -1,3 +1,5 @@
+护盾和玩家抖动诊断版本3，仅增加日志，不包含修复。请备份现有插件DLL。所有测试者都应使用此版本，记录测试时间，并在关闭游戏后发送 Mods/Plugins/EDF6Coop.log。测试后请恢复备份或重新安装正式版3.0.1。英文测试步骤见源码中的 release-notes/3.0.1-shield-diag3.md 或安装包中的 README_SHIELD_DIAGNOSTIC.txt。Windows 下运行 BUILD.cmd 构建，Linux 下运行 bash build.sh；所需工具见 BUILDING.txt。
+
 # edf-coop-stable
 
 [English](README.md) | **中文** | [日本語](README.ja.md)

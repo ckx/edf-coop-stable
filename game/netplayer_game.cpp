@@ -137,6 +137,39 @@ void LogCounters(double now) {
     counters.loggedMs = now;
 }
 
+#ifdef EDF6_SHIELD_TRACE
+// Protected by the player-sync lock. Five-second windows include native fallback frames;
+// logging only successful corrections would hide the periods we need to compare.
+struct PlayerDiagnostic {
+    double start = 0, previousFrame = 0, maxFrameGap = 0, maxArrivalGap = 0, maxSenderGap = 0, maxAge = 0;
+    float maxError = 0, maxCorrection = 0, maxSpeed = 0;
+    unsigned frames = 0, active = 0, fresh = 0, driven = 0, accepted = 0, rejected = 0, warps = 0;
+};
+PlayerTracks<PlayerDiagnostic> diagnostics;
+unsigned diagnosticLines = 0;
+
+void TracePlayerFrame(void* soldier, double now, bool active) {
+    auto& d = *diagnostics.Find(soldier, now, true);
+    if (!d.start) d.start = now;
+    if (now - d.start >= 5000.0 && diagnosticLines < 3600) {
+        Log("PLAYER diagnostic object=%p windowMs=%.0f frames=%u active=%u fresh=%u driven=%u "
+            "accepted=%u rejected=%u warps=%u maxFrameGapMs=%.2f maxArrivalGapMs=%.2f "
+            "maxSenderGapMs=%.2f maxSampleAgeMs=%.2f maxErrorM=%.4f maxCorrectionM=%.4f maxSpeedMps=%.3f",
+            soldier, now - d.start, d.frames, d.active, d.fresh, d.driven, d.accepted, d.rejected, d.warps,
+            d.maxFrameGap, d.maxArrivalGap, d.maxSenderGap, d.maxAge, d.maxError, d.maxCorrection, d.maxSpeed);
+        ++diagnosticLines;
+        const double previous = d.previousFrame;
+        d = PlayerDiagnostic{};
+        d.start = now;
+        d.previousFrame = previous;
+    }
+    if (d.previousFrame) d.maxFrameGap = (std::max)(d.maxFrameGap, now - d.previousFrame);
+    d.previousFrame = now;
+    ++d.frames;
+    d.active += active ? 1 : 0;
+}
+#endif
+
 bool Sending(void* soldier) {
     if (!NetFeatureActive(NetFeature::PlayerSync) || !Local(soldier) || !IsPlayer(soldier)) return false;
     const auto frames = Get<std::uint32_t>(soldier, kSyncFrames);
@@ -181,7 +214,24 @@ void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
         ++counters.refused;
     } else if (Remote(soldier)) {
         RemoteTrack* track = remotes.Find(soldier, now, true);
-        counters.received += AcceptSample(*track, sample, now, params) ? 1 : 0;
+#ifdef EDF6_SHIELD_TRACE
+        const bool hadSample = track->have;
+        const double arrivalGap = hadSample ? now - track->receivedMs : 0.0;
+        const double senderGap = hadSample ? static_cast<std::int32_t>(sample.senderMs - track->last.senderMs) : 0;
+#endif
+        const bool accepted = AcceptSample(*track, sample, now, params);
+        counters.received += accepted ? 1 : 0;
+#ifdef EDF6_SHIELD_TRACE
+        auto& d = *diagnostics.Find(soldier, now, true);
+        if (accepted) {
+            ++d.accepted;
+            d.maxArrivalGap = (std::max)(d.maxArrivalGap, arrivalGap);
+            d.maxSenderGap = (std::max)(d.maxSenderGap, senderGap);
+            d.maxSpeed = (std::max)(d.maxSpeed, Length(sample.velocity));
+        } else {
+            ++d.rejected;
+        }
+#endif
     }
     ReleaseSRWLockExclusive(&lock);
 }
@@ -198,11 +248,21 @@ void UpdateHook(void* soldier) {
     const UpdateFn original = GameFn<UpdateFn>(kOriginal[F][kUpdate]);
     const double now = NowMs();
     AcquireSRWLockExclusive(&lock);
+#ifdef EDF6_SHIELD_TRACE
+    if (Remote(soldier)) TracePlayerFrame(soldier, now, NetFeatureActive(NetFeature::PlayerSync));
+#endif
     ReleaseSRWLockExclusive(&lock);
     if (!Remote(soldier) || !NetFeatureActive(NetFeature::PlayerSync)) return original(soldier);
     AcquireSRWLockExclusive(&lock);
     RemoteTrack* track = remotes.Find(soldier, now, false);
     const bool drive = track && TrackFresh(*track, now, params);
+#ifdef EDF6_SHIELD_TRACE
+    if (track && track->have) {
+        auto& diagnostic = *diagnostics.Find(soldier, now, true);
+        diagnostic.maxAge = (std::max)(diagnostic.maxAge, SampleAgeMs(*track, now));
+        diagnostic.fresh += drive ? 1 : 0;
+    }
+#endif
     if (track && !drive) ResetSteps(*track);
     ReleaseSRWLockExclusive(&lock);
     if (!drive) return original(soldier);
@@ -228,6 +288,13 @@ void UpdateHook(void* soldier) {
     const RemoteStep step = StepRemote(*track, current, now, params);
     ++counters.driven;
     counters.warps += step.warp ? 1 : 0;
+#ifdef EDF6_SHIELD_TRACE
+    auto& d = *diagnostics.Find(soldier, now, true);
+    ++d.driven;
+    d.warps += step.warp ? 1 : 0;
+    d.maxError = (std::max)(d.maxError, Length(step.target - current));
+    d.maxCorrection = (std::max)(d.maxCorrection, Length(step.add));
+#endif
     ReleaseSRWLockExclusive(&lock);
     if (step.warp) {
         alignas(16) const float target[4] = {step.target.x, step.target.y, step.target.z, w};
@@ -325,6 +392,9 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
             return false;
         }
     }
+#ifdef EDF6_SHIELD_TRACE
+    Log("PLAYER diagnostic build 3: five-second per-object windows; limited to 3600 lines per process");
+#endif
     Log("PLAYER sync: hooks installed (%zu vtable slots%s). Players send position, velocity and time every %d sync "
         "frame(s); remote players with that data are extrapolated (up to %.0f ms) and converge in %.0f ms (warp above "
         "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms",
