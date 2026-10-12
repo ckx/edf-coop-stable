@@ -51,6 +51,7 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 
 ## Commits
 
+- After publishing any release, including diagnostic prereleases, install the published package locally in `/mnt/kosmos/SteamLibrary/steamapps/common/EARTH DEFENSE FORCE 6`. Back up the installed plugin, preserve settings and other mods, and verify the installed DLL against the published package's SHA-256. If EDF6 is running, wait for it to close before installing.
 - Landing completed work on `main` and pushing it to `origin/main` is authorized. Do not request separate confirmation. The data-loss rules below still apply. Release tags and GitHub Releases are not covered: those wait for the developer.
 - Auto-commit at your discretion after a meaningful unit of work lands.
 - Pull at session start and at sensible intervals during long sessions (`git pull --rebase`). Resolve conflict fallout yourself, preserving both sides' work.
