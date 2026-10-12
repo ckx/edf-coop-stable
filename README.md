@@ -115,6 +115,8 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
 | `CrashDump` | `0` | Also write `EDF6Coop-crash.dmp` for the first crash. It holds game memory (room name, chat), so turn it on only when asked |
 
+Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections.
+
 ## How it works
 
 ### Reliable sending

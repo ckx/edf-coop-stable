@@ -20,6 +20,7 @@ It plays the game's own rooms of up to four players. The bigger rooms (Player MO
 room weapon files, armor copy and automatic updates of 2.5.0 and earlier are gone; whoever needs them stays
 on 2.5.0. Everyone in a room should run the same version: a host refuses a player whose netcode protocol
 differs ([Netcode] RejectMismatched=1).
+Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections.
 
 [Install / uninstall]
 Windows: extract the whole zip, double-click INSTALL.bat, then start the game from Steam as usual. (Or drop

@@ -92,7 +92,7 @@ struct RemoteTrack {
     bool stepped = false;
     Vec3 lastPosition;         // where the copy was at the last step
     Vec3 lastAdded;            // what that step added
-    Vec3 ownMotion;            // the copy's own displacement per step, filtered
+    Vec3 ownVelocity;          // the copy's own metres per second of wall time, filtered
     double lastStepMs = 0.0;
 };
 

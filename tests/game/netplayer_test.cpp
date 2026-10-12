@@ -301,6 +301,93 @@ void TestConverge() {
     }
 }
 
+// The copy already follows the sender exactly, but frame gaps vary as in the joiner logs.
+// StepRemote must not turn changes in frame duration into alternating corrections.
+void TestUnevenFrames() {
+    for (const float speed : {6.0f, 40.0f}) {
+        NetPlayerParams p;
+        RemoteTrack track;
+        Vec3 copy{};
+        double now = 0.0;
+        float worstCorrection = 0.0f;
+        int warps = 0;
+        for (int frame = 0; frame < 300; ++frame) {
+            const double gap = frame % 29 == 0 ? 369.0 : (frame % 7 == 0 ? 45.0 : 1000.0 / 60.0);
+            if (frame) {
+                now += gap;
+                copy.x += speed * static_cast<float>(gap / 1000.0);
+            }
+            PlayerSample sample;
+            sample.seq = static_cast<std::uint16_t>(frame + 1);
+            sample.senderMs = static_cast<std::uint32_t>(now);
+            sample.position = {speed * static_cast<float>(now / 1000.0), 0, 0};
+            sample.velocity = {speed, 0, 0};
+            AcceptSample(track, sample, now, p);
+            const RemoteStep step = StepRemote(track, copy, now, p);
+            worstCorrection = (std::max)(worstCorrection, Length(step.add));
+            warps += step.warp ? 1 : 0;
+            copy = step.warp ? step.target : copy + step.add;
+        }
+        Check(worstCorrection < 0.03f && warps == 0,
+              "uneven frames do not push an accurately moving copy (" + std::to_string(worstCorrection) + " m)");
+    }
+}
+
+// The diagnostic 4 log has 100 ms samples with occasional 300 ms accepted-sample gaps.
+// Exercise the sender and receiver, dropping two updates while the local copy keeps updating at 60 Hz.
+void TestSparseUpdates() {
+    for (const float speed : {6.0f, 50.0f}) {
+        for (const float ownSpeed : {0.0f, speed}) {
+            for (const int turn : {1, 0, -1}) {
+                NetPlayerParams p;
+                p.maxExtrapolateMs = 350.0f;  // the diagnostic 5 setting used in these logs
+                SendTrack sender;
+                RemoteTrack track;
+                Vec3 copy{};
+                float minAdvance = speed, worstError = 0.0f, recoveredError = 0.0f;
+                int warps = 0;
+                for (int frame = 0; frame <= 120; ++frame) {
+                    const double now = frame * 1000.0 / 60.0;
+                    const float seconds = static_cast<float>(now / 1000.0);
+                    const float truth = speed * (seconds <= 1.0f ? seconds : 1.0f + (seconds - 1.0f) * turn);
+                    if (frame % 6 == 0) {
+                        const PlayerSample sample = MakeSample(sender, {truth, 0, 0}, now);
+                        if (frame != 60 && frame != 66) AcceptSample(track, sample, now, p);
+                    }
+                    const Vec3 before = copy;
+                    const RemoteStep step = StepRemote(track, copy, now, p);
+                    if (step.warp) {
+                        copy = step.target;
+                        ++warps;
+                    } else {
+                        copy = copy + Vec3{ownSpeed * (frame < 72 ? 1 : turn) / 60.0f, 0, 0} + step.add;
+                    }
+                    if (frame >= 54 && frame < 72) minAdvance = (std::min)(minAdvance, copy.x - before.x);
+                    const float nextSeconds = static_cast<float>((frame + 1) / 60.0);
+                    const float nextTruth = speed * (nextSeconds <= 1.0f ? nextSeconds :
+                        1.0f + (nextSeconds - 1.0f) * turn);
+                    const float error = std::fabs(copy.x - nextTruth);
+                    if (frame >= 54) worstError = (std::max)(worstError, error);
+                    if (frame >= 108) recoveredError = (std::max)(recoveredError, error);
+                }
+                const std::string label = "sparse updates, speed=" + std::to_string(speed) +
+                    " own=" + std::to_string(ownSpeed) + " turn=" + std::to_string(turn);
+                if (turn == 1) {
+                    Check(minAdvance > speed / 60.0f * 0.9f, label + ": no pause during a 300 ms gap");
+                    Check(worstError < 0.15f, label + ": straight movement stays within 15 cm");
+                    Check(warps == 0, label + ": no warp on resuming updates");
+                } else {
+                    Check(worstError < speed * 0.4f + 0.1f, label + ": missing updates bound stop/turn overshoot");
+                    Check(recoveredError < 0.15f, label + ": settles after a stop or reversal");
+                    Check(warps <= 1, label + ": no repeated warps after a stop or reversal");
+                }
+                std::printf("%s: min advance %.3f m, worst error %.3f m, settled error %.3f m, warps %d\n",
+                            label.c_str(), minAdvance, worstError, recoveredError, warps);
+            }
+        }
+    }
+}
+
 // Review fixes (2026-10-07).
 void TestReviewFixes() {
     // 1. The flush interval follows this machine's own PlayerSync switch.
@@ -424,6 +511,8 @@ int main() {
     TestAcceptAndClock();
     TestEstimate();
     TestConverge();
+    TestUnevenFrames();
+    TestSparseUpdates();
     TestReviewFixes();
     TestRoomTrackCapacity();
     TestFeature();

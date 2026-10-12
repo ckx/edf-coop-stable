@@ -165,7 +165,7 @@ Vec3 EstimatePosition(const RemoteTrack& track, double nowMs, const NetPlayerPar
 void ResetSteps(RemoteTrack& track) {
     track.stepped = false;
     track.lastAdded = {};
-    track.ownMotion = {};
+    track.ownVelocity = {};
 }
 
 RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetPlayerParams& params) {
@@ -181,22 +181,24 @@ RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetP
         ResetSteps(track);
         return step;
     }
-    const double dtMs = track.stepped ? std::clamp(nowMs - track.lastStepMs, 4.0, 50.0) : 1000.0 / 60.0;
+    const double elapsedMs = track.stepped ? (std::max)(nowMs - track.lastStepMs, 0.001) : 1000.0 / 60.0;
+    const double dtMs = std::clamp(elapsedMs, 4.0, 50.0);
     const float dt = static_cast<float>(dtMs / 1000.0);
     // The estimate moves with the sample's velocity only until the extrapolation limit, and so does the copy: this
     // step gets the velocity for what is left of that time, none past it.
     const double runMs = std::clamp(static_cast<double>(params.maxExtrapolateMs) - SampleAgeMs(track, nowMs), 0.0, dtMs);
     const Vec3 wanted = track.last.velocity * static_cast<float>(runMs / 1000.0);
     if (track.stepped) {
-        // What the copy did on its own last step: its motion less what we added.
-        const Vec3 own = current - track.lastPosition - track.lastAdded;
-        track.ownMotion = track.ownMotion * 0.5f + own * 0.5f;
+        // Measure over the actual interval, including hitches. Averaging displacements from unequal frames
+        // mistakes a longer frame for a faster copy and produces alternating forward/backward corrections.
+        const Vec3 own = (current - track.lastPosition - track.lastAdded) * static_cast<float>(1000.0 / elapsedMs);
+        track.ownVelocity = track.ownVelocity * 0.5f + own * 0.5f;
     } else {
-        track.ownMotion = wanted;  // nothing measured yet: assume it already moves right
+        track.ownVelocity = wanted * (1.0f / dt);  // nothing measured yet: assume it already moves right
     }
     const float gain = 1.0f - std::exp(-static_cast<float>(dtMs) / (std::max)(params.tauMs, 1.0f));
     const Vec3 converge = Length(error) < params.deadband ? Vec3{} : error * gain;
-    const Vec3 feed = (wanted - track.ownMotion) * std::clamp(params.feedForward, 0.0f, 1.0f);
+    const Vec3 feed = (wanted - track.ownVelocity * dt) * std::clamp(params.feedForward, 0.0f, 1.0f);
     step.add = ClampLength(converge + feed, params.maxSpeed * dt);
     track.stepped = true;
     track.lastPosition = current;

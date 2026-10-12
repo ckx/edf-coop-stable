@@ -115,6 +115,8 @@ zip 里有 README_EDF6Coop.txt（English）、README_EDF6Coop_zh.txt（中文）
 | `[Log] CrashLog` | `1` | 崩溃时把地址和调用栈写进日志 |
 | `CrashDump` | `0` | 第一次崩溃时另写 `EDF6Coop-crash.dmp`。里面有游戏内存（房间名、聊天），只在被要求时开 |
 
+玩家位置校正按实际经过的时间计算每秒速度，避免帧间隔变化让本来移动正确的远端玩家受到前后交替的校正。
+
 ## 原理
 
 ### 可靠发送

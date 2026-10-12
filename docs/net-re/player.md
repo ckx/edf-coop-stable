@@ -78,3 +78,27 @@ NetworkUpdate = main slot55 0x596130（PW 0x5803C0 jmp 过去）。远端（+0x1
 ## Full-room tracking
 
 The send and receive track tables use `kMaxPlayers`, the same limit as the game room. A 64-entry receive table would evict still-active players in larger rooms before their frame updates, discarding their samples and convergence history. `TestRoomTrackCapacity` exercises the production table with 65 and 1024 players over successive receive/update passes, then replaces a departed player without losing the remaining tracks.
+
+## 2026-10-12 frame-time correction
+
+The diagnostic 5 sessions in `EDF6Coop-chals.log`, `EDF6Coop-clam.log`, `EDF6Coop-pono.log`
+and the local host's `Mods/Plugins/EDF6Coop.log` show uneven update timing. Maximum gaps
+between player updates were 144.46, 178.29, 124.32 and 368.69 ms respectively. These are
+gaps between hook calls, not network latency measurements. The host and two joiners also
+recorded roughly 2,900 warps during a shared interval. The player confirmed that interval
+was a spaceship glitch, so it is excluded from the netplay diagnosis.
+
+`StepRemote` previously averaged the copy's displacement per frame, then compared it with
+the sender's velocity multiplied by the current frame duration. A copy moving at the
+correct speed could receive alternating forward/backward corrections solely because
+frame durations differed. `TestUnevenFrames` reproduced corrections up to 0.61 m at
+40 m/s with intermittent 45 ms frames before the fix.
+
+The estimator now divides observed motion, minus the previous added displacement, by
+the actual elapsed time before filtering it. Prediction and correction still use a
+bounded 4–50 ms step, while measuring a hitch uses its full duration. The final regression
+includes 369 ms hitches and requires corrections below 3 cm with no warps. The sparse
+update regression also exercises the diagnostic 5 setting of 350 ms through 300 ms
+packet gaps, stops and reversals. This change does not alter defaults, protocol or wire
+format. Both the MinGW/Wine and MSVC non-stress suites pass 26 tests, including 14 tests
+against EDF.dll. Live multiplayer improvement remains unverified.
