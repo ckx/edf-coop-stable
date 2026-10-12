@@ -129,6 +129,11 @@ const IniEntry kIniEntries[] = {
       "レーダー上のアイテムを種類で色分け：アーマー赤、回復白、武器緑（元のゲームは全部緑）。自分の画面だけ。1 オン / 0 元の動作",
       "Color pickups on the radar by type: armor red, health white, weapons green (the original game shows all of them\n"
       "  green). Only your own screen. 1 on / 0 original"}},
+    {"[Diagnostics]", {}},
+    {"Laser=1",
+     {"记录 Closed Laser M2 所用激光类型的限量诊断，不改变开火或伤害。0 关闭",
+      "Closed Laser M2 が使うレーザー型の診断を回数制限付きで記録。発射やダメージは変更しません。0 で無効",
+      "Record bounded diagnostics for the laser class used by Closed Laser M2; firing and damage are unchanged. 0 off"}},
     {"[Log]", {}},
     {"CrashLog=1",
      {"崩溃时把地址和调用栈写进 EDF6Coop.log",

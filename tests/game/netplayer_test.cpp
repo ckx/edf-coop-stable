@@ -148,7 +148,7 @@ void TestEstimate() {
     AcceptSample(t, s, 200000.0, p);
     Check(Near(EstimatePosition(t, 200000.0, p).x, 10.0f, 1e-4f), "estimate at arrival is the sample");
     Check(Near(EstimatePosition(t, 200100.0, p).x, 10.5f, 1e-3f), "100 ms later: +0.5 m");
-    Check(Near(EstimatePosition(t, 201000.0, p).x, 11.0f, 1e-3f), "extrapolation capped at maxExtrapolateMs");
+    Check(Near(EstimatePosition(t, 201000.0, p).x, 11.75f, 1e-3f), "extrapolation capped at maxExtrapolateMs");
     s.seq = 2;
     s.senderMs = 100050;
     s.velocity = {};
@@ -340,7 +340,6 @@ void TestSparseUpdates() {
         for (const float ownSpeed : {0.0f, speed}) {
             for (const int turn : {1, 0, -1}) {
                 NetPlayerParams p;
-                p.maxExtrapolateMs = 350.0f;  // the diagnostic 5 setting used in these logs
                 SendTrack sender;
                 RemoteTrack track;
                 Vec3 copy{};

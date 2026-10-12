@@ -12,7 +12,7 @@ of sync or ending when a connection drops:
 - with everyone on this version: the shooter decides hits, and player positions carry velocity.
 Enemy/object hits keep the game's complete collision data on the shooter's machine, including armor and weak
 points. Hits on other players/vehicles go to their owners. NetHit logs separate replayed events from HP reductions;
-armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.1 uses netcode protocol 4; update
+armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.2 uses netcode protocol 4; update
 everyone in the room together to use these fixes.
 On your own radar, pickups take the color of their type: armor red, health white, weapons green
 ([Display] RadarItemColors=0 keeps them all green).
@@ -21,6 +21,11 @@ room weapon files, armor copy and automatic updates of 2.5.0 and earlier are gon
 on 2.5.0. Everyone in a room should run the same version: a host refuses a player whose netcode protocol
 differs ([Netcode] RejectMismatched=1).
 Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections.
+
+The default [NetPlayer] MaxExtrapolateMs is 350 ms, retaining diagnostic 5’s prediction window. Explicit INI overrides are preserved. Longer prediction bridges short update gaps but can overshoot when a player stops or turns; the stale-data fallback remains 400 ms.
+
+Laser diagnostics write up to eight LASER sample lines per 30 seconds and an activity summary when the next laser callback occurs. Samples include owner identity when available, position, forward direction, age, lifetime, beam endpoints and render dimensions, and observed draw callbacks. receive-before means the laser’s native network callback ran; it does not count every shot announcement. Draw callbacks do not prove visible pixels, and zero callbacks before the first render do not prove a missing beam. These diagnostics do not establish whether damage synchronized. When a beam differs, note the time and collect the shooter’s and observers’ logs after closing the game.
+[Diagnostics] Laser=0: disable laser diagnostics.
 
 [Install / uninstall]
 Windows: extract the whole zip, double-click INSTALL.bat, then start the game from Steam as usual. (Or drop

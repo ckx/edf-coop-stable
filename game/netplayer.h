@@ -70,10 +70,10 @@ PlayerSample MakeSample(SendTrack& track, Vec3 position, double nowMs);
 
 struct NetPlayerParams {
     float tauMs = 80.0f;               // error time constant: a tenth left after ~2.3 tau
-    float maxExtrapolateMs = 200.0f;   // how far ahead of its last sample a player is extrapolated
+    float maxExtrapolateMs = 350.0f;   // how far ahead of its last sample a player is extrapolated
     float snapDistance = 8.0f;         // larger errors warp the copy to the estimate...
     float warpLeadSeconds = 0.25f;     // ...or, when faster, errors above speed * this (a 40 m/s boost turning:
-                                       // the extrapolation itself can be ~v * 0.2 s off for a moment)
+                                       // prediction can be wrong during an unseen turn)
     float maxSpeed = 60.0f;            // cap of what is added per frame, m/s
     float feedForward = 1.0f;          // 0..1: how much of the sender's velocity replaces the copy's own motion
     float deadband = 0.03f;            // m: errors below this are left alone

@@ -112,8 +112,13 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `HitAuthority` | `1` | The shooter decides hits. Used only while everyone has it on |
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: armor red, health white, weapons green. Only your own screen. `0` = all green (original) |
+| `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
 | `CrashDump` | `0` | Also write `EDF6Coop-crash.dmp` for the first crash. It holds game memory (room name, chat), so turn it on only when asked |
+
+The default `[NetPlayer] MaxExtrapolateMs` is 350 ms, retaining diagnostic 5’s prediction window. Explicit INI overrides are preserved. Longer prediction bridges short update gaps but can overshoot when a player stops or turns; the stale-data fallback remains 400 ms.
+
+Laser diagnostics write up to eight `LASER sample` lines per 30 seconds and an activity summary when the next laser callback occurs. Samples include owner identity when available, position, forward direction, age, lifetime, beam endpoints and render dimensions, and observed draw callbacks. `receive-before` means the laser’s native network callback ran; it does not count every shot announcement. Draw callbacks do not prove visible pixels, and zero callbacks before the first render do not prove a missing beam. These diagnostics do not establish whether damage synchronized. When a beam differs, note the time and collect the shooter’s and observers’ logs after closing the game.
 
 Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections.
 
@@ -145,7 +150,7 @@ Every player with the plugin also writes `EDF6DN_ID`: the SHA-256 fingerprint of
 
 ### Netcode version gate
 
-Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.1 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
+Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.2 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
 
 Every player publishes its netcode protocol and the features it has on (`EDF6NET_PROTO`, `EDF6NET_CAPS`). The host publishes what the whole room runs (`EDF6NET_ROOMCAPS`). Fragments, player sync and hit authority run only while every member runs the same protocol with the feature on; a single player without it turns it off for the room. With `RejectMismatched=1` the host removes a player of another protocol.
 

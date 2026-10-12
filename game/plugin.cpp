@@ -17,6 +17,7 @@
 #include "hitauthgame.h"
 #include "lobbytexts.h"
 #include "log.h"
+#include "lasertrace.h"
 #include "midhook.h"
 #include "netfeature.h"
 #include "netplayer_game.h"
@@ -178,6 +179,7 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     // Only this machine's radar: nothing goes over the network.
     if (GetPrivateProfileIntW(L"Display", L"RadarItemColors", 1, iniPath) != 0) InstallRadarItemColors(base);
     else Log("RadarItemColors=0: every pickup on the radar stays green");
+    if (GetPrivateProfileIntW(L"Diagnostics", L"Laser", 1, iniPath) != 0) InstallLaserTrace(base);
     // Hit authority and player sync: hooks and thunk pages of their own, so a site that is not the expected code
     // leaves only that part off and the game does as it always did. A part that did not start is not published.
     InitNetFeature(iniPath);

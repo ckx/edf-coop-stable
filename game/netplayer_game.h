@@ -19,7 +19,7 @@ struct PlayerSyncSettings {
     int sendIntervalFrames = 2;  // 1 = every sync frame (60 Hz)
     int flushIntervalMs = 45;    // 0 = leave the game's 90 ms
     float tauMs = 80.0f;
-    float maxExtrapolateMs = 200.0f;
+    float maxExtrapolateMs = 350.0f;
     float snapDistance = 8.0f;
     float feedForward = 1.0f;
 };
