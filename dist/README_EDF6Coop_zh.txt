@@ -1,4 +1,4 @@
-护盾和玩家抖动诊断版本4，仅增加日志，不包含修复。请备份现有插件DLL。所有测试者都应使用此版本，记录测试时间，并在关闭游戏后发送 Mods/Plugins/EDF6Coop.log。测试后请恢复备份或重新安装正式版3.0.1。英文测试步骤见源码中的 release-notes/3.0.1-shield-diag4.md 或安装包中的 README_SHIELD_DIAGNOSTIC.txt。Windows 下运行 BUILD.cmd 构建，Linux 下运行 bash build.sh；所需工具见 BUILDING.txt。
+护盾和玩家抖动诊断版本5。此实验版本将远程移动预测上限的默认值从200毫秒提高到350毫秒，以覆盖已观测到的300毫秒更新间隔。突然停止或转向时，预测位置可能偏离得更远。400毫秒的数据失效机制和通信格式不变。保留现有的 [NetPlayer] MaxExtrapolateMs 设置；本次实验请设为350，设为200可恢复之前的上限。护盾和激光行为不变。请备份插件DLL。所有测试者应使用此版本，记录测试时间，关闭游戏后发送 Mods/Plugins/EDF6Coop.log。详情见源码中的 release-notes/3.0.1-shield-diag5.md 或安装包中的 README_SHIELD_DIAGNOSTIC.txt。Windows 下运行 BUILD.cmd 构建，Linux 下运行 bash build.sh；所需工具见 BUILDING.txt。
 
 EDF6Coop - 地球防卫军6 联机稳定插件
 项目主页：https://github.com/hajisensai/edf-coop-stable

@@ -226,7 +226,7 @@ bool InstallShieldTrace(unsigned char* base) {
     if (!WriteCode(base + kDrawSlot, reinterpret_cast<const unsigned char*>(&drawHook), sizeof(drawHook)) ||
         !WriteCode(base + kUpdateSlot, reinterpret_cast<const unsigned char*>(&hook), sizeof(hook)))
         return false;
-    Log("SHIELD diagnostic build 4: native behavior unchanged; visibility snapshots limited to 512 per process");
+    Log("SHIELD diagnostic build 5: native behavior unchanged; visibility snapshots limited to 512 per process");
     return true;
 }
 

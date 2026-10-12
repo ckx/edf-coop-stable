@@ -1,4 +1,4 @@
-シールドとプレイヤーの揺れを調べる診断ビルド4です。ログ収集用であり、修正版ではありません。既存のプラグインDLLをバックアップしてください。テスト参加者全員がこのビルドを使用し、テスト時刻を記録して、ゲーム終了後に Mods/Plugins/EDF6Coop.log を送ってください。終了後はバックアップを復元するか通常版3.0.1を再インストールしてください。英語のテスト手順はソース内の release-notes/3.0.1-shield-diag4.md、配布パッケージ内の README_SHIELD_DIAGNOSTIC.txt を参照してください。ビルドは Windows で BUILD.cmd、Linux で bash build.sh を実行します。必要なツールは BUILDING.txt を参照してください。
+シールドとプレイヤーの揺れを調べる診断ビルド5です。この実験版は、観測された300 msの更新間隔に対応するため、リモート移動の予測上限の既定値を200 msから350 msに変更します。急停止や方向転換では行き過ぎが増える場合があります。400 msでの古いデータの失効と通信形式は変更しません。既存の [NetPlayer] MaxExtrapolateMs 設定は保持されます。この実験では350、従来の上限に戻す場合は200を指定してください。シールドとレーザーの挙動は変更しません。プラグインDLLをバックアップし、全テスト参加者がこのビルドを使い、テスト時刻を記録してゲーム終了後に Mods/Plugins/EDF6Coop.log を送ってください。詳細はソースの release-notes/3.0.1-shield-diag5.md または配布パッケージの README_SHIELD_DIAGNOSTIC.txt を参照してください。Windows は BUILD.cmd、Linux は bash build.sh でビルドできます。必要なツールは BUILDING.txt を参照してください。
 
 EDF6Coop - 地球防衛軍6 のオンライン協力プレイを安定させるプラグイン
 プロジェクトページ：https://github.com/hajisensai/edf-coop-stable

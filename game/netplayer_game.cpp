@@ -333,7 +333,7 @@ PlayerSyncSettings ReadPlayerSyncSettings(const wchar_t* iniPath) {
     s.flushIntervalMs = flush <= 0 ? 0 : std::clamp(flush, 16, 90);
     s.tauMs = static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"ConvergeMs", 80, iniPath), 10, 1000));
     s.maxExtrapolateMs =
-        static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"MaxExtrapolateMs", 200, iniPath), 0, 500));
+        static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"MaxExtrapolateMs", 350, iniPath), 0, 500));
     s.snapDistance = static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"SnapDistance", 8, iniPath), 1, 100));
     s.feedForward =
         static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"FeedForwardPercent", 100, iniPath), 0, 100)) / 100.0f;
@@ -399,7 +399,7 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
         }
     }
 #ifdef EDF6_SHIELD_TRACE
-    Log("PLAYER diagnostic build 4: five-second per-object windows; limited to 3600 lines per process");
+    Log("PLAYER diagnostic build 5: five-second per-object windows; limited to 3600 lines per process");
 #endif
     Log("PLAYER sync: hooks installed (%zu vtable slots%s). Players send position, velocity and time every %d sync "
         "frame(s); remote players with that data are extrapolated (up to %.0f ms) and converge in %.0f ms (warp above "

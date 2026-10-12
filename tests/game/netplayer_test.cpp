@@ -148,7 +148,7 @@ void TestEstimate() {
     AcceptSample(t, s, 200000.0, p);
     Check(Near(EstimatePosition(t, 200000.0, p).x, 10.0f, 1e-4f), "estimate at arrival is the sample");
     Check(Near(EstimatePosition(t, 200100.0, p).x, 10.5f, 1e-3f), "100 ms later: +0.5 m");
-    Check(Near(EstimatePosition(t, 201000.0, p).x, 11.0f, 1e-3f), "extrapolation capped at maxExtrapolateMs");
+    Check(Near(EstimatePosition(t, 201000.0, p).x, 11.75f, 1e-3f), "extrapolation capped at maxExtrapolateMs");
     s.seq = 2;
     s.senderMs = 100050;
     s.velocity = {};
@@ -301,6 +301,60 @@ void TestConverge() {
     }
 }
 
+// The diagnostic 4 log has 100 ms samples with occasional 300 ms accepted-sample gaps.
+// Exercise the sender and receiver, dropping two updates while the local copy keeps updating at 60 Hz.
+void TestSparseUpdates() {
+    for (const float speed : {6.0f, 50.0f}) {
+        for (const float ownSpeed : {0.0f, speed}) {
+            for (const int turn : {1, 0, -1}) {
+                NetPlayerParams p;
+                SendTrack sender;
+                RemoteTrack track;
+                Vec3 copy{};
+                float minAdvance = speed, worstError = 0.0f, recoveredError = 0.0f;
+                int warps = 0;
+                for (int frame = 0; frame <= 120; ++frame) {
+                    const double now = frame * 1000.0 / 60.0;
+                    const float seconds = static_cast<float>(now / 1000.0);
+                    const float truth = speed * (seconds <= 1.0f ? seconds : 1.0f + (seconds - 1.0f) * turn);
+                    if (frame % 6 == 0) {
+                        const PlayerSample sample = MakeSample(sender, {truth, 0, 0}, now);
+                        if (frame != 60 && frame != 66) AcceptSample(track, sample, now, p);
+                    }
+                    const Vec3 before = copy;
+                    const RemoteStep step = StepRemote(track, copy, now, p);
+                    if (step.warp) {
+                        copy = step.target;
+                        ++warps;
+                    } else {
+                        copy = copy + Vec3{ownSpeed * (frame < 72 ? 1 : turn) / 60.0f, 0, 0} + step.add;
+                    }
+                    if (frame >= 54 && frame < 72) minAdvance = (std::min)(minAdvance, copy.x - before.x);
+                    const float nextSeconds = static_cast<float>((frame + 1) / 60.0);
+                    const float nextTruth = speed * (nextSeconds <= 1.0f ? nextSeconds :
+                        1.0f + (nextSeconds - 1.0f) * turn);
+                    const float error = std::fabs(copy.x - nextTruth);
+                    if (frame >= 54) worstError = (std::max)(worstError, error);
+                    if (frame >= 108) recoveredError = (std::max)(recoveredError, error);
+                }
+                const std::string label = "sparse updates, speed=" + std::to_string(speed) +
+                    " own=" + std::to_string(ownSpeed) + " turn=" + std::to_string(turn);
+                if (turn == 1) {
+                    Check(minAdvance > speed / 60.0f * 0.9f, label + ": no pause during a 300 ms gap");
+                    Check(worstError < 0.15f, label + ": straight movement stays within 15 cm");
+                    Check(warps == 0, label + ": no warp on resuming updates");
+                } else {
+                    Check(worstError < speed * 0.4f + 0.1f, label + ": missing updates bound stop/turn overshoot");
+                    Check(recoveredError < 0.15f, label + ": settles after a stop or reversal");
+                    Check(warps <= 1, label + ": no repeated warps after a stop or reversal");
+                }
+                std::printf("%s: min advance %.3f m, worst error %.3f m, settled error %.3f m, warps %d\n",
+                            label.c_str(), minAdvance, worstError, recoveredError, warps);
+            }
+        }
+    }
+}
+
 // Review fixes (2026-10-07).
 void TestReviewFixes() {
     // 1. The flush interval follows this machine's own PlayerSync switch.
@@ -424,6 +478,7 @@ int main() {
     TestAcceptAndClock();
     TestEstimate();
     TestConverge();
+    TestSparseUpdates();
     TestReviewFixes();
     TestRoomTrackCapacity();
     TestFeature();
