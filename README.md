@@ -150,7 +150,7 @@ Every player with the plugin also writes `EDF6DN_ID`: the SHA-256 fingerprint of
 
 ### Netcode version gate
 
-Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.2 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
+Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.3 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
 
 Every player publishes its netcode protocol and the features it has on (`EDF6NET_PROTO`, `EDF6NET_CAPS`). The host publishes what the whole room runs (`EDF6NET_ROOMCAPS`). Fragments, player sync and hit authority run only while every member runs the same protocol with the feature on; a single player without it turns it off for the room. With `RejectMismatched=1` the host removes a player of another protocol.
 
