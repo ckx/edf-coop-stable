@@ -14,7 +14,7 @@ Enemy/object hits keep the game's complete collision data on the shooter's machi
 points. Hits on other players/vehicles go to their owners. NetHit logs separate replayed events from HP reductions;
 armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.2 uses netcode protocol 4; update
 everyone in the room together to use these fixes.
-On your own radar, pickups take the color of their type: armor red, health white, weapons green
+On your own radar, pickups take the color of their type: health white, armor and weapons green
 ([Display] RadarItemColors=0 keeps them all green).
 It plays the game's own rooms of up to four players. The bigger rooms (Player MOD), room screen, weapon pages,
 room weapon files, armor copy and automatic updates of 2.5.0 and earlier are gone; whoever needs them stays

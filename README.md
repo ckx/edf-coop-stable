@@ -111,7 +111,7 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `PlayerSync` | `1` | Player positions carry velocity, so other players move smoother. Used only while everyone has it on |
 | `HitAuthority` | `1` | The shooter decides hits. Used only while everyone has it on |
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
-| `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: armor red, health white, weapons green. Only your own screen. `0` = all green (original) |
+| `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
 | `CrashDump` | `0` | Also write `EDF6Coop-crash.dmp` for the first crash. It holds game memory (room name, chat), so turn it on only when asked |

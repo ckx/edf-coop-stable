@@ -125,9 +125,9 @@ const IniEntry kIniEntries[] = {
       "As host, refuse players whose netcode protocol differs (different rules would desync). 1 on / 0 off"}},
     {"[Display]", {}},
     {"RadarItemColors=1",
-     {"雷达上的道具按种类着色：护甲红、回复白、武器绿（原版全是绿色）。只影响自己的画面。1 开 / 0 原版",
-      "レーダー上のアイテムを種類で色分け：アーマー赤、回復白、武器緑（元のゲームは全部緑）。自分の画面だけ。1 オン / 0 元の動作",
-      "Color pickups on the radar by type: armor red, health white, weapons green (the original game shows all of them\n"
+     {"雷达上的道具按种类着色：回复白、护甲和武器绿（原版全是绿色）。只影响自己的画面。1 开 / 0 原版",
+      "レーダー上のアイテムを種類で色分け：回復白、アーマーと武器は緑（元のゲームは全部緑）。自分の画面だけ。1 オン / 0 元の動作",
+      "Color pickups on the radar by type: health white, armor and weapons green (the original game shows all of them\n"
       "  green). Only your own screen. 1 on / 0 original"}},
     {"[Diagnostics]", {}},
     {"Laser=1",

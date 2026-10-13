@@ -35,7 +35,6 @@ struct Positions {
 using DrawDotsFn = void(__fastcall*)(void* radar, void* rdx, const Positions* dots, void* r9, const float* color,
                                      void* sixth);
 
-alignas(16) constexpr float kRed[4] = {1.0f, 0.0f, 0.0f, 1.0f};
 alignas(16) constexpr float kWhite[4] = {1.0f, 1.0f, 1.0f, 1.0f};
 
 unsigned char* game = nullptr;
@@ -62,7 +61,6 @@ bool ReadItemTypes(std::size_t count, std::uint32_t* types) {
 
 const float* ItemColor(std::uint32_t type, const float* gameColor) {
     switch (type) {
-    case kArmor: return kRed;
     case kHealSmall:
     case kHealBig: return kWhite;
     default: return gameColor;
@@ -78,7 +76,7 @@ void __fastcall DrawItemDots(void* radar, void* rdx, const Positions* dots, void
         draw(radar, rdx, dots, r9, color, sixth);
         return;
     }
-    for (const float* pass : {color, kWhite, kRed}) {
+    for (const float* pass : {color, kWhite}) {
         group.clear();
         for (std::size_t i = 0; i < dots->size; ++i)
             if (ItemColor(types[i], color) == pass) group.push_back(dots->data[i]);
@@ -112,7 +110,7 @@ bool InstallRadarItemColors(unsigned char* base) {
         page.Release();
         return false;
     }
-    Log("RADAR: item dots by type (armor red, health white, weapons green); call at EDF+%X", site.rva);
+    Log("RADAR: item dots by type (health white, armor and weapons green); call at EDF+%X", site.rva);
     return true;
 }
 
