@@ -8,7 +8,7 @@ W2 = 玩家同步（`game/netplayer*`），W1 = 传输层和联机协议版本�
 SoldierBase 0x17D24D8 / AssultSoldier 0x17CDF28 / Engineer 0x17CF100 / HeavyArmor 0x17CF5B8 / PaleWing 0x17D0FF8；NetworkObject 子表在 +0x120。
 - NetworkObject slot5 0x125A70 -> slot7 0x59FA80（写）；slot6 0x125180 -> slot8 0x592130（读）。
 - 写：0x5781B0 计数 obj+0x1820++；mask=main slot92（0x59FB10，PW 0x582DF0 加 0x800）；u16 mask 经 0x12B54E0；字段 main slot52（0x59FDB0，PW 0x582E40）。读：slot53（0x592180，PW 0x57FCC0）。
-- 玩家（slot33 0x550890 为真）mask：0x08/0x10/0x40 每次；位置 bit1 仅 cnt%6==3；朝向 bit2 cnt%6==0（+0x1E41 时每 2 次）。已用位 0x1..0x800，0x1000-0x8000 空闲。
+- 玩家（slot33 0x550890 为真）普通活动路径 mask：0x08/0x10/0x40 每次；位置 bit1 仅 cnt%6==3；朝向 bit2 cnt%6==0。+0x1E41 非零时，0x59FBB5 最终每次都设置 bit2，不能只看前面的除以 2 分支。已用位 0x1..0x800，0x1000-0x8000 空闲。
 - 位置 bit1：0x77AD00 写 obj+0x90 vec3，经 0x761B20 **三个半精度浮点**（6 字节，>512m 时步长 0.5m）。H
 - 每对象 payload 以 bin 元素（0x12B5200，tag 0xA0|len）追加进批，接收按对象有界（M）。
 
@@ -20,7 +20,7 @@ SoldierBase 0x17D24D8 / AssultSoldier 0x17CDF28 / Engineer 0x17CF100 / HeavyArmo
 NetworkUpdate = main slot55 0x596130（PW 0x5803C0 jmp 过去）。远端（+0x128 bit0）：
 - HumanCharacterSyncControl @obj+0x1830：Init 0x77AC90（快照阈值 100m、120 帧未收敛则下包瞬移）；读 0x77AB00 写目标 +0x1840、+0x1850=0/+0x1851=1。
 - Update 0x77AD70：目标每帧按**副本自己模拟的速度** dead-reckon；校正速度 = 60*G*err 写入 obj+0x840（Havok 代理一次性附加速度，步末 0x11B9CBF 清零）。G 由 SoldierBase 构造 0x58E120 设为 (0.075,0,0.075) 空中 / (0.075,0.1,0.075) 地面 —— 空中竖直不校正。死区 PlayerCtrlSyncChecker 0x58EDB0：水平<0.1m 且竖直<0.15m 即停。
-- 0x596386 的 0.05 只平滑 +0x1920（校正速度的平滑副本，slot63 0x570D80 用于朝向），不影响位置——这就是改它没用的根因。
+- 0x596386 的 0.05 只平滑 +0x1920（校正速度的平滑副本，slot63 0x570D80 用于修正运动向量），不影响位置。slot63 并不直接写瞄准角 +0x1230/+0x1234。
 
 ## 记录大小与带宽（M，按写入函数推算）
 - 标量 float（0x12B5350）：误差 ≤0.1 时 3 字节半精度，否则 0xC2+float32 共 5 字节；vec3 位置（0x761B20）恒为 bin(6)=8 字节。
@@ -72,7 +72,7 @@ NetworkUpdate = main slot55 0x596130（PW 0x5803C0 jmp 过去）。远端（+0x1
 - 远端副本 +0x340/+0x1ED0（slot33）是否为真不影响接收端（按收到的块驱动），但发送端要求本机玩家 slot33 为真（M）。
 - +0x840 附加速度的手感、与地面碰撞/坡道/墙的交互，前馈测量在被挡住时是否推墙；Wing Diver 飞行与 Fencer 冲刺。
 - slot55 在物理步之前调用（推断自 +0x840 由步末清零，M）。
-- 关掉原版校正后 +0x1900=0，slot63 不再按校正方向转身（外观）；+0x1210 的翻面修正不再执行。
+- 关掉原版校正后 +0x1900=0，slot63 跳过 +0x1210/+0x1200 运动向量修正和 +0x11E0 的本体坐标转换。之前将其称为“转身”过于确定；没有证据证明此处会使瞄准方向错误。
 - 单向延迟无法测出，显示约落后一个最短单向延迟；8 人房带宽见上。
 
 ## Full-room tracking
