@@ -51,8 +51,9 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 
 ## Commits
 
+- Publish every build delivered to the developer on GitHub Releases, including diagnostic and experimental builds, so it can be distributed to other players. Upload a complete installable package and its SHA-256 checksum, and provide the release URL. Diagnostic builds use a clearly named prerelease and must not replace the latest stable release. A local DLL path or a source-only push is not delivery. Creating the required tags and publishing these builds is authorized; do not ask for separate confirmation.
 - After publishing any release, including diagnostic prereleases, install the published package locally in `/mnt/kosmos/SteamLibrary/steamapps/common/EARTH DEFENSE FORCE 6`. Back up the installed plugin, preserve settings and other mods, and verify the installed DLL against the published package's SHA-256. If EDF6 is running, wait for it to close before installing.
-- Landing completed work on `main` and pushing it to `origin/main` is authorized. Do not request separate confirmation. The data-loss rules below still apply. Release tags and GitHub Releases are not covered: those wait for the developer.
+- Landing completed work on `main` and pushing it to `origin/main` is authorized. Do not request separate confirmation. The data-loss rules below still apply.
 - Auto-commit at your discretion after a meaningful unit of work lands.
 - Pull at session start and at sensible intervals during long sessions (`git pull --rebase`). Resolve conflict fallout yourself, preserving both sides' work.
 - Fast-forwards, merges, rebases and pushes are yours to run. The hard limit is data loss: if an operation would drop anyone's commit or uncommitted change (a force-push over work you do not hold, a rebase that discards a side, a hard reset over a dirty tree), stop and ask. When in doubt, merge so both sides survive.
