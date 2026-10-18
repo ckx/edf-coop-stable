@@ -22,6 +22,7 @@ struct PlayerSyncSettings {
     float maxExtrapolateMs = 350.0f;
     float snapDistance = 8.0f;
     float feedForward = 1.0f;
+    bool diagnostics = true;
 };
 
 PlayerSyncSettings ReadPlayerSyncSettings(const wchar_t* iniPath);

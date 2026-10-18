@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstring>
 #include <vector>
@@ -124,6 +125,66 @@ Vec3 RecordPosition(const void* soldier) {
 SRWLOCK lock = SRWLOCK_INIT;
 PlayerTracks<SendTrack> sent;
 PlayerTracks<RemoteTrack> remotes;
+struct MotionFrame {
+    double now = 0.0;
+    RemoteTrack before;
+    Vec3 current, record, ownVelocity;
+    RemoteStep step;
+};
+struct MotionTrace {
+    std::array<MotionFrame, 8> history{};
+    std::size_t next = 0, count = 0;
+    unsigned remaining = 0;
+    double nextBurstMs = 0.0;
+};
+PlayerTracks<MotionTrace> motionTraces;
+double motionWindowMs = 0.0;
+unsigned motionLines = 0;
+
+void LogMotion(void* soldier, const MotionFrame& f) {
+    if (motionLines >= 96) return;  // Includes bursts from objects recreated during this window.
+    ++motionLines;
+    const auto& t = f.before;
+    const Vec3 moved = t.stepped ? f.current - t.lastPosition : Vec3{};
+    Log("PLAYER motion object=%p t=%.2f dt=%.2f seq=%u senderMs=%u ageMs=%.2f recvAgeMs=%.2f "
+        "sample=(%.4f,%.4f,%.4f) velocity=(%.3f,%.3f,%.3f) proxy=(%.4f,%.4f,%.4f) "
+        "record=(%.4f,%.4f,%.4f) moved=(%.4f,%.4f,%.4f) prevAdd=(%.4f,%.4f,%.4f) "
+        "own=(%.3f,%.3f,%.3f) target=(%.4f,%.4f,%.4f) add=(%.4f,%.4f,%.4f) warp=%d measured=%d",
+        soldier, f.now, t.stepped ? f.now - t.lastStepMs : 0.0, static_cast<unsigned>(t.last.seq),
+        static_cast<unsigned>(t.last.senderMs), SampleAgeMs(t, f.now), f.now - t.receivedMs,
+        t.last.position.x, t.last.position.y, t.last.position.z,
+        t.last.velocity.x, t.last.velocity.y, t.last.velocity.z,
+        f.current.x, f.current.y, f.current.z, f.record.x, f.record.y, f.record.z,
+        moved.x, moved.y, moved.z, t.lastAdded.x, t.lastAdded.y, t.lastAdded.z,
+        f.ownVelocity.x, f.ownVelocity.y, f.ownVelocity.z,
+        f.step.target.x, f.step.target.y, f.step.target.z, f.step.add.x, f.step.add.y, f.step.add.z,
+        f.step.warp ? 1 : 0, t.stepped ? 1 : 0);
+}
+
+// Called under lock. Keep the frames before a large correction as well as those after it;
+// aggregate maxima cannot show whether a sample or the local feedback started an oscillation.
+void TraceMotion(void* soldier, const MotionFrame& frame) {
+    if (frame.now - motionWindowMs >= 30000.0) {
+        motionWindowMs = frame.now;
+        motionLines = 0;
+    }
+    MotionTrace& trace = *motionTraces.Find(soldier, frame.now, true);
+    if (!trace.remaining && frame.now >= trace.nextBurstMs && motionLines < 96 &&
+        (frame.step.warp || Length(frame.step.add) >= 0.25f || SampleAgeMs(frame.before, frame.now) >= 200.0)) {
+        for (std::size_t i = 0; i < trace.count; ++i)
+            LogMotion(soldier, trace.history[(trace.next + trace.history.size() - trace.count + i) % trace.history.size()]);
+        trace.remaining = 16;
+        trace.nextBurstMs = frame.now + 30000.0;
+    }
+    if (trace.remaining) {
+        LogMotion(soldier, frame);
+        --trace.remaining;
+    }
+    trace.history[trace.next] = frame;
+    trace.next = (trace.next + 1) % trace.history.size();
+    trace.count = (std::min)(trace.count + 1, trace.history.size());
+}
+
 struct Counters {
     std::uint64_t sent = 0, received = 0, refused = 0, driven = 0, warps = 0;
     double loggedMs = 0.0;
@@ -225,7 +286,19 @@ void UpdateHook(void* soldier) {
     }
     float w = 1.0f;
     const Vec3 current = ProxyPosition(soldier, w);
+    MotionFrame frame;
+    if (settings.diagnostics) {
+        frame.now = now;
+        frame.before = *track;
+        frame.current = current;
+        frame.record = RecordPosition(soldier);
+    }
     const RemoteStep step = StepRemote(*track, current, now, params);
+    if (settings.diagnostics) {
+        frame.step = step;
+        frame.ownVelocity = track->ownVelocity;
+        TraceMotion(soldier, frame);
+    }
     ++counters.driven;
     counters.warps += step.warp ? 1 : 0;
     ReleaseSRWLockExclusive(&lock);
@@ -255,6 +328,7 @@ int Clamped(UINT value, int low, int high) { return std::clamp(static_cast<int>(
 
 PlayerSyncSettings ReadPlayerSyncSettings(const wchar_t* iniPath) {
     PlayerSyncSettings s;
+    s.diagnostics = GetPrivateProfileIntW(L"Diagnostics", L"Player", 1, iniPath) != 0;
     s.sendIntervalFrames = Clamped(GetPrivateProfileIntW(L"NetPlayer", L"SendIntervalFrames", 2, iniPath), 1, 6);
     const int flush = static_cast<int>(GetPrivateProfileIntW(L"NetPlayer", L"FlushIntervalMs", 45, iniPath));
     s.flushIntervalMs = flush <= 0 ? 0 : std::clamp(flush, 16, 90);
@@ -330,6 +404,10 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
         "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms",
         Sites().size(), flush ? " + flush interval" : "", settings.sendIntervalFrames, params.maxExtrapolateMs,
         params.tauMs, params.snapDistance, params.feedForward * 100.0f, flush ? flushMs : 90);
+    if (settings.diagnostics)
+        Log("PLAYER motion diagnostics ON: correction >= 0.25 m, warp or sample age >= 200 ms captures "
+            "8 prior and 16 current/following driven frames; one burst per object per 30 seconds, "
+            "at most 96 motion lines per 30 seconds across all objects; t is the hook time in ms");
     return true;
 }
 

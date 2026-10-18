@@ -102,3 +102,55 @@ update regression also exercises the diagnostic 5 setting of 350 ms through 300 
 packet gaps, stops and reversals. This change does not alter defaults, protocol or wire
 format. Both the MinGW/Wine and MSVC non-stress suites pass 26 tests, including 14 tests
 against EDF.dll. Live multiplayer improvement remains unverified.
+
+## 2026-10-17 movement jitter investigation
+
+The host's 20:53 session and the joiner's 2026-10-18 14:53 session have the same
+room ID. Both run 3.0.3 with PlayerSync active, 350 ms extrapolation and 45 ms
+packet flushing. During the recording interval the counters show no sync warps,
+refused blocks, disconnect holds, exhausted retries or skipped reliable packets.
+RTT is approximately 180–190 ms. There are retransmissions, so these summaries
+do not rule out short arrival gaps. Each side writes about 30 player blocks per
+second and accepts about 10. They do not record per-frame sample age or correction.
+The older `PLAYER diagnostic` lines in these files are from earlier sessions.
+
+The 2.402-second recording shows repeated vertical motion of a remote Wing Diver.
+The player confirms that this character was moving. Neither the video nor the
+cumulative counters establish the source of the oscillation.
+
+Instruction inspection confirms the correction path. EDF+575BBD calls slot 55,
+then EDF+575BCA calls the proxy preparation function at 11B9890. That function
+adds holder+1C0, which is soldier+840, to its velocity at 11B9A96–11B9AFC, submits
+the velocity through 11AFA70 and clears the addition at 11B9CBF. This establishes
+that the addition is a requested physics velocity, not a measured displacement.
+
+`StepRemote` subtracts the preceding requested displacement from observed movement
+to estimate the copy's own velocity. A small C++ probe calling the production
+`AcceptSample` and `StepRemote` exposes windup when collision blocks that request.
+With a stationary target at y=0, a copy constrained above a floor at y=0.05,
+60 Hz steps and 100 ms samples, the requested downward correction reaches 1 m
+per frame and the inferred upward velocity reaches 60 m/s despite zero observed
+movement. The same probe with both floor and target at y=0 remains at zero.
+The offset floor is a fixture assumption. The supplied logs do not establish
+that this condition occurred in the recording, and this probe does not reproduce
+the recorded bouncing.
+
+`[Diagnostics] Player=1` now captures bounded `PLAYER motion` bursts around large
+corrections, warps or old samples. Each line contains the received sample, sample
+age, current proxy and object positions, observed displacement, previous requested
+addition, inferred own velocity and new correction. The `t` field preserves the
+hook time of buffered history; the log prefix is the later emission time. Compare
+successive rows to distinguish changes in received motion from feedback caused by
+an unapplied correction. A burst covers up to eight preceding and sixteen current
+and following driven frames. Each object can trigger once per 30 seconds, with a
+global cap of 96 motion lines per 30 seconds including recreated objects.
+
+This change adds observation only. The movement algorithm, settings governing
+movement and wire format are unchanged. A live capture is still needed before
+attributing this report to collision feedback or claiming a jitter fix.
+
+Validation: the MinGW build and all 27 non-stress tests pass under Wine, including
+15 tests using EDF.dll. A focused check invoking the production trace functions
+also verifies chronological history, burst length, cooldown, the global line cap
+and its window reset. MSVC and live multiplayer have not been checked for this
+diagnostic change.

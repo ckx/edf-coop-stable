@@ -113,8 +113,11 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
+| `[Diagnostics] Player` | `1` | Bounded player movement traces for jitter diagnosis. `0` disables them |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
 | `CrashDump` | `0` | Also write `EDF6Coop-crash.dmp` for the first crash. It holds game memory (room name, chat), so turn it on only when asked |
+
+Player motion diagnostics are on by default. A correction of at least 0.25 m, a warp, or a sample age of at least 200 ms captures up to eight preceding and sixteen current/following driven frames. Each object can trigger once per 30 seconds, with a total limit of 96 `PLAYER motion` lines per 30 seconds. The lines record received positions and velocities, proxy and object positions, observed movement, requested corrections and the estimated local velocity. `t` is the original hook time in milliseconds; preceding frames are logged later. These traces do not prove that physics applied a requested correction. Set `[Diagnostics] Player=0` to disable them. When reporting jitter, note the time and collect the host and affected joiners' logs after closing the game.
 
 The default `[NetPlayer] MaxExtrapolateMs` is 350 ms, retaining diagnostic 5’s prediction window. Explicit INI overrides are preserved. Longer prediction bridges short update gaps but can overshoot when a player stops or turns; the stale-data fallback remains 400 ms.
 
