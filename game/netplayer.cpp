@@ -111,17 +111,26 @@ PlayerSample MakeSample(SendTrack& track, Vec3 position, double nowMs) {
     sample.seq = ++track.seq;
     sample.senderMs = static_cast<std::uint32_t>(static_cast<std::uint64_t>(nowMs));
     sample.position = position;
-    const double gap = nowMs - track.lastMs;
-    if (track.have && gap >= 1.0 && gap <= kMaxVelocityGapMs) {
-        const Vec3 moved = position - track.lastPosition;
+    // The newest write at least kVelocityWindowMs ago, or the oldest one when none is that old yet; writes further
+    // back than kMaxVelocityGapMs (a pause) are left out, so a resumed sender starts afresh.
+    std::size_t from = SendTrack::kHistory;
+    for (std::size_t i = 0; i < track.count; ++i) {
+        const std::size_t at = (track.next + SendTrack::kHistory - track.count + i) % SendTrack::kHistory;  // oldest first
+        const double age = nowMs - track.times[at];
+        if (age > kMaxVelocityGapMs || age < 1.0) continue;
+        if (from == SendTrack::kHistory || age >= kVelocityWindowMs) from = at;
+    }
+    if (from != SendTrack::kHistory) {
+        const Vec3 moved = position - track.positions[from];
         if (Length(moved) <= kWarpDistance) {
-            const Vec3 velocity = moved * static_cast<float>(1000.0 / gap);
+            const Vec3 velocity = moved * static_cast<float>(1000.0 / (nowMs - track.times[from]));
             sample.velocity = Length(velocity) <= kMaxSentSpeed ? velocity : Vec3{};
         }
     }
-    track.have = true;
-    track.lastPosition = position;
-    track.lastMs = nowMs;
+    track.positions[track.next] = position;
+    track.times[track.next] = nowMs;
+    track.next = (track.next + 1) % SendTrack::kHistory;
+    track.count = (std::min)(track.count + 1, SendTrack::kHistory);
     return sample;
 }
 
@@ -166,6 +175,7 @@ void ResetSteps(RemoteTrack& track) {
     track.stepped = false;
     track.lastAdded = {};
     track.ownVelocity = {};
+    track.windowCount = track.windowNext = 0;
 }
 
 RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetPlayerParams& params) {
@@ -181,17 +191,49 @@ RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetP
         ResetSteps(track);
         return step;
     }
-    const double elapsedMs = track.stepped ? (std::max)(nowMs - track.lastStepMs, 0.001) : 1000.0 / 60.0;
-    const double dtMs = std::clamp(elapsedMs, 4.0, 50.0);
+    const double elapsedMs = track.stepped ? nowMs - track.lastStepMs : 1000.0 / 60.0;
+    // Called again before the physics stepped: nothing moved to measure, and the last request is still pending.
+    if (track.stepped && elapsedMs < kMinStepMs) return step;
+    const double dtMs = std::clamp(elapsedMs, kMinStepMs, 50.0);
     const float dt = static_cast<float>(dtMs / 1000.0);
     // The estimate moves with the sample's velocity only until the extrapolation limit, and so does the copy: this
     // step gets the velocity for what is left of that time, none past it.
     const double runMs = std::clamp(static_cast<double>(params.maxExtrapolateMs) - SampleAgeMs(track, nowMs), 0.0, dtMs);
     const Vec3 wanted = track.last.velocity * static_cast<float>(runMs / 1000.0);
     if (track.stepped) {
-        // Measure over the actual interval, including hitches. Averaging displacements from unequal frames
-        // mistakes a longer frame for a faster copy and produces alternating forward/backward corrections.
-        const Vec3 own = (current - track.lastPosition - track.lastAdded) * static_cast<float>(1000.0 / elapsedMs);
+        // The copy's own motion: what it did beyond the requests the physics applied, over the last few steps. The
+        // physics applies a request in full, in part (a slope, a wall) or not at all (a landing, a stagger, the
+        // ground under a downward request), and never the opposite way. Taking every request as applied read a
+        // blocked one as the copy moving against it, and the feed-forward answered with a larger request: the copy
+        // of a player standing still was shoved +-35 cm at 30 Hz, and a landed copy was pushed at the step cap
+        // (the host's motion traces of 2026-10-22). A standing copy whose requests are blocked and a running copy
+        // braked to a standstill look the same in one step (nothing moves either way), so the estimate so far
+        // decides: a copy that was moving against the request is being braked, and the request counts as applied;
+        // otherwise only what moved along the request was applied. Per axis, as the ground and most walls block.
+        // Summed over the window, so a push the ground undoes the next frame cancels instead of reading as motion
+        // either way; measured over the actual time, hitches included: a per-step displacement mistakes a longer
+        // frame for a faster copy.
+        track.movedWindow[track.windowNext] = current - track.lastPosition;
+        track.addedWindow[track.windowNext] = track.lastAdded;
+        track.elapsedWindow[track.windowNext] = elapsedMs;
+        track.windowNext = (track.windowNext + 1) % RemoteTrack::kStepWindow;
+        track.windowCount = (std::min)(track.windowCount + 1, RemoteTrack::kStepWindow);
+        Vec3 moved, added;
+        double overMs = 0.0;
+        for (std::size_t i = 0; i < track.windowCount; ++i) {
+            moved = moved + track.movedWindow[i];
+            added = added + track.addedWindow[i];
+            overMs += track.elapsedWindow[i];
+        }
+        const auto axis = [](float m, float a, float prior) {
+            if (a == 0.0f || prior * a < 0.0f) return m - a;
+            const float sign = a < 0.0f ? -1.0f : 1.0f;
+            return m - sign * std::clamp(m * sign, 0.0f, std::fabs(a));
+        };
+        const Vec3 own = ClampLength(Vec3{axis(moved.x, added.x, track.ownVelocity.x), axis(moved.y, added.y, track.ownVelocity.y),
+                                          axis(moved.z, added.z, track.ownVelocity.z)} *
+                                         static_cast<float>(1000.0 / overMs),
+                                     kMaxOwnSpeed);
         track.ownVelocity = track.ownVelocity * 0.5f + own * 0.5f;
     } else {
         track.ownVelocity = wanted * (1.0f / dt);  // nothing measured yet: assume it already moves right

@@ -101,13 +101,48 @@ void TestSender() {
     PlayerSample a = MakeSample(track, {0, 0, 0}, 1000.0);
     Check(a.seq == 1 && Length(a.velocity) == 0.0f, "first sample: no velocity");
     PlayerSample b = MakeSample(track, {0.2f, 0.1f, 0}, 1033.3333);
-    Check(b.seq == 2 && Near(b.velocity.x, 6.0f, 0.01f) && Near(b.velocity.y, 3.0f, 0.01f), "velocity over 33 ms");
+    Check(b.seq == 2 && Near(b.velocity.x, 6.0f, 0.01f) && Near(b.velocity.y, 3.0f, 0.01f),
+          "one write so far: velocity over its 33 ms");
     PlayerSample c = MakeSample(track, {50.0f, 0.1f, 0}, 1066.6666);
     Check(Length(c.velocity) == 0.0f, "a warp carries no velocity");
     MakeSample(track, {50.0f, 0.1f, 0}, 2000.0);
     PlayerSample d = MakeSample(track, {51.0f, 0.1f, 0}, 2600.0);
     Check(Length(d.velocity) == 0.0f, "a long gap carries no velocity");
     Check(d.senderMs == 2600u, "sender time in ms");
+    // The velocity covers the interval the receivers get blocks at (one write in three, 100 ms), not the one write
+    // since the last: a dash that starts 33 ms before a write.
+    {
+        SendTrack t;
+        double now = 5000.0;
+        float x = 0.0f;
+        for (int i = 0; i < 6; ++i, now += 33.3333, x += 0.2f) MakeSample(t, {x, 0, 0}, now);  // 6 m/s
+        PlayerSample run = MakeSample(t, {x, 0, 0}, now);
+        Check(Near(run.velocity.x, 6.0f, 0.05f), "steady running: 6 m/s over the window (" + std::to_string(run.velocity.x) + ")");
+        now += 33.3333;
+        x += 0.2f;
+        MakeSample(t, {x, 0, 0}, now);
+        now += 33.3333;
+        x += 3.0f;  // 90 m/s for one write: a Fencer's dash starting
+        PlayerSample dash = MakeSample(t, {x, 0, 0}, now);
+        Check(dash.velocity.x > 25.0f && dash.velocity.x < 45.0f,
+              "a dash start is the window's average, not 0 for passing the cap in one write (" +
+                  std::to_string(dash.velocity.x) + ")");
+        now += 33.3333;
+        x += 3.0f;
+        now += 33.3333;
+        x += 3.0f;
+        PlayerSample dashing = MakeSample(t, {x, 0, 0}, now);
+        Check(dashing.velocity.x > 80.0f && dashing.velocity.x <= kMaxSentSpeed,
+              "a 90 m/s dash is sent as such (" + std::to_string(dashing.velocity.x) + ")");
+        // After a pause the old writes say nothing: the first write after it carries no velocity, the next one
+        // measures from the resumed writes only.
+        now += 1000.0;
+        PlayerSample resumed = MakeSample(t, {x, 0, 0}, now);
+        Check(Length(resumed.velocity) == 0.0f, "first write after a pause: no velocity");
+        now += 33.3333;
+        PlayerSample next = MakeSample(t, {x + 0.2f, 0, 0}, now);
+        Check(Near(next.velocity.x, 6.0f, 0.05f), "the write after measures from the resumed writes");
+    }
 }
 
 void TestAcceptAndClock() {
@@ -387,6 +422,103 @@ void TestSparseUpdates() {
     }
 }
 
+// The physics does not always do what the step asks: the host's motion traces of 2026-10-22 show requests of a
+// metre a frame with nothing moving (a landing, an animation) and a standing copy thrown +-35 cm up and down at
+// 30 Hz, both from the estimator reading an unapplied request as motion the other way and the feed-forward
+// fighting it. A request the physics does not apply must not grow.
+void TestBlockedRequest() {
+    // The sender stands at y=0; the copy's ground is 5 cm higher (uneven terrain between the machines).
+    {
+        NetPlayerParams p;
+        RemoteTrack track;
+        Vec3 copy{0, 0.05f, 0};
+        float worstAdd = 0.0f, worstOwn = 0.0f;
+        for (int frame = 0; frame < 240; ++frame) {
+            const double now = frame * 1000.0 / 60.0;
+            if (frame % 6 == 0) {
+                PlayerSample s;
+                s.seq = static_cast<std::uint16_t>(frame / 6 + 1);
+                s.senderMs = static_cast<std::uint32_t>(now);
+                AcceptSample(track, s, now, p);
+            }
+            const RemoteStep step = StepRemote(track, copy, now, p);
+            copy = copy + step.add;
+            copy.y = (std::max)(copy.y, 0.05f);  // the floor takes the downward part
+            if (frame > 60) {
+                worstAdd = (std::max)(worstAdd, Length(step.add));
+                worstOwn = (std::max)(worstOwn, Length(track.ownVelocity));
+            }
+        }
+        Check(worstAdd < 0.02f, "a request the floor blocks stays at the error's share, it does not wind up (" +
+                                    std::to_string(worstAdd) + " m a frame)");
+        Check(worstOwn < 0.5f, "and the copy is not taken for moving (" + std::to_string(worstOwn) + " m/s)");
+    }
+    // The physics applies the request, then the ground puts the copy back the next frame (a downward push into
+    // the floor): the correction must settle, not grow to the step cap.
+    {
+        NetPlayerParams p;
+        RemoteTrack track;
+        Vec3 copy{0, 0, 0};
+        PlayerSample s;
+        s.seq = 1;
+        s.position = {0, -0.3f, 0};  // the sender's ground is 30 cm lower
+        AcceptSample(track, s, 0.0, p);
+        float lateAdd = 0.0f;
+        bool pushed = false;
+        for (int frame = 1; frame < 120; ++frame) {
+            const double now = frame * 1000.0 / 60.0;
+            if (frame % 6 == 0) {
+                s.seq = static_cast<std::uint16_t>(frame / 6 + 1);
+                s.senderMs = static_cast<std::uint32_t>(now);
+                AcceptSample(track, s, now, p);
+            }
+            const RemoteStep step = StepRemote(track, copy, now, p);
+            copy = pushed ? Vec3{0, 0, 0} : copy + step.add;  // applied one frame, undone the next
+            pushed = !pushed;
+            if (frame > 60) lateAdd = (std::max)(lateAdd, Length(step.add));
+        }
+        Check(lateAdd < 0.12f, "a push the ground undoes settles instead of growing (" + std::to_string(lateAdd) + " m a frame)");
+    }
+    // A copy running 30% too fast on its own, braked by the step (the request opposes its motion) and the physics
+    // applying the brake in full: the estimator still reads its own speed right, so the brake holds.
+    {
+        NetPlayerParams p;
+        RemoteTrack track;
+        Vec3 copy{};
+        float worst = 0.0f;
+        for (int frame = 0; frame < 300; ++frame) {
+            const double now = frame * 1000.0 / 60.0;
+            if (frame % 6 == 0) {
+                PlayerSample s;
+                s.seq = static_cast<std::uint16_t>(frame / 6 + 1);
+                s.senderMs = static_cast<std::uint32_t>(now);
+                s.position = {10.0f * static_cast<float>(now / 1000.0), 0, 0};
+                s.velocity = {10, 0, 0};
+                AcceptSample(track, s, now, p);
+            }
+            const RemoteStep step = StepRemote(track, copy, now, p);
+            copy = copy + Vec3{13.0f / 60.0f, 0, 0} + step.add;  // where the copy is at the next frame
+            if (frame > 120) worst = (std::max)(worst, std::fabs(copy.x - 10.0f * static_cast<float>((frame + 1) / 60.0)));
+        }
+        Check(worst < 0.1f, "a copy too fast on its own is held by the brake (" + std::to_string(worst) + " m)");
+    }
+    // Called again within the same physics frame: nothing more is added and nothing is measured.
+    {
+        NetPlayerParams p;
+        RemoteTrack track;
+        PlayerSample s;
+        s.seq = 1;
+        s.velocity = {6, 0, 0};
+        AcceptSample(track, s, 0.0, p);
+        const RemoteStep first = StepRemote(track, {0, 0, 0}, 16.0, p);
+        const Vec3 own = track.ownVelocity;
+        const RemoteStep again = StepRemote(track, {0, 0, 0}, 16.5, p);
+        Check(Length(first.add) > 0.0f && Length(again.add) == 0.0f && Same(track.ownVelocity, own) &&
+                  Same(track.lastAdded, first.add),
+              "a repeated step adds nothing and keeps the measurement");
+    }
+}
+
 // Review fixes (2026-10-07).
 void TestReviewFixes() {
     // 1. The flush interval follows this machine's own PlayerSync switch.
@@ -512,6 +644,7 @@ int main() {
     TestConverge();
     TestUnevenFrames();
     TestSparseUpdates();
+    TestBlockedRequest();
     TestReviewFixes();
     TestRoomTrackCapacity();
     TestFeature();

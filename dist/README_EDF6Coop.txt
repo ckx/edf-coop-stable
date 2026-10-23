@@ -12,7 +12,7 @@ of sync or ending when a connection drops:
 - with everyone on this version: the shooter decides hits, and player positions carry velocity.
 Enemy/object hits keep the game's complete collision data on the shooter's machine, including armor and weak
 points. Hits on other players/vehicles go to their owners. NetHit logs separate replayed events from HP reductions;
-armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.3 uses netcode protocol 4; update
+armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.4 uses netcode protocol 4; update
 everyone in the room together to use these fixes.
 On your own radar, pickups take the color of their type: health white, armor and weapons green
 ([Display] RadarItemColors=0 keeps them all green).
@@ -20,7 +20,7 @@ It plays the game's own rooms of up to four players. The bigger rooms (Player MO
 room weapon files, armor copy and automatic updates of 2.5.0 and earlier are gone; whoever needs them stays
 on 2.5.0. Everyone in a room should run the same version: a host refuses a player whose netcode protocol
 differs ([Netcode] RejectMismatched=1).
-Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections.
+Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections. A correction the physics does not apply (a landing, a stagger, the ground under a downward push) is not read as the copy moving the other way, so it no longer grows into a shove. The velocity a player sends covers the 100 ms at which the others receive its position, not the last 33 ms, so the start of a dash is not sent as a stop.
 
 The default [NetPlayer] MaxExtrapolateMs is 350 ms, retaining diagnostic 5’s prediction window. Explicit INI overrides are preserved. Longer prediction bridges short update gaps but can overshoot when a player stops or turns; the stale-data fallback remains 400 ms.
 

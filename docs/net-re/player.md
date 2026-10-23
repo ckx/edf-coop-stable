@@ -154,3 +154,37 @@ Validation: the MinGW build and all 27 non-stress tests pass under Wine, includi
 also verifies chronological history, burst length, cooldown, the global line cap
 and its window reset. MSVC and live multiplayer have not been checked for this
 diagnostic change.
+
+## 2026-10-22 estimator windup and delivery cadence
+
+The host's `PLAYER motion` bursts from the 2026-10-22 sessions (3.0.3 with the jitter diagnostic, two joiners
+at 180 ms and 46 ms RTT, direct link, no loss: `gaveup=0 skipped=0`, sample ages at arrival 1-13 ms) show two
+things the algorithm got wrong.
+
+Every accepted block is 3 sequence numbers and 100 ms apart (474 of 487 gaps), while the sender writes a block
+every second sync frame (30 a second, the `PLAYER sync` counters). The mask builder 0x59FB10 returns a non-zero
+mask every frame (0x58 plus 0x1 at cnt%6==3, 0x2 at cnt%6==0) and the sync loop 0x75D2E0 writes every local
+object's record every frame within its 450-byte budget, so the thinning happens after the write: where is not
+established. What matters here: the receivers get one sample per 100 ms, and the velocity in it was measured over
+the 33 ms since the previous write, three times shorter than the interval it is extrapolated over. The start of a
+dash exceeded the 80 m/s cap within 33 ms and went out as 0 (43 of 487 accepted samples had zero velocity, among
+them samples between two at 60-75 m/s); the copy then stood still for 100 ms and was 5-9 m off at the next sample.
+`MakeSample` now measures over the newest write at least 90 ms old (a ring of eight), and the cap is 120 m/s over
+that window.
+
+The requested correction was mostly not applied by the physics: the motion along the previous request, as a
+fraction of it, has a median of 0.00 (p25 -0.27, p75 0.39, n=1783), and `|moved - v*dt|` (0.083 m median) is
+smaller than `|moved - add(n-1) - v*dt|` (0.222 m). The estimator took every request as applied, so a blocked
+request read as the copy moving the other way, and the feed-forward answered with a larger request the next
+frame: own-velocity estimates of 40-65 m/s for players moving at 2-5 m/s, requests at the 60 m/s step cap, a
+landed copy with `moved=0` for 15 frames under 1 m requests, and a near-standing copy moved +-35 cm up and down
+at 30 Hz (object 5d2dca60, error 5 cm, requests 0.7 m). That is the jitter the hosts and joiners reported.
+`StepRemote` now sums motion and requests over the last four steps and, per axis, counts a request as applied
+only as far as the copy moved along it, unless the copy was already moving against it (a brake), in which case
+the request is applied in full as before. A step called again within 4 ms adds nothing. Unit tests cover the
+floor-blocked request, a push the ground undoes, the braked copy and the repeated step. The game's response to
++0x840 when standing, landing or in an animation is still not read from the game's code: this bounds the damage
+of whatever it does, it does not model it.
+
+Not established by these logs: why only every third record is delivered, and whether the players' reports of
+each other's shots have a cause in the transport (the sessions logged were lossless with regular delivery).

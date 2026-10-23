@@ -123,7 +123,7 @@ The default `[NetPlayer] MaxExtrapolateMs` is 350 ms, retaining diagnostic 5’s
 
 Laser diagnostics write up to eight `LASER sample` lines per 30 seconds and an activity summary when the next laser callback occurs. Samples include owner identity when available, position, forward direction, age, lifetime, beam endpoints and render dimensions, and observed draw callbacks. `receive-before` means the laser’s native network callback ran; it does not count every shot announcement. Draw callbacks do not prove visible pixels, and zero callbacks before the first render do not prove a missing beam. These diagnostics do not establish whether damage synchronized. When a beam differs, note the time and collect the shooter’s and observers’ logs after closing the game.
 
-Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections.
+Player correction measures movement per second, so uneven frame times do not turn a correctly moving copy into alternating forward and backward corrections. A correction the physics does not apply (a landing, a stagger, the ground under a downward push) is not read as the copy moving the other way, so it no longer grows into a shove. The velocity a player sends covers the 100 ms at which the others receive its position, not the last 33 ms, so the start of a dash is not sent as a stop.
 
 ## How it works
 
@@ -153,7 +153,7 @@ Every player with the plugin also writes `EDF6DN_ID`: the SHA-256 fingerprint of
 
 ### Netcode version gate
 
-Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.3 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
+Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.4 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
 
 Every player publishes its netcode protocol and the features it has on (`EDF6NET_PROTO`, `EDF6NET_CAPS`). The host publishes what the whole room runs (`EDF6NET_ROOMCAPS`). Fragments, player sync and hit authority run only while every member runs the same protocol with the feature on; a single player without it turns it off for the room. With `RejectMismatched=1` the host removes a player of another protocol.
 

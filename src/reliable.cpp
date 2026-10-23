@@ -11,9 +11,12 @@ namespace {
 // packet arriving some tens of ms later costs little, while a spurious resend doubles the traffic.
 constexpr uint32_t kMinRtoMs = 150;
 constexpr uint32_t kMaxRtoMs = 1000;
-// RFC 6298: RTO = SRTT + max(G, 4 * RTTVAR), G the clock granularity (nowMs() is in milliseconds; a few ms
-// of scheduling jitter as well).
+// RFC 6298: RTO = SRTT + max(G, 4 * RTTVAR), G the clock granularity. On a steady link RTTVAR goes to zero and
+// the margin was the 5 ms granularity alone: the ACK of a 180 ms link only had to come back 5 ms late (the peer's
+// 5 ms poll, scheduling) for a spurious resend, and real hosts resent a quarter of their packets to such a link
+// (2026-10-22: retx 925 and dup 1160 in 2398 packets). So the margin is at least a quarter of the SRTT.
 constexpr double kClockGranularityMs = 5.0;
+constexpr double kMinMarginFraction = 0.25;
 constexpr size_t kMaxReorderBuffer = 4096;
 // Retransmissions follow what the link delivers (packet conservation, as TCP's ACK clock): every packet the
 // peer acknowledges earns this many resends. Above 1 so a link recovering from an outage doubles its resend
@@ -103,7 +106,7 @@ size_t ReliableSender::onAck(const AckMsg& ack, uint64_t nowMs) {
 }
 
 uint32_t ReliableSender::rtoMs() const {
-    double rto = srtt_ + std::max(kClockGranularityMs, 4 * rttvar_);
+    double rto = srtt_ + std::max({kClockGranularityMs, kMinMarginFraction * srtt_, 4 * rttvar_});
     return std::clamp(static_cast<uint32_t>(rto), kMinRtoMs, kMaxRtoMs);
 }
 

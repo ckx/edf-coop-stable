@@ -56,16 +56,23 @@ constexpr std::size_t kSerializeCapacity = 0x5E0;
 bool WriteBinElement(void* serialize, const std::uint8_t* data, std::size_t size);
 bool ReadBinElement(void* serialize, std::uint8_t* out, std::size_t capacity, std::size_t& size);
 
-// Sender: one sample per block, the velocity measured over the time since the last one.
+// Sender: one sample per block. The velocity is the displacement over about kVelocityWindowMs, the interval at
+// which the receivers get the blocks: one in three, 100 ms apart (every accepted block in the host logs of
+// 2026-10-22 is 3 sequence numbers and 100 ms after the last; where the game thins them is not established,
+// docs/net-re/player.md). A velocity measured over the one write since the last (33 ms) was 3 times noisier than
+// the interval it is extrapolated over, and the start of a dash exceeded the speed cap in that short window and
+// went out as 0: the copy then stood still for 100 ms and was 5-9 m off at the next sample.
 struct SendTrack {
-    bool have = false;
-    Vec3 lastPosition;
-    double lastMs = 0.0;
+    static constexpr std::size_t kHistory = 8;
+    Vec3 positions[kHistory];
+    double times[kHistory]{};
+    std::size_t count = 0, next = 0;  // a ring: `next` is the oldest once full
     std::uint16_t seq = 0;
 };
-constexpr float kMaxSentSpeed = 80.0f;     // m/s; above that the motion is a warp, not movement
-constexpr float kWarpDistance = 20.0f;     // m between two samples
-constexpr double kMaxVelocityGapMs = 250.0;
+constexpr double kVelocityWindowMs = 90.0;  // measure over the newest write at least this old
+constexpr float kMaxSentSpeed = 120.0f;     // m/s over the window; above that the motion is a warp, not movement
+constexpr float kWarpDistance = 20.0f;      // m over the window
+constexpr double kMaxVelocityGapMs = 250.0;  // writes further apart than this say nothing about the velocity
 PlayerSample MakeSample(SendTrack& track, Vec3 position, double nowMs);
 
 struct NetPlayerParams {
@@ -94,7 +101,14 @@ struct RemoteTrack {
     Vec3 lastAdded;            // what that step added
     Vec3 ownVelocity;          // the copy's own metres per second of wall time, filtered
     double lastStepMs = 0.0;
+    // The last steps' motion and requests, which the own velocity is measured over (StepRemote).
+    static constexpr std::size_t kStepWindow = 4;
+    Vec3 movedWindow[kStepWindow], addedWindow[kStepWindow];
+    double elapsedWindow[kStepWindow]{};
+    std::size_t windowNext = 0, windowCount = 0;
 };
+constexpr float kMaxOwnSpeed = 150.0f;  // m/s: faster is the game moving the copy itself (a snapshot), not motion
+constexpr double kMinStepMs = 4.0;      // a step called again sooner than this follows no physics step: nothing added
 
 // False for a sample that is not newer than the last one (reordered or repeated). A track that went stale starts
 // over with any sample.
