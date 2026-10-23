@@ -1,7 +1,7 @@
 ﻿param([switch]$Uninstall, [string]$GameDir = '')
 # EDF6Coop installer: finds the EARTH DEFENSE FORCE 6 folder via Steam and copies the plugin in.
-# EDF6Coop replaces EDF6DirectNet, EDF6MultiSlot and EDF6Spectate: their DLLs are renamed to .disabled (a .disabled
-# copy of an earlier install is replaced), and their settings files stay where they are.
+# EDF6Coop replaces EDF6DirectNet, EDF6MultiSlot and EDF6Spectate. The first two DLLs are renamed to .disabled (a
+# .disabled copy of an earlier install is replaced) and their settings files stay. EDF6Spectate is uninstalled.
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $gameFolder = 'EARTH DEFENSE FORCE 6'
@@ -208,7 +208,7 @@ function Copy-Into([string]$from, [string]$to) {
 foreach ($f in $files) { Copy-Into (Join-Path $here $f) (Join-Path $game $f) }
 # The plugins EDF6Coop replaces: both would hook the same game code. Renamed, not deleted, so going back
 # is a rename; their .ini files stay.
-foreach ($old in 'EDF6DirectNet.dll', 'EDF6MultiSlot.dll', 'EDF6Spectate.dll') {
+foreach ($old in 'EDF6DirectNet.dll', 'EDF6MultiSlot.dll') {
     $path = Join-Path $plugins $old
     if (-not (Test-Path -LiteralPath $path)) { continue }
     $disabled = "$path.disabled"
@@ -217,6 +217,16 @@ foreach ($old in 'EDF6DirectNet.dll', 'EDF6MultiSlot.dll', 'EDF6Spectate.dll') {
     Write-Host ((T '已停用旧插件（改名为 .disabled）：' '古いプラグインを無効にしました（.disabled に改名）：' 'Disabled the replaced plugin (renamed to .disabled): ') + $old)
 }
 foreach ($f in $replacedExtras) { Remove-Item -LiteralPath (Join-Path $game $f) -ErrorAction SilentlyContinue }
+# EDF6Spectate is part of EDF6Coop and has no settings to keep: its DLL, the .disabled copy EDF6Coop 3.1.0 left and
+# its log are deleted.
+$spectate = @('EDF6Spectate.dll', 'EDF6Spectate.dll.disabled', 'EDF6Spectate.log') | ForEach-Object { Join-Path $plugins $_ } |
+    Where-Object { Test-Path -LiteralPath $_ }
+if ($spectate) {
+    Remove-Item -LiteralPath $spectate -Force
+    Write-Host (T '已卸载单独的 EDF6Spectate（观战镜头已包含在 EDF6Coop 中）。' `
+        '単体の EDF6Spectate をアンインストールしました（観戦カメラは EDF6Coop に含まれています）。' `
+        'Uninstalled the standalone EDF6Spectate (the spectator camera is part of EDF6Coop).')
+}
 Write-Host (T '已安装 EDF6Coop。' 'EDF6Coop をインストールしました。' 'EDF6Coop installed.') -ForegroundColor Green
 
 # EDFModLoader loads the plugin. The package bundles a fixed build of the official v1.0.10 loader (the official one

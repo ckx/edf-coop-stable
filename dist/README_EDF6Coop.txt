@@ -36,7 +36,7 @@ look controls (mouse or right stick). Being revived, or every teammate being dow
 The watched teammate gets a health bar and the multiplayer name/health indicators stay; ammo, radar and class
 gauges are not shown for them. Only your screen changes; nothing is sent to other players. Offline play and
 split screen are left alone, and there is no button to pick a teammate yet. This used to be the EDF6Spectate
-plugin; installing renames EDF6Spectate.dll to .disabled. Following and returning were checked online with
+plugin; installing uninstalls it. Following and returning were checked online with
 EDF6Spectate 0.1.1; the orbit camera and health bar have not been checked online yet.
 [Display] SpectateWhenDown=0: keep your own camera while down.
 
@@ -50,8 +50,9 @@ Without it Wine loads its own winmm.dll and EDFModLoader never runs.
 If EDFModLoader (winmm.dll) is missing, the bundled one is installed: official v1.0.10 with a fix for a
 multithread bug (LOADER_FIX.md). An existing winmm.dll is never overwritten, except one that is
 byte for byte the official v1.0.10 file: it is replaced and kept as winmm.dll.bak-official.
-Coming from EDF6DirectNet / EDF6MultiSlot / EDF6Spectate: their DLLs in Mods\Plugins are renamed to
-.disabled. Their settings files stay but are not read. The menu layout and HUD files that 2.5.0 and earlier wrote under Mods
+Coming from EDF6DirectNet / EDF6MultiSlot: their DLLs in Mods\Plugins are renamed to .disabled. Their
+settings files stay but are not read. A standalone EDF6Spectate is uninstalled: the installer deletes
+EDF6Spectate.dll, a .disabled copy of it and EDF6Spectate.log. The menu layout and HUD files that 2.5.0 and earlier wrote under Mods
 (UI\LYT_MAINFRAME.SGO, HUD\ONLINEHUDTEXTURE.RAB) are deleted at the first start; another mod's file of the
 same name stays.
 Upgrade: install the newer release the same way; your settings are kept.

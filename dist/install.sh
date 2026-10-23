@@ -64,7 +64,7 @@ for f in "${files[@]}"; do
     cp -f "$here/$f" "$game/$f"
 done
 # The plugins EDF6Coop replaces would hook the same game code: renamed, not deleted.
-for old in EDF6DirectNet.dll EDF6MultiSlot.dll EDF6Spectate.dll; do
+for old in EDF6DirectNet.dll EDF6MultiSlot.dll; do
     [ -f "$plugins/$old" ] || continue
     mv -f "$plugins/$old" "$plugins/$old.disabled"
     echo "Disabled the replaced plugin (renamed to .disabled): $old"
@@ -72,6 +72,15 @@ done
 # What EDF6Spectate put next to the game, and the translated readmes of EDF6Coop 3.0.4 and earlier.
 rm -f "$game"/README_EDF6Spectate.txt "$game"/EDF6Coop_GUARD_LICENSE.txt "$game"/EDF6Coop_TOOLS_LICENSE.txt \
       "$game"/README_EDF6Coop_zh.txt "$game"/README_EDF6Coop_ja.txt
+# EDF6Spectate is part of EDF6Coop and has no settings to keep: its DLL, the .disabled copy EDF6Coop 3.1.0 left and
+# its log are deleted.
+spectate=0
+for f in EDF6Spectate.dll EDF6Spectate.dll.disabled EDF6Spectate.log; do
+    [ -f "$plugins/$f" ] || continue
+    rm -f "$plugins/$f"
+    spectate=1
+done
+[ $spectate = 1 ] && echo "Uninstalled the standalone EDF6Spectate (the spectator camera is part of EDF6Coop)."
 echo "EDF6Coop installed."
 # EDFModLoader: installed when missing; an existing winmm.dll is replaced only when it is the official v1.0.10 one.
 if [ ! -f "$game/winmm.dll" ]; then

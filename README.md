@@ -12,7 +12,7 @@ This version plays the game's own rooms of up to four players. Up to 2.5.0 EDF6C
 
 Everyone in a room should run the same version. A host refuses a player whose netcode protocol differs (`[Netcode] RejectMismatched=1`), because the two would apply different rules. Reliable sending and the disconnect grace period work with any version, and with players who do not have the plugin.
 
-Installing renames an old `EDF6DirectNet.dll` / `EDF6MultiSlot.dll` / `EDF6Spectate.dll` to `.disabled`. Their settings files stay but are not read.
+Installing renames an old `EDF6DirectNet.dll` / `EDF6MultiSlot.dll` to `.disabled`. Their settings files stay but are not read. The installer uninstalls a standalone EDF6Spectate: it deletes `EDF6Spectate.dll`, a `.disabled` copy of it and `EDF6Spectate.log`.
 
 ## What it fixes
 
