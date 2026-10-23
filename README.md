@@ -1,8 +1,6 @@
 # edf-coop-stable
 
-**English** | [中文](README.zh-CN.md) | [日本語](README.ja.md)
-
-**EDF6Coop** keeps online co-op missions in EARTH DEFENSE FORCE 6 (PC / Steam) from drifting out of sync or ending when a connection drops. It resends lost packets, hides a short disconnect from the game while EOS reconnects, and offers an optional direct UDP link to the host. It is one [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) plugin, `EDF6Coop.dll`, and runs on Windows and on Linux through Steam Proton.
+**EDF6Coop** keeps online co-op missions in EARTH DEFENSE FORCE 6 (PC / Steam) from drifting out of sync or ending when a connection drops. It resends lost packets, hides a short disconnect from the game while EOS reconnects, and offers an optional direct UDP link to the host. While you are down online, it lets you watch a standing teammate until you are revived. It is one [EDFModLoader](https://github.com/BlueAmulet/EDFModLoader) plugin, `EDF6Coop.dll`, and runs on Windows and on Linux through Steam Proton.
 
 > Unofficial mod, not affiliated with D3 PUBLISHER / SANDLOT / Epic Games. It changes network calls and a few game functions in memory and never modifies game files. Set `[DirectNet] Enabled=0` or delete the DLL to get the original game back.
 >
@@ -14,7 +12,7 @@ This version plays the game's own rooms of up to four players. Up to 2.5.0 EDF6C
 
 Everyone in a room should run the same version. A host refuses a player whose netcode protocol differs (`[Netcode] RejectMismatched=1`), because the two would apply different rules. Reliable sending and the disconnect grace period work with any version, and with players who do not have the plugin.
 
-Installing renames an old `EDF6DirectNet.dll` / `EDF6MultiSlot.dll` to `.disabled`. Their settings files stay but are not read.
+Installing renames an old `EDF6DirectNet.dll` / `EDF6MultiSlot.dll` / `EDF6Spectate.dll` to `.disabled`. Their settings files stay but are not read.
 
 ## What it fixes
 
@@ -26,8 +24,21 @@ Installing renames an old `EDF6DirectNet.dll` / `EDF6MultiSlot.dll` to `.disable
 | High latency through the Epic relay, NAT traversal fails | All traffic goes through EOS P2P / relay | The host can enable the direct link: others connect straight to the host after joining (star, the host relays) | The host sets it up; joiners only need the plugin |
 | Hits that do nothing, players that jump around | The target decides hits; other players' positions are sent coarsely | With everyone on this version: the shooter decides hits, and player positions carry velocity for extrapolation | Everyone in the room |
 | You get disconnected and do not know why | | Writes a log: NAT type, direct or relay, disconnect reasons, lobby members, per-minute traffic, crash details | Yourself |
+| While you are down, you only see your own body until someone revives you | The game keeps a downed player's camera on that player | Switches your view to a standing teammate, aimed with your own look controls (see below) | Yourself |
 
 Everything is on by default, except the direct link, which the host enables.
+
+## Watching a teammate while down
+
+In an online room, when you go down and wait for a revive, your view switches to the standing teammate with the lowest slot. If they go down or leave, it moves to the next one. Being revived, or every teammate being down, returns your own camera.
+
+- The camera orbits the watched teammate and points where you look. Turn it with your normal look controls (mouse or right stick, your own bindings and sensitivity). It does not copy the teammate's aim. There is no detached free camera.
+- The watched teammate gets a health bar with current/maximum health, and the multiplayer name/health indicators stay. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
+- Only your own screen changes. Nothing is sent to other players, and they do not need it on.
+- Offline play and split screen are left alone. There is no button to pick a teammate yet.
+- `[Display] SpectateWhenDown=0` turns it off.
+
+This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The orbit camera and the health bar have not been checked online. Static analysis says the game hides the health bar while the camera orbits; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
 
 ## Install
 
@@ -51,7 +62,7 @@ Everything is on by default, except the direct link, which the host enables.
    Without it Wine loads its own `winmm.dll` and EDFModLoader never runs.
 3. Start the game. The settings file and log appear in `Mods/Plugins/` as on Windows.
 
-The zip has README_EDF6Coop.txt (English), README_EDF6Coop_zh.txt (中文) and README_EDF6Coop_ja.txt (日本語). The settings file is commented in your Windows display language (Chinese, Japanese, otherwise English).
+The zip has README_EDF6Coop.txt. The settings file is commented in your Windows display language (Chinese, Japanese, otherwise English).
 
 Upgrade: install the newer release the same way. Your settings are kept. There is no automatic update.
 
@@ -112,6 +123,7 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `HitAuthority` | `1` | The shooter decides hits. Used only while everyone has it on |
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
+| `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived (see above). Only your own screen. `0` = your own camera (original) |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
 | `[Diagnostics] Player` | `1` | Bounded player movement traces for jitter diagnosis. `0` disables them |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
@@ -153,7 +165,7 @@ Every player with the plugin also writes `EDF6DN_ID`: the SHA-256 fingerprint of
 
 ### Netcode version gate
 
-Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Version 3.0.4 uses netcode protocol 4, so everyone in the room must update together to use these fixes.
+Enemy and object hits are applied on the shooter's machine using the game's complete collision data, including armor and weak points. Hits on other players and vehicles are sent to their owner's machine. The `NetHit` log distinguishes replayed events from those that reduced HP; no HP change can also mean armor, invulnerability or friendly-fire rules blocked the hit. Versions 3.0.1 to 3.1.0 use netcode protocol 4 and play together. Everyone in the room needs protocol 4 to use these fixes.
 
 Every player publishes its netcode protocol and the features it has on (`EDF6NET_PROTO`, `EDF6NET_CAPS`). The host publishes what the whole room runs (`EDF6NET_ROOMCAPS`). Fragments, player sync and hit authority run only while every member runs the same protocol with the feature on; a single player without it turns it off for the room. With `RejectMismatched=1` the host removes a player of another protocol.
 
@@ -169,6 +181,7 @@ Every player publishes its netcode protocol and the features it has on (`EDF6NET
 - `EOS hooks FAILED`: the `EDF.dll` import table is not as expected; the plugin leaves EOS alone. Please open an Issue.
 - `LOBBY ... other players treat us as vanilla`: the plugin could not publish its lobby attribute, so other players give you no disconnect grace.
 - `EOS incoming packet queue FULL`: the EOS queue is full and packets are dropped. Please open an Issue with your log.
+- `SPECTATE: ... is not the expected code` or `does not call`: another mod or a game update changed code the spectator camera needs. A downed player keeps their own camera; everything else runs. `SPECTATE STOPPED: fault ...`: the spectator camera hit a fault and is off until the game restarts. Please open an Issue with your log.
 - `RESILIENCE ... RECOVERED`: a disconnect was hidden. `did not come back within`: it was handed to the game after `GraceSeconds`.
 - `RESILIENCE ... lost Epic's lobby service but the direct link is up` / `back in Epic's lobby service`: Epic's lobby service dropped a player and let them back in; the game never saw it.
 - `NETCODE features in room ... off: ...`: someone in the room runs another protocol or has a feature off; the log names who. `NETCODE REFUSED`: as host you removed a player of another protocol.
@@ -224,7 +237,7 @@ Release packages are built on a machine with the game, so every test against the
 | Path | Contents |
 |---|---|
 | `game/plugin.cpp` | EDFModLoader entry point: reads `EDF6Coop.ini`, starts the transport part, patches `EDF.dll` |
-| `game/` | The game part: patches (weapon guard, peer timeout), netcode version gate, player sync, hit authority, crash log, log |
+| `game/` | The game part: patches (weapon guard, peer timeout), spectator camera (`spectate.*`), netcode version gate, player sync, hit authority, crash log, log |
 | `src/config.*` | Settings and their comments (Chinese / Japanese / English after the Windows display language) |
 | `src/eos_min.h` | The EOS SDK structs in use (from the official 1.15.5 headers; the game uses 1.16.1) |
 | `src/eos_hooks.cpp`, `src/iat.*` | Patches the `EDF.dll` import table to take over EOS P2P and lobby calls |
@@ -233,9 +246,10 @@ Release packages are built on a machine with the game, so every test against the
 | `src/direct_net.*`, `src/reliable.*`, `src/wire.*`, `src/auth.*`, `src/fragment.*` | Direct link transport, fragments |
 | `src/netif.*`, `src/upnp.*` | Physical adapter detection, UPnP |
 | `CMakeLists.txt` | The build and the one version number (`project(EDF6Coop VERSION x.y.z)`) |
-| `dist/` | Install scripts, bundled readmes (English / Chinese / Japanese) and the loader fix note |
+| `dist/` | Install scripts, the bundled readme and the loader fix note |
+| `docs/spectate/` | The spectator camera's design, the game interfaces it uses with their evidence, and its live checks |
 | `tests/` | Tests: the transport part; `tests/game/` the game part; `tests/gamenet/` rooms of several processes on the real `EDF.dll` |
-| `tools/`, `third_party/` | The loader fix tool and its inputs, the MSVC environment script; EDFModLoader's plugin header and license |
+| `tools/`, `third_party/` | The loader fix tool and its inputs, the MSVC environment script, a read-only spectator camera inspector for Linux (`inspect_camera.py`); EDFModLoader's plugin header and license |
 
 ## Known limitations
 
@@ -249,7 +263,7 @@ Release packages are built on a machine with the game, so every test against the
 
 ## License
 
-MIT, see [LICENSE](LICENSE). The bundled EDFModLoader is MIT; its license is in the package as `EDFModLoader_LICENSE.txt`. The game part (`game/`, first written by momotori01) is public domain ([Unlicense](game/LICENSE)).
+MIT, see [LICENSE](LICENSE). The bundled EDFModLoader is MIT; its license is in the package as `EDFModLoader_LICENSE.txt`. The game part (`game/`, first written by momotori01, with the spectator camera from EDF6Spectate) is public domain ([Unlicense](game/LICENSE)).
 
 ## Acknowledgements
 

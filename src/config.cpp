@@ -129,6 +129,11 @@ const IniEntry kIniEntries[] = {
       "レーダー上のアイテムを種類で色分け：回復白、アーマーと武器は緑（元のゲームは全部緑）。自分の画面だけ。1 オン / 0 元の動作",
       "Color pickups on the radar by type: health white, armor and weapons green (the original game shows all of them\n"
       "  green). Only your own screen. 1 on / 0 original"}},
+    {"SpectateWhenDown=1",
+     {"联机倒地时观看一名站着的队友直到被救起，用自己的视角操作转动镜头。只影响自己的画面。1 开 / 0 原版",
+      "オンラインでダウン中、救助されるまで立っている味方を見る。カメラは自分の視点操作で回す。自分の画面だけ。1 オン / 0 元の動作",
+      "Online, while you are down, watch a standing teammate until you are revived; turn the camera with your own\n"
+      "  look controls. Only your own screen. 1 on / 0 original"}},
     {"[Diagnostics]", {}},
     {"Laser=1",
      {"记录 Closed Laser M2 所用激光类型的限量诊断，不改变开火或伤害。0 关闭",

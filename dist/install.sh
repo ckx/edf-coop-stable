@@ -42,7 +42,7 @@ if pgrep -x EDF6.exe >/dev/null 2>&1; then
     exit 1
 fi
 plugins=$game/Mods/Plugins
-files=(Mods/Plugins/EDF6Coop.dll README_EDF6Coop.txt README_EDF6Coop_zh.txt README_EDF6Coop_ja.txt EDFModLoader_LICENSE.txt)
+files=(Mods/Plugins/EDF6Coop.dll README_EDF6Coop.txt EDFModLoader_LICENSE.txt)
 
 if [ $uninstall = 1 ]; then
     # The loader's license stays with the loader.
@@ -64,11 +64,14 @@ for f in "${files[@]}"; do
     cp -f "$here/$f" "$game/$f"
 done
 # The plugins EDF6Coop replaces would hook the same game code: renamed, not deleted.
-for old in EDF6DirectNet.dll EDF6MultiSlot.dll; do
+for old in EDF6DirectNet.dll EDF6MultiSlot.dll EDF6Spectate.dll; do
     [ -f "$plugins/$old" ] || continue
     mv -f "$plugins/$old" "$plugins/$old.disabled"
     echo "Disabled the replaced plugin (renamed to .disabled): $old"
 done
+# What EDF6Spectate put next to the game, and the translated readmes of EDF6Coop 3.0.4 and earlier.
+rm -f "$game"/README_EDF6Spectate.txt "$game"/EDF6Coop_GUARD_LICENSE.txt "$game"/EDF6Coop_TOOLS_LICENSE.txt \
+      "$game"/README_EDF6Coop_zh.txt "$game"/README_EDF6Coop_ja.txt
 echo "EDF6Coop installed."
 # EDFModLoader: installed when missing; an existing winmm.dll is replaced only when it is the official v1.0.10 one.
 if [ ! -f "$game/winmm.dll" ]; then

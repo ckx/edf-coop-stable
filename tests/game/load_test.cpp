@@ -24,6 +24,7 @@
 #include "../../game/midhook.h"
 #include "../../game/patches.h"
 #include "../../game/radar.h"
+#include "../../game/spectate.h"
 
 using namespace multislot;
 
@@ -161,14 +162,16 @@ int wmain(int argc, wchar_t** argv) {
     CopyFileW(argv[2], dll.c_str(), FALSE);
     DeleteFileW(logPath.c_str());
     DeleteFileW(iniPath.c_str());
-    // A plugin EDF6Coop replaces, as a player who had it still has it in Mods\Plugins.
-    const std::wstring replaced = plugins + L"\\EDF6DirectNet.dll";
-    DeleteFileW(replaced.c_str());
-    DeleteFileW((replaced + L".disabled").c_str());
-    if (mode == L"replaced") std::ofstream(std::filesystem::path(replaced), std::ios::binary) << "MZ not loaded";
+    // Plugins EDF6Coop replaces, as a player who had them still has them in Mods\Plugins.
+    const std::wstring replacedPlugins[] = {plugins + L"\\EDF6DirectNet.dll", plugins + L"\\EDF6Spectate.dll"};
+    for (const auto& replaced : replacedPlugins) {
+        DeleteFileW(replaced.c_str());
+        DeleteFileW((replaced + L".disabled").c_str());
+        if (mode == L"replaced") std::ofstream(std::filesystem::path(replaced), std::ios::binary) << "MZ not loaded";
+    }
     if (mode == L"off" || mode == L"optionsoff" || mode == L"on") {
         const char* ini = mode == L"off"           ? "[DirectNet]\r\nEnabled=0\r\n"
-                          : mode == L"optionsoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n[Display]\r\nRadarItemColors=0\r\n"
+                          : mode == L"optionsoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n[Display]\r\nRadarItemColors=0\r\nSpectateWhenDown=0\r\n"
                                                    : "[Log]\r\nCrashLog=1\r\n";
         std::ofstream(std::filesystem::path(iniPath), std::ios::binary | std::ios::trunc) << ini;
     }
@@ -191,6 +194,8 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& hook : HitAuthorityHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves the hit sites alone");
         Check(CallTargets(base + RadarItemDotsCall().rva, RadarItemDotsCall().rva, RadarItemDotsCall().target),
               "Enabled=0 leaves the radar alone");
+        const CallSite update = spectate::UpdateCall();
+        Check(CallTargets(base + update.rva, update.rva, update.target), "Enabled=0 leaves System::Update alone");
         Check(Contains(log, "Enabled=0"), "Enabled=0 is logged");
         FreeLibrary(plugin);  // what EDFModLoader does with a plugin that refuses
         Check(GetModuleHandleW(dll.c_str()) == nullptr, "the refused plugin is unloaded completely");
@@ -213,6 +218,10 @@ int wmain(int argc, wchar_t** argv) {
         const CallSite radar = RadarItemDotsCall();
         Check(keepRoom ? RedirectedInto(base + radar.rva, plugin) : CallTargets(base + radar.rva, radar.rva, radar.target),
               radar.name);
+        const CallSite update = spectate::UpdateCall();
+        Check(keepRoom ? RedirectedInto(base + update.rva, plugin)
+                       : CallTargets(base + update.rva, update.rva, update.target),
+              update.name);
         Check(Contains(log, "Crash log armed"), "the crash log is armed");
         if (mode == L"fresh") {
             const std::string written = ReadIniText(iniPath);
@@ -223,9 +232,10 @@ int wmain(int argc, wchar_t** argv) {
                   "a missing INI is written with every section, crash dumps off");
         }
         if (mode == L"replaced") {
-            Check(GetFileAttributesW(replaced.c_str()) == INVALID_FILE_ATTRIBUTES &&
-                      GetFileAttributesW((replaced + L".disabled").c_str()) != INVALID_FILE_ATTRIBUTES,
-                  "a replaced plugin is renamed .disabled");
+            for (const auto& replaced : replacedPlugins)
+                Check(GetFileAttributesW(replaced.c_str()) == INVALID_FILE_ATTRIBUTES &&
+                          GetFileAttributesW((replaced + L".disabled").c_str()) != INVALID_FILE_ATTRIBUTES,
+                      "a replaced plugin is renamed .disabled");
         }
         if (mode == L"on") {
             ThrowAndCatch();

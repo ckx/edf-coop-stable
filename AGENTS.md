@@ -1,6 +1,6 @@
 # AI coding instructions
 
-EDF6Coop.dll is an EDFModLoader plugin for EARTH DEFENSE FORCE 6 (PC / Steam). It fixes online desync caused by packet loss, holds dropped peers while EOS reconnects and adds an optional direct UDP link, in the game's rooms of four. Players install released builds by hand and update when they choose, so wire and config changes reach a mixed population.
+EDF6Coop.dll is an EDFModLoader plugin for EARTH DEFENSE FORCE 6 (PC / Steam). It fixes online desync caused by packet loss, holds dropped peers while EOS reconnects and adds an optional direct UDP link, in the game's rooms of four. It also lets a downed player watch a standing teammate until revived (the spectator camera, formerly the EDF6Spectate plugin). Players install released builds by hand and update when they choose, so wire and config changes reach a mixed population.
 
 The networking fixes for desync are the core of the project and get the most care. Everything else is secondary to keeping them correct and simple.
 
@@ -9,11 +9,11 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 ## Layout
 
 - `src/`: the transport part, formerly EDF6DirectNet. EOS import-table hooks (`eos_hooks.cpp`, `iat.*`), reliable sending and queue sizing, disconnect hold (`hold.*`), lobby markers, the direct link (`direct_net.*`, `wire.*`, `auth.*`, `reliable.*`), fragments (`fragment.*`), UPnP, config.
-- `game/`: the game part, first written as EDF6MultiSlot by momotori01 (its namespace is still `multislot`). In-memory patches to `EDF.dll` (weapon guard, peer timeout), the netcode version gate (`netfeature*`), player sync (`netplayer*`), hit authority (`hitauth*`), the crash log and the log. `plugin.cpp` is the EDFModLoader entry point for the whole DLL.
+- `game/`: the game part, first written as EDF6MultiSlot by momotori01 (its namespace is still `multislot`). In-memory patches to `EDF.dll` (weapon guard, peer timeout), the spectator camera (`spectate.*`), the netcode version gate (`netfeature*`), player sync (`netplayer*`), hit authority (`hitauth*`), the crash log and the log. `plugin.cpp` is the EDFModLoader entry point for the whole DLL.
 - `CMakeLists.txt` builds both parts into one DLL (in `out/`) and holds the one version number (`project(EDF6Coop VERSION x.y.z)`).
 - `tests/` covers the transport part; `tests/game/` covers the game part, and `tests/gamenet/` runs multi-process rooms against the real `EDF.dll` with a fake EOS.
 - `dist/` is what the package ships besides the DLLs (install scripts, readmes, the loader fix note); `tools/` and `third_party/` make the race-fixed EDFModLoader.
-- `docs/net-re/` holds reverse-engineering notes for the game's network code (Chinese).
+- `docs/net-re/` holds reverse-engineering notes for the game's network code (Chinese). `docs/spectate/` holds the spectator camera's design, its evidence for every address (`research.md`) and its live checks (`plan.md`).
 
 ## Build and test
 
@@ -42,9 +42,20 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 - Wire format changes go through the netcode version gate (`game/netfeature.*`), since peers run mixed versions. Cleanup of what older releases left behind (`RetireReplacedPlugins`, `RemoveOldModFiles`) stays until a deliberate decision drops it.
 - Untrusted input includes everything from peers, lobby attributes, the update server and host data files. Bounds-check it at the parse site.
 
+## Spectator camera
+
+`game/spectate.*` switches view 0 of a downed online player to a camera following a standing teammate. Its behaviour is in `docs/spectate/design.md`.
+
+- Scope (user decisions): the camera orbits the watched teammate and is aimed by the downed player's own look input (2026-10-22). It is on by default (`[Display] SpectateWhenDown=1`, 2026-10-22). Do not add a detached free-fly camera, watching while alive, offline or split-screen behaviour, network messages, more HUD widgets or unrelated patches without a new scope decision. The input for cycling teammates is an open decision (`docs/spectate/plan.md`).
+- It sends nothing, so it needs no netcode version gate. Keep it that way.
+- Prefer the game's own camera functions over writing camera or view fields; prove their calling conventions and ownership first. The orbit fields on remote soldiers are the one exception, with the evidence in `research.md`.
+- Act on the main thread in the `System::Update` call it takes. Keep no game pointers between frames; find cameras and players again each frame. Never leave a camera current whose target has expired or left the room: the ghost camera's update reads a raw target pointer.
+- Every range of game code it calls or relies on is checked by hash before the call is taken. A fault inside `Guarded` stops it for the session; it is never retried, since a recovered fault does not undo a partial game call.
+- Live research reads the running game's memory (`tools/inspect_camera.py`) and never writes to it.
+
 ## Documentation
 
-- User-visible behaviour is documented in `README.md`, `README.ja.md`, `README.zh-CN.md` and the bundled `dist/README_EDF6Coop*.txt`. A change to settings, install steps or behaviour updates all language versions in the same change.
+- User-visible behaviour is documented in English only, in `README.md` and the bundled `dist/README_EDF6Coop.txt` (the user dropped the Chinese and Japanese readmes in 3.1.0). A change to settings, install steps or behaviour updates both in the same change. The INI comments (`src/config.cpp`) and installer messages stay in Chinese, Japanese and English.
 - Release text goes in `release-notes/<version>.md`. The release process is in README.md, "Release".
 - Code reviews go in `docs/reviews/`, named `YYYY-MM-DD-<topic>.md`. Format: Scope/Excluded/Method header, `[C]`/`[A]` confidence markers, Critical/Major/Minor tiers with continuous numbering, a concrete failure scenario and `Fix shape:` per finding, a Cleared list, architecture notes.
 - Transient agent output goes outside the repo or in an untracked `tmp/`.

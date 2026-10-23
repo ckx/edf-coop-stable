@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # EDF6Coop.dll: the transport part (src/) and the game part (game/) as one plugin.
-project(EDF6Coop VERSION 3.0.4 LANGUAGES CXX)
+project(EDF6Coop VERSION 3.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Every file sees <windows.h> the same way.
@@ -43,9 +43,9 @@ add_library(TransportPart STATIC "${TRANSPORT_DIR}/lobby_marker.cpp" "${TRANSPOR
     "${TRANSPORT_DIR}/dn_part.cpp")
 target_link_libraries(TransportPart PUBLIC TransportCore)
 
-# The game part: patches to EDF.dll, the netcode version gate, player sync, hit authority, the log.
+# The game part: patches to EDF.dll, the spectator camera, the netcode version gate, player sync, hit authority, the log.
 set(GAME_CORE log code midhook patches identity crashlog coop peertimeout weaponguard lobbytexts netfeature hitauth
-    hitauthgame netplayer netplayer_game radar lasertrace)
+    hitauthgame netplayer netplayer_game radar spectate lasertrace)
 list(TRANSFORM GAME_CORE PREPEND "game/")
 list(TRANSFORM GAME_CORE APPEND ".cpp")
 add_library(GameCore STATIC ${GAME_CORE})
@@ -113,6 +113,10 @@ unit_test(NetcodeVersionGate NetFeatureTests tests/game/netfeature_test.cpp Game
 unit_test(NetPlayerSync NetPlayerTests tests/game/netplayer_test.cpp GameCore)
 unit_test(HitAuthority HitAuthTests tests/game/hitauth_test.cpp GameCore)
 game_test(HitAuthorityGameCode HitAuthTests "${EDF_DLL}")
+unit_test(SpectateTarget SpectateTargetTests tests/game/spectate_target_test.cpp GameCore)
+add_executable(SpectateCameraTests tests/game/spectate_camera_test.cpp)
+target_link_libraries(SpectateCameraTests PRIVATE GameCore)
+game_test(SpectateCameraGameCode SpectateCameraTests "${EDF_DLL}")
 add_executable(LaserTraceTests tests/game/lasertrace_test.cpp)
 target_link_libraries(LaserTraceTests PRIVATE GameCore)
 game_test(LaserDiagnosticsGameCode LaserTraceTests "${EDF_DLL}")

@@ -7,6 +7,12 @@
 
 namespace multislot {
 
+// Where a fault Guarded recovered from happened.
+struct Fault {
+    DWORD code = 0;
+    std::uintptr_t instruction = 0;
+};
+
 // Guarded(body) runs `body`. A hardware fault inside it (an access violation reading game memory that is not there,
 // at any call depth, also inside game code it calls) makes it return false instead of crashing the game; true when
 // the body ran to its end. It replaces __try/__except, which only MSVC honours for every faulting instruction:
@@ -20,6 +26,7 @@ struct Guard {
     CONTEXT resume;  // where Guarded continues after a fault, captured on its way in
     Guard* outer;
     volatile LONG64 faulted;  // 64 bits: no padding after the 16-byte aligned CONTEXT (MSVC warns of it)
+    volatile Fault detail;
 };
 inline thread_local Guard* active = nullptr;
 
@@ -40,6 +47,8 @@ inline LONG CALLBACK OnFault(EXCEPTION_POINTERS* info) {
         return EXCEPTION_CONTINUE_SEARCH;
     }
     active = guard->outer;
+    guard->detail.code = info->ExceptionRecord->ExceptionCode;
+    guard->detail.instruction = reinterpret_cast<std::uintptr_t>(info->ExceptionRecord->ExceptionAddress);
     guard->faulted = 1;
     *info->ContextRecord = guard->resume;
     return EXCEPTION_CONTINUE_EXECUTION;
@@ -52,13 +61,20 @@ __declspec(noinline)
 #else
 __attribute__((noinline))
 #endif
-inline bool Run(void (*body)(void*), void* context) {
+inline bool Run(void (*body)(void*), void* context, Fault* detail) {
     static const PVOID handler = AddVectoredExceptionHandler(1, &OnFault);
     if (!handler) return false;
+    if (detail) *detail = {};
     Guard guard{};
     guard.outer = active;
     RtlCaptureContext(&guard.resume);
-    if (guard.faulted) return false;
+    if (guard.faulted) {
+        if (detail) {
+            detail->code = guard.detail.code;
+            detail->instruction = guard.detail.instruction;
+        }
+        return false;
+    }
     active = &guard;
     body(context);
     active = guard.outer;
@@ -67,11 +83,12 @@ inline bool Run(void (*body)(void*), void* context) {
 
 }  // namespace guard_detail
 
+// `detail`, when given, says where a fault happened.
 template <typename Body>
-bool Guarded(Body&& body) {
+bool Guarded(Body&& body, Fault* detail = nullptr) {
     using B = std::remove_reference_t<Body>;
     return guard_detail::Run([](void* p) { (*static_cast<B*>(p))(); },
-                             const_cast<void*>(static_cast<const void*>(&body)));
+                             const_cast<void*>(static_cast<const void*>(&body)), detail);
 }
 
 // True while this thread runs inside Guarded: the crash handler leaves those faults alone.

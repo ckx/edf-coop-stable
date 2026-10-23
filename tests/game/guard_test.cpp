@@ -58,6 +58,13 @@ int main() {
     CHECK(Guarded([&] { value = ReadDeep(&good, 3); }));
     CHECK(value == 44);
 
+    // The fault's code and instruction come back for the log, and a later run that does not fault clears them.
+    Fault fault;
+    CHECK(!Guarded([&] { value = ReadDeep(nullptr, 2); }, &fault));
+    CHECK(fault.code == EXCEPTION_ACCESS_VIOLATION && fault.instruction != 0);
+    CHECK(Guarded([&] { value = ReadDeep(&good, 0); }, &fault));
+    CHECK(fault.code == 0 && fault.instruction == 0);
+
     // ReadGuarded.
     std::uint64_t word = 0;
     CHECK(!ReadGuarded(std::uintptr_t{0x20}, word));

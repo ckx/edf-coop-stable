@@ -1,13 +1,13 @@
-// What EDF6Coop does as one plugin before either part starts: it takes over from EDF6DirectNet.dll and
-// EDF6MultiSlot.dll, and it keeps one log for both parts.
+// What EDF6Coop does as one plugin before either part starts: it takes over from EDF6DirectNet.dll,
+// EDF6MultiSlot.dll and EDF6Spectate.dll, and it keeps one log for both parts.
 #pragma once
 
 #include <string>
 
 namespace multislot {
 
-// EDF6DirectNet.dll and EDF6MultiSlot.dll in `dir` (the plugin folder, trailing backslash) are renamed to
-// <name>.disabled, so they no longer load. EDFModLoader loads Mods\Plugins in name order and EDF6Coop.dll
+// EDF6DirectNet.dll, EDF6MultiSlot.dll and EDF6Spectate.dll in `dir` (the plugin folder, trailing backslash) are
+// renamed to <name>.disabled, so they no longer load. EDFModLoader loads Mods\Plugins in name order and EDF6Coop.dll
 // comes first, so this normally happens before it reaches them. False when one of them is loaded in this game
 // already or could not be renamed: running next to it would hook the same game code twice, so EDF6Coop must
 // then stay off (the log says what to do).

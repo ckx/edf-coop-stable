@@ -1,6 +1,5 @@
 EDF6Coop - steadier online co-op for EARTH DEFENSE FORCE 6
 Project page: https://github.com/hajisensai/edf-coop-stable
-中文: README_EDF6Coop_zh.txt / 日本語: README_EDF6Coop_ja.txt
 If something goes wrong, open an Issue and attach Mods\Plugins\EDF6Coop.log.
 
 EDF6Coop is one EDFModLoader plugin (Mods\Plugins\EDF6Coop.dll) that keeps online missions from drifting out
@@ -9,11 +8,12 @@ of sync or ending when a connection drops:
 - a short connection drop is hidden from the game while EOS reconnects (up to 30 s);
 - a guest stays in the room when the P2P handshake with a later joiner never completes;
 - an optional direct link to the host when Epic's relay is slow or NAT traversal fails;
-- with everyone on this version: the shooter decides hits, and player positions carry velocity.
+- with everyone on this version: the shooter decides hits, and player positions carry velocity;
+- while you are down online, you watch a standing teammate until revived.
 Enemy/object hits keep the game's complete collision data on the shooter's machine, including armor and weak
 points. Hits on other players/vehicles go to their owners. NetHit logs separate replayed events from HP reductions;
-armor, invulnerability and friendly-fire rules can prevent HP loss. Version 3.0.4 uses netcode protocol 4; update
-everyone in the room together to use these fixes.
+armor, invulnerability and friendly-fire rules can prevent HP loss. Versions 3.0.1 to 3.1.0 use netcode protocol 4
+and play together; everyone in the room needs protocol 4 to use these fixes.
 On your own radar, pickups take the color of their type: health white, armor and weapons green
 ([Display] RadarItemColors=0 keeps them all green).
 It plays the game's own rooms of up to four players. The bigger rooms (Player MOD), room screen, weapon pages,
@@ -29,6 +29,17 @@ Laser diagnostics write up to eight LASER sample lines per 30 seconds and an act
 
 Player motion diagnostics are on by default. A correction of at least 0.25 m, a warp, or a sample age of at least 200 ms captures up to eight preceding and sixteen current/following driven frames. Each object can trigger once per 30 seconds, with a total limit of 96 PLAYER motion lines per 30 seconds. The lines record received positions and velocities, proxy and object positions, observed movement, requested corrections and the estimated local velocity. t is the original hook time in milliseconds; preceding frames are logged later. These traces do not prove that physics applied a requested correction. Set [Diagnostics] Player=0 to disable them. When reporting jitter, note the time and collect the host and affected joiners' logs after closing the game.
 
+[Watching a teammate while down]
+Online, when you go down, your view switches to the standing teammate with the lowest slot, and moves to the
+next one when they go down or leave. The camera orbits them and points where you look: turn it with your normal
+look controls (mouse or right stick). Being revived, or every teammate being down, returns your own camera.
+The watched teammate gets a health bar and the multiplayer name/health indicators stay; ammo, radar and class
+gauges are not shown for them. Only your screen changes; nothing is sent to other players. Offline play and
+split screen are left alone, and there is no button to pick a teammate yet. This used to be the EDF6Spectate
+plugin; installing renames EDF6Spectate.dll to .disabled. Following and returning were checked online with
+EDF6Spectate 0.1.1; the orbit camera and health bar have not been checked online yet.
+[Display] SpectateWhenDown=0: keep your own camera while down.
+
 [Install / uninstall]
 Windows: extract the whole zip, double-click INSTALL.bat, then start the game from Steam as usual. (Or drop
 the contents of the zip into the game folder, next to EDF6.exe: the layout is the game folder's.)
@@ -39,8 +50,8 @@ Without it Wine loads its own winmm.dll and EDFModLoader never runs.
 If EDFModLoader (winmm.dll) is missing, the bundled one is installed: official v1.0.10 with a fix for a
 multithread bug (LOADER_FIX.md). An existing winmm.dll is never overwritten, except one that is
 byte for byte the official v1.0.10 file: it is replaced and kept as winmm.dll.bak-official.
-Coming from EDF6DirectNet / EDF6MultiSlot: their DLLs in Mods\Plugins are renamed to .disabled. Their
-settings files stay but are not read. The menu layout and HUD files that 2.5.0 and earlier wrote under Mods
+Coming from EDF6DirectNet / EDF6MultiSlot / EDF6Spectate: their DLLs in Mods\Plugins are renamed to
+.disabled. Their settings files stay but are not read. The menu layout and HUD files that 2.5.0 and earlier wrote under Mods
 (UI\LYT_MAINFRAME.SGO, HUD\ONLINEHUDTEXTURE.RAB) are deleted at the first start; another mod's file of the
 same name stays.
 Upgrade: install the newer release the same way; your settings are kept.

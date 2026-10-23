@@ -24,6 +24,7 @@
 #include "patches.h"
 #include "peertimeout.h"
 #include "radar.h"
+#include "spectate.h"
 #include "weaponguard.h"
 #include "src/config.h"
 #include "src/dn_part.h"
@@ -161,8 +162,8 @@ bool Apply(unsigned char* base, bool keepRoom) {
     return true;
 }
 
-// The game part: the weapon guard, KeepRoomOnPeerTimeout, radar item colors, the netcode version gate, hit authority,
-// player sync and the crash log. Returns whether it runs; when it does not, it has changed nothing and started nothing.
+// The game part: the weapon guard, KeepRoomOnPeerTimeout, radar item colors, the spectator camera, the netcode version
+// gate, hit authority, player sync and the crash log. Returns whether it runs; when it does not, it has changed nothing and started nothing.
 bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     const auto base = reinterpret_cast<unsigned char*>(game);
     if (!SupportedImage(base)) {
@@ -185,6 +186,8 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     // Only this machine's radar: nothing goes over the network.
     if (GetPrivateProfileIntW(L"Display", L"RadarItemColors", 1, iniPath) != 0) InstallRadarItemColors(base);
     else Log("RadarItemColors=0: every pickup on the radar stays green");
+    if (GetPrivateProfileIntW(L"Display", L"SpectateWhenDown", 1, iniPath) != 0) spectate::Install(base);
+    else Log("SpectateWhenDown=0: a downed player keeps their own camera");
     if (GetPrivateProfileIntW(L"Diagnostics", L"Laser", 1, iniPath) != 0) InstallLaserTrace(base);
     // Hit authority and player sync: hooks and thunk pages of their own, so a site that is not the expected code
     // leaves only that part off and the game does as it always did. A part that did not start is not published.

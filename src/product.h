@@ -4,7 +4,7 @@
 namespace coop {
 
 constexpr const wchar_t* kNameW = L"EDF6Coop";
-// The plugins EDF6Coop replaced. Running next to either would hook the same game code twice.
-constexpr const wchar_t* kReplacedPlugins[] = {L"EDF6DirectNet.dll", L"EDF6MultiSlot.dll"};
+// The plugins EDF6Coop replaced. Running next to any of them would hook the same game code twice.
+constexpr const wchar_t* kReplacedPlugins[] = {L"EDF6DirectNet.dll", L"EDF6MultiSlot.dll", L"EDF6Spectate.dll"};
 
 }  // namespace coop

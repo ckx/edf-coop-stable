@@ -1,14 +1,14 @@
 ﻿param([switch]$Uninstall, [string]$GameDir = '')
 # EDF6Coop installer: finds the EARTH DEFENSE FORCE 6 folder via Steam and copies the plugin in.
-# EDF6Coop replaces EDF6DirectNet and EDF6MultiSlot: their DLLs are renamed to .disabled (a .disabled copy of an
-# earlier install is replaced), and their settings files stay where they are.
+# EDF6Coop replaces EDF6DirectNet, EDF6MultiSlot and EDF6Spectate: their DLLs are renamed to .disabled (a .disabled
+# copy of an earlier install is replaced), and their settings files stay where they are.
 $ErrorActionPreference = 'Stop'
 $here = Split-Path -Parent $MyInvocation.MyCommand.Path
 $gameFolder = 'EARTH DEFENSE FORCE 6'
 # Messages follow the Windows display language: Chinese, Japanese, otherwise English.
 $lang = switch ((Get-UICulture).TwoLetterISOLanguageName) { 'zh' { 0 } 'ja' { 1 } default { 2 } }
 function T([string]$zh, [string]$ja, [string]$en) { return @($zh, $ja, $en)[$lang] }
-$readme = @('README_EDF6Coop_zh.txt', 'README_EDF6Coop_ja.txt', 'README_EDF6Coop.txt')[$lang]
+$readme = 'README_EDF6Coop.txt'
 
 function Find-SteamLibraries {
     $roots = @()
@@ -64,15 +64,16 @@ $plugins = Join-Path $game 'Mods\Plugins'
 $files = @(
     'Mods\Plugins\EDF6Coop.dll',
     'README_EDF6Coop.txt',
-    'README_EDF6Coop_zh.txt',
-    'README_EDF6Coop_ja.txt',
     'EDF6Coop_AllowFirewall.bat',
     'EDFModLoader_LICENSE.txt'
 )
-# What EDF6DirectNet and EDF6MultiSlot put next to the game, besides their DLLs and settings.
+# What EDF6DirectNet, EDF6MultiSlot and EDF6Spectate put next to the game, besides their DLLs and settings, and the
+# translated readmes of EDF6Coop 3.0.4 and earlier.
 $replacedExtras = @('README_EDF6DirectNet.txt', 'README_EDF6DirectNet_zh.txt', 'README_EDF6DirectNet_ja.txt',
     'README_EDF6DirectNet_en.txt', 'EDF6DirectNet_AllowFirewall.bat', 'EDF6DirectNet_防火墙放行.bat',
-    'README_EDF6MultiSlot.txt', 'RELEASE_NOTES_EDF6MultiSlot.md')
+    'README_EDF6MultiSlot.txt', 'RELEASE_NOTES_EDF6MultiSlot.md',
+    'README_EDF6Spectate.txt', 'EDF6Coop_GUARD_LICENSE.txt', 'EDF6Coop_TOOLS_LICENSE.txt',
+    'README_EDF6Coop_zh.txt', 'README_EDF6Coop_ja.txt')
 
 # Only a game started from this folder holds these files. A process whose path cannot be read (another
 # user's, an elevated one) counts as this folder's.
@@ -207,7 +208,7 @@ function Copy-Into([string]$from, [string]$to) {
 foreach ($f in $files) { Copy-Into (Join-Path $here $f) (Join-Path $game $f) }
 # The plugins EDF6Coop replaces: both would hook the same game code. Renamed, not deleted, so going back
 # is a rename; their .ini files stay.
-foreach ($old in 'EDF6DirectNet.dll', 'EDF6MultiSlot.dll') {
+foreach ($old in 'EDF6DirectNet.dll', 'EDF6MultiSlot.dll', 'EDF6Spectate.dll') {
     $path = Join-Path $plugins $old
     if (-not (Test-Path -LiteralPath $path)) { continue }
     $disabled = "$path.disabled"
