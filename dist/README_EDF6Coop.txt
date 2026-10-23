@@ -12,7 +12,7 @@ of sync or ending when a connection drops:
 - while you are down online, you watch a standing teammate until revived.
 Enemy/object hits keep the game's complete collision data on the shooter's machine, including armor and weak
 points. Hits on other players/vehicles go to their owners. NetHit logs separate replayed events from HP reductions;
-armor, invulnerability and friendly-fire rules can prevent HP loss. Versions 3.0.1 to 3.1.0 use netcode protocol 4
+armor, invulnerability and friendly-fire rules can prevent HP loss. Versions 3.0.1 to 3.1.1 use netcode protocol 4
 and play together; everyone in the room needs protocol 4 to use these fixes.
 On your own radar, pickups take the color of their type: health white, armor and weapons green
 ([Display] RadarItemColors=0 keeps them all green).
