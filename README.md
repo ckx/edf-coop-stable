@@ -226,7 +226,7 @@ The Python tools run from a virtual environment `build.sh` makes in `~/.local/sh
 
 Release packages are built on a machine with the game, so every test against the game's code runs. GitHub Actions runs the other tests (`.github/workflows/ci.yml`).
 
-1. Bump the version: `project(EDF6Coop VERSION x.y.z)` in `CMakeLists.txt`.
+1. Bump the version: `project(EDF6Coop VERSION x.y.z)` in `CMakeLists.txt`. The build writes it into the DLL's version resource, and `package.ps1` checks it.
 2. Write the release notes `release-notes/<version>.md` (the body of the Release page and `RELEASE_NOTES_EDF6Coop.md` in the package).
 3. Commit to `main`, tag it and push the tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
 4. On the machine with the game, at that commit: `powershell -ExecutionPolicy Bypass -File release.ps1 -Upload`. It runs `build.ps1 -Test -RequireGame` and `package.ps1`, then creates a **draft** Release with `EDF6Coop-<version>.zip` and its `.sha256` (without `-Upload` it only stages them in `release\upload-<version>\`).

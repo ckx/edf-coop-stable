@@ -10,7 +10,7 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 
 - `src/`: the transport part, formerly EDF6DirectNet. EOS import-table hooks (`eos_hooks.cpp`, `iat.*`), reliable sending and queue sizing, disconnect hold (`hold.*`), lobby markers, the direct link (`direct_net.*`, `wire.*`, `auth.*`, `reliable.*`), fragments (`fragment.*`), UPnP, config.
 - `game/`: the game part, first written as EDF6MultiSlot by momotori01 (its namespace is still `multislot`). In-memory patches to `EDF.dll` (weapon guard, peer timeout), the spectator camera (`spectate.*`), the netcode version gate (`netfeature*`), player sync (`netplayer*`), hit authority (`hitauth*`), the crash log and the log. `plugin.cpp` is the EDFModLoader entry point for the whole DLL.
-- `CMakeLists.txt` builds both parts into one DLL (in `out/`) and holds the one version number (`project(EDF6Coop VERSION x.y.z)`).
+- `CMakeLists.txt` builds both parts into one DLL (in `out/`) and holds the one version number (`project(EDF6Coop VERSION x.y.z)`). `game/version.rc.in` puts it in the DLL's version resource.
 - `tests/` covers the transport part; `tests/game/` covers the game part, and `tests/gamenet/` runs multi-process rooms against the real `EDF.dll` with a fake EOS.
 - `dist/` is what the package ships besides the DLLs (install scripts, readmes, the loader fix note); `tools/` and `third_party/` make the race-fixed EDFModLoader.
 - `docs/net-re/` holds reverse-engineering notes for the game's network code (Chinese). `docs/spectate/` holds the spectator camera's design, its evidence for every address (`research.md`) and its live checks (`plan.md`).
@@ -63,6 +63,7 @@ Linux via Steam Proton is a first-class platform, equal to Windows. The develope
 ## Commits
 
 - Publish every build delivered to the developer on GitHub Releases, including diagnostic and experimental builds, so it can be distributed to other players. Upload a complete installable package and its SHA-256 checksum, and provide the release URL. Diagnostic builds use a clearly named prerelease and must not replace the latest stable release. A local DLL path or a source-only push is not delivery. Creating the required tags and publishing these builds is authorized; do not ask for separate confirmation.
+- Every released DLL carries its version in its version resource (Explorer, Properties, Details), diagnostic and experimental builds included. Bump `project()` for each release rather than reusing a published version. `package.ps1` refuses a DLL whose resource or exported marker does not match; do not bypass it.
 - After publishing any release, including diagnostic prereleases, install the published package locally in `/mnt/kosmos/SteamLibrary/steamapps/common/EARTH DEFENSE FORCE 6`. Back up the installed plugin, preserve settings and other mods, and verify the installed DLL against the published package's SHA-256. If EDF6 is running, wait for it to close before installing.
 - Landing completed work on `main` and pushing it to `origin/main` is authorized. Do not request separate confirmation. The data-loss rules below still apply.
 - Auto-commit at your discretion after a meaningful unit of work lands.

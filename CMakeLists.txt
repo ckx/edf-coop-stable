@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 # EDF6Coop.dll: the transport part (src/) and the game part (game/) as one plugin.
-project(EDF6Coop VERSION 3.1.1 LANGUAGES CXX)
+project(EDF6Coop VERSION 3.1.1 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Every file sees <windows.h> the same way.
 add_compile_definitions(WIN32_LEAN_AND_MEAN NOMINMAX)
-# The version EDFModLoader is told (PluginInfo) and the plugin's exported marker carry.
+# The version EDFModLoader is told (PluginInfo) and the plugin's exported marker carry; game/version.rc.in puts it in
+# the DLL's version resource.
 add_compile_definitions(EDF6COOP_VERSION_MAJOR=${PROJECT_VERSION_MAJOR} EDF6COOP_VERSION_MINOR=${PROJECT_VERSION_MINOR}
                         EDF6COOP_VERSION_PATCH=${PROJECT_VERSION_PATCH})
 # Where the plugin and the race-fixed loader land (package.ps1 takes them from there).
@@ -28,7 +29,8 @@ else()
     string(APPEND CMAKE_CXX_STANDARD_LIBRARIES " -lwinpthread")
     set(CMAKE_SHARED_LIBRARY_PREFIX "")
 endif()
-add_compile_options(${WARNINGS})
+# C++ only: the resource compiler takes none of these.
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${WARNINGS}>")
 
 # The transport part: EOS hooks, held disconnects, the direct link.
 set(TRANSPORT_DIR "${CMAKE_SOURCE_DIR}/src")
@@ -53,7 +55,8 @@ add_library(GameCore STATIC ${GAME_CORE})
 target_include_directories(GameCore PUBLIC "${CMAKE_SOURCE_DIR}")
 target_link_libraries(GameCore PUBLIC TransportPart)
 
-add_library(EDF6Coop SHARED game/plugin.cpp)
+configure_file(game/version.rc.in version.rc @ONLY)
+add_library(EDF6Coop SHARED game/plugin.cpp "${CMAKE_CURRENT_BINARY_DIR}/version.rc")
 option(EDF6_SHIELD_TRACE "Build temporary Luminous Shield visibility diagnostics" OFF)
 if(EDF6_SHIELD_TRACE)
     target_sources(EDF6Coop PRIVATE game/shieldtrace.cpp)

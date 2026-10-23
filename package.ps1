@@ -51,8 +51,12 @@ if ($loaderHash -ne 'BE94E1FAC0CA12C41B6924E2EB168851641C999CE951D2A5A9FAEA5161B
     throw "winmm.dll is not the verified race-fixed EDFModLoader ($loaderHash); build.ps1 makes it with tools/fix_winmm_proxy.py"
 }
 # The DLL must be this version.
-$pluginText = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($sources['Mods/Plugins/EDF6Coop.dll']))
-if ($pluginText.IndexOf("EDF6COOP_VERSION=$version`0") -lt 0) { throw "EDF6Coop.dll is not version $version; rebuild with build.ps1" }
+$pluginBytes = [IO.File]::ReadAllBytes($sources['Mods/Plugins/EDF6Coop.dll'])
+if ([Text.Encoding]::ASCII.GetString($pluginBytes).IndexOf("EDF6COOP_VERSION=$version`0") -lt 0) { throw "EDF6Coop.dll is not version $version; rebuild with build.ps1" }
+# So must its version resource (game/version.rc.in), whose strings are UTF-16 and padded to 4 bytes.
+if ([Text.Encoding]::Unicode.GetString($pluginBytes) -notmatch "FileVersion`0+$([regex]::Escape($version))`0") {
+    throw "EDF6Coop.dll has no version resource for $version; rebuild with build.ps1"
+}
 # A DLL older than its sources would ship something else than the tag says.
 $newestSource = Get-ChildItem (Join-Path $root 'src'), (Join-Path $root 'game'), (Join-Path $root 'CMakeLists.txt') -File |
     Sort-Object LastWriteTime -Descending | Select-Object -First 1
