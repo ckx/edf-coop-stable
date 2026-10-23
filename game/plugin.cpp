@@ -31,6 +31,9 @@
 #include "src/log.h"
 
 namespace multislot {
+#ifdef EDF6_SHIELD_TRACE
+bool InstallShieldTrace(unsigned char* base);
+#endif
 namespace {
 
 // CMakeLists.txt's project VERSION, the one version of EDF6Coop: EDFModLoader is told it (PluginInfo), and the
@@ -172,6 +175,9 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     InitWeaponGuard(base);
     InitPeerTimeout(base);
     if (!Apply(base, keepRoom)) return false;
+#ifdef EDF6_SHIELD_TRACE
+    InstallShieldTrace(base);
+#endif
     Log("KeepRoomOnPeerTimeout=%d: %s", keepRoom ? 1 : 0,
         keepRoom ? "when the P2P handshake with someone who joined after you times out, you stay in the room and they "
                    "stay unconnected (the game makes every member but the host leave)"
