@@ -76,6 +76,16 @@ as evidence of parameter layout, but is never called by the plugin.
 | teammate name and network slot | `0x7FFBD0` | `0x316` | `0x928DCDE1820225DC` |
 | network display name | `0x784830` | `0x1D6` | `0xAC8CA0E518BFCB02` |
 | network platform name | `0x12ABFF0` | `0x266` | `0x2FFD4BD265F55D78` |
+| chat HUD factory (3.1.2) | `0x7FCE60` | `0x257` | `0xD0128CEBB3F70692` |
+| chat HUD construction | `0x800520` | `0x125` | `0x31F4B8FFF36A2126` |
+| chat HUD destructor | `0x8007E0` | `0x15A` | `0x6E653C90FCC9C658` |
+| chat HUD deleting destructor | `0x800A80` | `0x17C` | `0x0E3BB1E3AAF4F75E` |
+| chat receive callback | `0x800C00` | `0x59` | `0xE9AE064FC00E2944` |
+| chat HUD layout setup | `0x802970` | `0x289` | `0x863B694B975811BE` |
+| chat message add | `0x802C00` | `0x310` | `0xB48D3FC86CCDE78C` |
+| chat HUD draw | `0x802F10` | `0x102` | `0x8F50E7AEBAE1EE37` |
+| chat HUD update | `0x803020` | `0x214` | `0xB8C6C261062A53DC` |
+| chat message draw | `0x801420` | `0xEB2` | `0xDB38601F64406159` |
 
 ## Hook: the System::Update call
 
@@ -576,6 +586,69 @@ Validation: MinGW/clang build and the EDF6Coop suite under Wine with the game's
 EDF.dll, except the `DirectNet` and `LogFileCap` stress tests. `PluginLoad_on`,
 `_fresh` and `_replaced` hash every range in the mapped DLL and find the call
 redirected into the plugin. Not live-tested.
+
+## Chat log and own name indicator, 2026-10-23
+
+The user reported that the chat log was not visible while spectating and that their
+own name indicator was missing. Static analysis of the supported EDF.dll with
+`tools/pe.py`; the running game was not read (the user was playing).
+
+Chat log evidence:
+
+- The builder `0x7FE5D0` makes its eighth factory call at `0x7FEE5D` to
+  `0x7FCE60(camera, weakOut, param)`. The InitParam vtable is `0x17F6738`, the same
+  `HudPlayer::InitParam` as the names call (`rdi` is not written between `0x7FED94`
+  and `0x7FEE3E`), with the player at `+0x10`. The factory writes the camera into
+  `+8` itself (`0x7FCE7B`).
+- `0x7FCE60` allocates `0x120` bytes, constructs `HudPlayer_Chat` (vtable
+  `0x17F6A58`) through `0x800520`, moves the strong reference into the camera's HUD
+  list at `+0x208` through `0x7FF390` and returns a weak reference: the same
+  contract as the names factory, so `AttachHud` serves both.
+- `0x800520` runs the `MultiPlayHud_Base` constructor `0x7FF670`, which copies the
+  player's weak self-reference (`SoldierBase +0x28/+0x30`, read at `0x7FF766`) to
+  `+0x70/+0x78` and the raw pointer to `+0x80`. It then links a node {callback
+  `0x800C00`, this} into the chat receiver list at `*(EDF+0x20B2AC8)+0x58`. The
+  callback filters through `0x7207E0` and appends through `0x802C00` to the widget's
+  own message list at `+0xB0`. Each widget has its own list, so a spectator camera's
+  log shows the messages that arrive after its creation.
+- Both destructors (`0x8007E0`, `0x800A80`) remove every receiver node whose
+  callback is `0x800C00`, not only their own. That is the game's behaviour for its
+  own chat widgets; a second widget changes nothing, because view 0's cameras, the
+  local one included, are torn down together (`0x11956C0`), and the local camera's
+  own chat widget removes the same nodes then.
+- Update `0x803020` (ends at `0x803234`; the unwind table splits it) ages messages
+  and looks up senders' vehicles (`0x8024D0`). Draw `0x802F10` lays out each message
+  through `0x801420` and submits with the camera's view index (`+0x18`, then
+  `+0x60`). `0x801420` reads game settings through the global local index at
+  `*(EDF+0x20B2890)+0x38`, not through the player, and locks the viewer's weak
+  reference; with the local player as viewer this is the stock path. No chat method
+  reads `SoldierBase +0x338` or calls the camera's slot 9, so the log is expected to
+  stay while the camera orbits.
+- None of the ten ranges contains a base relocation.
+
+Own name evidence:
+
+- The enumeration callback `0x807680` skips a candidate equal to the locked viewer
+  (`0x807689`) and null candidates. The viewer is locked in update `0x807870` from
+  `+0x70/+0x78`; an expired weak reference locks to null and excludes nobody.
+- The per-player draw `0x804C90` locks the viewer at `0x804D4C` and returns without
+  drawing when that fails (`0x804D67` to `0x8065D1`). Its other uses of the viewer
+  are the vehicle lookup `0x8024D0` (`0x804E0D`) and the seat lookup `0x806A80`,
+  which returns -1 for a missing viewer. So clearing the viewer after construction
+  would remove every indicator, and a null InitParam player faults in `0x7FF766`.
+- The raw pointer at `+0x80` is written at `0x7FF7A7` and not read by any
+  `HudPlayer_MultiPlayStatus`, `MultiPlayHud_Base` or `HudBase` method inspected
+  (`0x7FC2D0`, `0x7FC620`, `0x7FC630`, `0x7FC6D0`, `0x7FC750`, `0x7FF800`).
+- The viewer therefore has to be a live soldier, and the only way to show the local
+  player with the game's code is to make someone else the viewer. 3.1.2 passes the
+  watched teammate: a remote `SoldierBase` with the weak self-reference the callback
+  at `0x807B72` already reads on every candidate, and a valid argument to the
+  vehicle lookup, which runs on remote candidates in the stock path. Its indicator
+  is the one dropped.
+
+Validation: MinGW/clang build and the non-stress suite under Wine with the game's
+EDF.dll; `PluginLoad_on` hashes the ten new ranges in the mapped DLL. Not
+live-tested; the live checks are M9 in `plan.md`.
 
 ## Open questions
 

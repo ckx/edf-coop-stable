@@ -123,6 +123,25 @@ Live checks:
    name/health indicators stay.
 6. Watched teammates of each class, on foot and in vehicles.
 
+## M9. Chat log and own name indicator (3.1.2)
+
+The user reported that chat was not visible while spectating and that their own
+name indicator was missing (2026-10-23). Version 3.1.2 attaches the game's chat log
+widget to each spectator camera and makes the watched teammate the name indicators'
+viewer. Evidence is in `research.md` (Chat log and own name indicator). Built and
+run against the existing tests; no live check has passed.
+
+Live checks:
+
+1. A chat message sent while spectating appears in the spectator view; messages
+   from before the first death do not (the local camera's log shows them again on
+   revival).
+2. The downed player's own body has a name/health indicator; the other teammates
+   keep theirs; the watched teammate has none.
+3. Revival, a second death in the same mission (camera reuse, no second chat log),
+   the watched teammate going down or leaving, and mission end: the chat keeps
+   working on the own camera in the next mission.
+
 ## M8. Part of EDF6Coop (done in 3.1.0)
 
 The user asked for one install and one mod (2026-10-22), with the camera on by

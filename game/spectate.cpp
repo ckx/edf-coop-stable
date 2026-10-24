@@ -19,6 +19,7 @@ constexpr std::uint32_t kSystemUpdate = 0x1198DA0;
 constexpr std::uint32_t kGhostCameraFactory = 0x82B40;  // System's factory for CharacterGhostCamera
 constexpr std::uint32_t kHealthHudFactory = 0x7FC9A0;  // (SceneCamera*, weak_ptr* out, HUiHudBaseObject::InitParam*)
 constexpr std::uint32_t kNamesHudFactory = 0x7FD580;   // (SceneCamera*, weak_ptr* out, HudPlayer::InitParam*)
+constexpr std::uint32_t kChatHudFactory = 0x7FCE60;    // (SceneCamera*, weak_ptr* out, HudPlayer::InitParam*)
 constexpr std::uint32_t kHealthHudParamVtable = 0x17F6768;
 constexpr std::uint32_t kNamesHudParamVtable = 0x17F6738;
 constexpr std::uint32_t kHealthHudLayout = 0x17F6790;  // app:/ui/lyt_HudPowerGauge01.sgo
@@ -122,6 +123,16 @@ constexpr Code kCode[] = {
     {"teammate name and network slot", 0x7FFBD0, 0x316, 0x928DCDE1820225DC},
     {"network display name", 0x784830, 0x1D6, 0xAC8CA0E518BFCB02},
     {"network platform name", 0x12ABFF0, 0x266, 0x2FFD4BD265F55D78},
+    {"chat HUD factory", 0x7FCE60, 0x257, 0xD0128CEBB3F70692},
+    {"chat HUD construction", 0x800520, 0x125, 0x31F4B8FFF36A2126},
+    {"chat HUD destructor", 0x8007E0, 0x15A, 0x6E653C90FCC9C658},
+    {"chat HUD deleting destructor", 0x800A80, 0x17C, 0x0E3BB1E3AAF4F75E},
+    {"chat receive callback", 0x800C00, 0x59, 0xE9AE064FC00E2944},
+    {"chat HUD layout setup", 0x802970, 0x289, 0x863B694B975811BE},
+    {"chat message add", 0x802C00, 0x310, 0xB48D3FC86CCDE78C},
+    {"chat HUD draw", 0x802F10, 0x102, 0x8F50E7AEBAE1EE37},
+    {"chat HUD update", 0x803020, 0x214, 0xB8C6C261062A53DC},
+    {"chat message draw", 0x801420, 0xEB2, 0xDB38601F64406159},
     {"view camera switch", kSetViewCamera, 0x18D, 0xF859E0B97E448F2F},
     {"weak_from_this", kWeakFromThis, 0x9C, 0x580BFED010D5E37E},
     {"camera flush", 0x1195A80, 0x159, 0xFAAA5CBBF9469555},
@@ -249,7 +260,8 @@ void ReleaseWeak(std::uintptr_t control) {
     reinterpret_cast<ControlFn>(Ptr(Ptr(control) + 8))(control);
 }
 
-// Match the isolated calls at 7FEC45 and 7FEDBA, not the full local-player HUD builder.
+// Match the isolated calls at 7FEC45, 7FEDBA and 7FEE5D, not the full local-player HUD builder. The factory fills in
+// the camera. The HudPlayer widgets keep the player's weak self-reference (SoldierBase +0x28/+0x30, read at 7FF766).
 struct HudParam {
     std::uintptr_t vtable;
     std::uintptr_t camera;
@@ -270,7 +282,7 @@ void AttachHud(std::uintptr_t camera, std::uint32_t factory, HudParam& param) {
 
 // A ghost camera following `object` on view 0, made as the game's create_remote_camera (CCCA0) makes one. The System
 // adds it to the view and makes it current in its next flush, which the System::Update about to run does.
-bool Create(std::uintptr_t system, std::uintptr_t object, std::uintptr_t viewer, std::uint32_t slot) {
+bool Create(std::uintptr_t system, std::uintptr_t object, std::uintptr_t local, std::uint32_t slot) {
     // Read before making any game objects. The native gauge divides by maximum health.
     const float health = At<float>(object + kHealth);
     const float maximum = At<float>(object + kMaxHealth);
@@ -297,11 +309,19 @@ bool Create(std::uintptr_t system, std::uintptr_t object, std::uintptr_t viewer,
     } else {
         Log("SPECTATE: skipping health bar for slot %u: health or maximum health is invalid", slot);
     }
-    // The name/health indicators enumerate everyone except their owner. Keep the local player as that owner,
-    // so the watched remote player stays in the list. This component already handles remote network records.
+    // The name/health indicators enumerate everyone except their viewer (807689) and draw nothing without one
+    // (804D67). The watched teammate is the viewer: they fill the middle of the view anyway, and the downed local
+    // player's own body gets an indicator like everyone else's, which the game's own camera never shows. The
+    // viewer's only other use is the vehicle lookup (8024D0) the indicators run on every player.
     Log("SPECTATE: creating teammate name indicators for the spectator camera");
-    HudParam namesParam{reinterpret_cast<std::uintptr_t>(game + kNamesHudParamVtable), 0, viewer, nullptr, {}, 0, 0};
+    HudParam namesParam{reinterpret_cast<std::uintptr_t>(game + kNamesHudParamVtable), 0, object, nullptr, {}, 0, 0};
     AttachHud(camera[0], kNamesHudFactory, namesParam);
+    // The chat log belongs to the camera it was built for, so the spectator camera gets one of its own, with the
+    // local player as its viewer as on the game's camera. It registers a receiver with the chat service (800C00)
+    // and shows the messages that arrive while it exists; the local camera's log keeps receiving as well.
+    Log("SPECTATE: creating the chat log for the spectator camera");
+    HudParam chatParam{reinterpret_cast<std::uintptr_t>(game + kNamesHudParamVtable), 0, local, nullptr, {}, 0, 0};
+    AttachHud(camera[0], kChatHudFactory, chatParam);
     // The System's queue owns the camera. Releasing a strong reference here would destroy it before the flush.
     ReleaseWeak(camera[1]);
     return true;
@@ -373,7 +393,7 @@ void Follow(std::uintptr_t system) {
     } else if (target != kOwnCamera && target < 32 && !(createdThisDown & (1u << target))) {
         createdThisDown |= 1u << target;
         if (Create(system, object, roster.local.object, target))
-            Log("SPECTATE: following the player in slot %u (new camera with health/name HUD)", target);
+            Log("SPECTATE: following the player in slot %u (new camera with health, names and chat)", target);
         else
             Log("SPECTATE: could not create a camera for the player in slot %u", target);
     }

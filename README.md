@@ -33,12 +33,12 @@ Everything is on by default, except the direct link, which the host enables.
 In an online room, when you go down and wait for a revive, your view switches to the standing teammate with the lowest slot. If they go down or leave, it moves to the next one. Being revived, or every teammate being down, returns your own camera.
 
 - The camera orbits the watched teammate and points where you look. Turn it with your normal look controls (mouse or right stick, your own bindings and sensitivity). It does not copy the teammate's aim. There is no detached free camera.
-- The watched teammate gets a health bar with current/maximum health, and the multiplayer name/health indicators stay. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
+- The watched teammate gets a health bar with current/maximum health. The multiplayer name/health indicators show the other players, your own downed body included, and not the teammate you are watching. The chat log stays visible. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
 - Only your own screen changes. Nothing is sent to other players, and they do not need it on.
 - Offline play and split screen are left alone. There is no button to pick a teammate yet.
 - `[Display] SpectateWhenDown=0` turns it off.
 
-This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The orbit camera and the health bar have not been checked online. Static analysis says the game hides the health bar while the camera orbits; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
+This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The orbit camera, the health bar, your own name indicator and the chat log have not been checked online. Static analysis says the game hides the health bar while the camera orbits; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
 
 ## Install
 

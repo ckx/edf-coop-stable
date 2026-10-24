@@ -31,9 +31,16 @@ watch, the view returns to their own camera.
 - Nothing is sent over the network. Each player's plugin acts on its own view only.
   Players without the plugin see no difference.
 - Version 0.3.0 attaches only a health gauge and multiplayer name/health indicators.
-  The gauge reads the watched teammate's current/maximum health directly. The name
-  indicators keep the local player as their viewer, so their normal exclusion of
-  the viewer does not hide the watched teammate. Names use the game's settings.
+  The gauge reads the watched teammate's current/maximum health directly. From 3.1.2
+  the watched teammate is the indicators' viewer: they show every other player, the
+  downed local player's own body included, and not the watched teammate, who fills
+  the middle of the view. (0.3.0 to 3.1.1 kept the local player as viewer, which hid
+  their own body's indicator, as the game's own camera does.) Names use the game's
+  settings.
+- From 3.1.2 the spectator camera also carries a chat log of its own (the game's
+  `HudPlayer_Chat`), so chat stays readable while watching. It shows the messages
+  received while it exists; the local camera's log keeps the full history and shows
+  it again on revival.
 - Returning to the local camera returns its original HUD. No ammo, radar, damage
   or class gauges are created for spectator cameras. The smaller HUD is unverified
   online. Full combat HUD support is deferred in favor of health and names.
@@ -66,9 +73,11 @@ Each frame, before calling the game's `System::Update`, it:
    flush in the `System::Update` that follows makes the new camera current.
 7. For a new camera, attach the health widget through `0x7FC9A0` using only the
    `lyt_HudPowerGauge01.sgo` layout and the watched player. Attach multiplayer
-   indicators through `0x7FD580` using the local player as the viewer. Release
-   both returned weak references; the camera owns the objects. The full HUD builder
-   at `0x7FE5D0` is never called. Invalid health/max values skip the health widget.
+   indicators through `0x7FD580` with the watched teammate as the viewer, and the
+   chat log through `0x7FCE60` with the local player as the viewer, as on the game's
+   own camera. Release all three returned weak references; the camera owns the
+   objects. The full HUD builder at `0x7FE5D0` is never called. Invalid health/max
+   values skip the health widget.
 
 The plugin keeps no game pointers between frames. Its only state is a bit per slot
 for cameras it asked for during the current downed period, so a camera that fails to
@@ -143,5 +152,5 @@ runs.
 - Input to cycle teammates or return to the own camera while down, and how to read it
   (game input, XInput, keyboard).
 - Whether to watch while the local player has bled out, if the game has such a state.
-- Whether a separate fixed spectator-name caption is needed beyond the native
-  multiplayer indicators.
+- Whether a separate fixed spectator-name caption is needed, now that the watched
+  teammate has no indicator of their own (3.1.2).
