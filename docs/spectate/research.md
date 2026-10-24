@@ -702,7 +702,8 @@ The game's text-entry state:
 
 Reading the key:
 
-- Chosen: `GetAsyncKeyState(VK_SPACE)` from the plugin, gated by
+- Chosen: `GetAsyncKeyState(VK_SPACE)` from the plugin (`'W'` from 3.2.1, user
+  decision 2026-10-24), gated by
   `GetForegroundWindow` belonging to this process. The game does the same compare
   against its window (`0x1183947` to `0x118395F`). No game dependence for the key
   itself.
@@ -741,6 +742,6 @@ Wine: `ImmAssociateContext`, `GetAsyncKeyState`, `GetForegroundWindow` and
   check and the camera update.
 - Whether any job thread reads view 0's camera while `Application::Update` runs.
 - Who calls `0x7D0B10` (text entry begin), and whether the Steam overlay keyboard
-  sets the text-entry byte. Decided input: Space (plan M4).
+  sets the text-entry byte. Decided input: W (plan M4).
 - Whether the orbit camera follows the downed player's look input in a live room,
   and whether the health gauge hides as the static analysis predicts.

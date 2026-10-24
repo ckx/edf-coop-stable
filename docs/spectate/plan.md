@@ -57,7 +57,9 @@ for any of these.
 ## M4. Choosing whom to watch (built in 3.2.0, unverified online)
 
 The user chose the space bar (2026-10-23): keyboard only, no controller button, no
-INI key. A press must not change the camera while the player is typing in the chat
+INI key. On 2026-10-24 the user moved it to the W key (3.2.1); the rest of M4 is
+unchanged, and Space below reads as W for the live checks. Holding W (running
+forward) as the player goes down is not a press. A press must not change the camera while the player is typing in the chat
 box. Evidence for the game's text-entry state is in `research.md`, "Teammate
 cycling input".
 

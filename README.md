@@ -32,7 +32,7 @@ Everything is on by default, except the direct link, which the host enables.
 
 In an online room, when you go down and wait for a revive, your view switches to the standing teammate with the lowest slot. If they go down or leave, it moves to the next one. Being revived, or every teammate being down, returns your own camera.
 
-Press **Space** while down to watch the next standing teammate instead. It wraps round, and the one you chose stays watched until they go down or leave. Keyboard only, not rebindable. Space is ignored while the chat box is open, so typing a space does not move the camera, and while the game window is not in the foreground.
+Press **W** while down to watch the next standing teammate instead. It wraps round, and the one you chose stays watched until they go down or leave. Keyboard only, not rebindable. W is ignored while the chat box is open, so typing a w does not move the camera, and while the game window is not in the foreground. Holding W as you go down does not count as a press.
 
 - The camera orbits the watched teammate and points where you look. Turn it with your normal look controls (mouse or right stick, your own bindings and sensitivity). It does not copy the teammate's aim. There is no detached free camera.
 - The watched teammate gets a health bar with current/maximum health. The multiplayer name/health indicators show the other players, your own downed body included, and not the teammate you are watching. The chat log stays visible. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
@@ -40,7 +40,7 @@ Press **Space** while down to watch the next standing teammate instead. It wraps
 - Offline play and split screen are left alone.
 - `[Display] SpectateWhenDown=0` turns it off.
 
-This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The orbit camera, the health bar, your own name indicator, the chat log and the Space key have not been checked online. Static analysis says the game hides the health bar while the camera orbits; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
+This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The orbit camera, the health bar, your own name indicator, the chat log and the W key have not been checked online. Static analysis says the game hides the health bar while the camera orbits; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
 
 ## Install
 
@@ -125,7 +125,7 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `HitAuthority` | `1` | The shooter decides hits. Used only while everyone has it on |
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
-| `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; Space picks the next one (see above). Only your own screen. `0` = your own camera (original) |
+| `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; W picks the next one (see above). Only your own screen. `0` = your own camera (original) |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
 | `[Diagnostics] Player` | `1` | Bounded player movement traces for jitter diagnosis. `0` disables them |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |

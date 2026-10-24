@@ -182,7 +182,7 @@ bool stopped = false;
 // A slot no player has: the current camera follows someone who left the room.
 constexpr std::uint32_t kGone = kOwnCamera - 1;
 std::uint32_t createdThisDown = 0;  // slots whose camera was asked for since the local player went down
-bool cycleHeld = true;              // the space bar counted as down last frame, so it is not a new press
+bool cycleHeld = true;              // the W key counted as down last frame, so it is not a new press
 
 struct Player {
     std::uintptr_t object;
@@ -349,15 +349,15 @@ void Orbit(std::uintptr_t soldier, const float* look) {
     }
 }
 
-// A new press of the space bar, which cycles teammates. The key counts as held, so the next press needs a release
-// first, while the game's text entry is open (a typed space goes into the message only) and while another window
-// has the focus.
+// A new press of the W key, which cycles teammates. The key counts as held, so the next press needs a release
+// first, while the game's text entry is open (a typed w goes into the message only) and while another window has
+// the focus.
 bool CyclePressed() {
     DWORD process = 0;
     GetWindowThreadProcessId(GetForegroundWindow(), &process);
     const bool down = process != GetCurrentProcessId() ||
                       At<std::uint8_t>(reinterpret_cast<std::uintptr_t>(game) + kTextEntry) != 0 ||
-                      (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+                      (GetAsyncKeyState('W') & 0x8000) != 0;
     const bool pressed = down && !cycleHeld;
     cycleHeld = down;
     return pressed;
@@ -390,7 +390,7 @@ void Follow(std::uintptr_t system) {
     std::uint32_t target = kOwnCamera;
     if (roster.local.alive) {
         createdThisDown = 0;
-        cycleHeld = true;  // a key held while going down (a jump, say) is not a press
+        cycleHeld = true;  // W held while going down (running forward) is not a press
     } else {
         Teammate mates[kMaxPlayers];
         for (std::size_t i = 0; i < roster.remotes; ++i) mates[i] = {roster.remote[i].slot, roster.remote[i].alive};

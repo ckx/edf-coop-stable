@@ -31,8 +31,8 @@ Player motion diagnostics are on by default. A correction of at least 0.25 m, a 
 
 [Watching a teammate while down]
 Online, when you go down, your view switches to the standing teammate with the lowest slot, and moves to the
-next one when they go down or leave. Press Space to watch the next standing teammate instead (keyboard only;
-ignored while the chat box is open, so a typed space does not move the camera). The camera orbits them and
+next one when they go down or leave. Press W to watch the next standing teammate instead (keyboard only;
+ignored while the chat box is open, so a typed w does not move the camera). The camera orbits them and
 points where you look: turn it with your normal look controls (mouse or right stick). Being revived, or every
 teammate being down, returns your own camera.
 The watched teammate gets a health bar. The name/health indicators show the other players, your own downed body
@@ -40,7 +40,7 @@ included, but not the teammate you watch; the chat log stays visible. Ammo, rada
 shown for them. Only your screen changes; nothing is sent to other players. Offline play and split screen are
 left alone. This used to be the EDF6Spectate plugin; installing uninstalls it. Following and returning were
 checked online with EDF6Spectate 0.1.1; the orbit camera, the health bar, your own name indicator, the chat log
-and the Space key have not been checked online yet.
+and the W key have not been checked online yet.
 [Display] SpectateWhenDown=0: keep your own camera while down.
 
 [Install / uninstall]

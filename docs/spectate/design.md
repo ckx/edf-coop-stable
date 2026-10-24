@@ -45,12 +45,12 @@ watch, the view returns to their own camera.
   or class gauges are created for spectator cameras. The smaller HUD is unverified
   online. Full combat HUD support is deferred in favor of health and names.
 
-- From 3.2.0 a press of the space bar while down moves the view to the next
+- From 3.2.0 a press of the space bar (the W key from 3.2.1) while down moves the view to the next
   standing teammate in slot order, wrapping round; the chosen teammate stays watched
   until they go down or leave. The key counts as held, so the next press needs a
   release first, while the game's text entry (the chat box) is open, while the game
   window is not in the foreground and while the local player stands. Keyboard only
-  (user decision 2026-10-23). Unverified online.
+  (user decisions 2026-10-23, W 2026-10-24). Unverified online.
 
 Not in the prototype: a detached free-fly camera, watching while alive, and offline
 split screen.
@@ -156,7 +156,7 @@ runs.
 ## Open decisions
 
 - A controller button or a rebindable key for cycling, and a key to return to the
-  own camera while down. Space is decided; the game's bound actions would be the
+  own camera while down. W is decided; the game's bound actions would be the
   route for these (`research.md`, "Teammate cycling input").
 - Whether to watch while the local player has bled out, if the game has such a state.
 - Whether a separate fixed spectator-name caption is needed, now that the watched

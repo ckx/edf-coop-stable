@@ -36,7 +36,7 @@ int main() {
     Check(NextTarget(allDown, 3, 2, false) == kOwnCamera, "with every teammate down: the player's own camera");
     Check(NextTarget(nullptr, 0, kOwnCamera, false) == kOwnCamera, "alone: the player's own camera");
 
-    // The space bar.
+    // The W key.
     Check(NextTarget(all, 3, 2, true) == 3, "a press moves on to the next standing teammate");
     Check(NextTarget(all, 3, 3, true) == 1, "a press past the last slot wraps to the first");
     Check(NextTarget(secondDown, 3, 1, true) == 3, "a press skips a teammate who is down");
