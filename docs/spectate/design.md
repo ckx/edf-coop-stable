@@ -45,9 +45,13 @@ watch, the view returns to their own camera.
   or class gauges are created for spectator cameras. The smaller HUD is unverified
   online. Full combat HUD support is deferred in favor of health and names.
 
-Not in the prototype: a button to choose whom to watch, a detached free-fly camera,
-watching while alive, and offline split screen. A cycle button is the next decision for the user
-(see the plan).
+- Planned (plan M4, decided 2026-10-23): the space bar cycles to the next standing
+  teammate in slot order while down. The key is not read while the game's text
+  entry (the chat box) is open, nor while the game window is not in the foreground,
+  nor while the local player stands. Keyboard only.
+
+Not in the prototype: a detached free-fly camera, watching while alive, and offline
+split screen.
 
 ## Runtime design
 
@@ -149,8 +153,9 @@ runs.
 
 ## Open decisions
 
-- Input to cycle teammates or return to the own camera while down, and how to read it
-  (game input, XInput, keyboard).
+- A controller button or a rebindable key for cycling, and a key to return to the
+  own camera while down. Space is decided; the game's bound actions would be the
+  route for these (`research.md`, "Teammate cycling input").
 - Whether to watch while the local player has bled out, if the game has such a state.
 - Whether a separate fixed spectator-name caption is needed, now that the watched
   teammate has no indicator of their own (3.1.2).

@@ -54,11 +54,76 @@ with at least two other players. Check:
 Record the results, with the log, in `research.md`. A green test run does not stand in
 for any of these.
 
-## M4. Choosing whom to watch (needs a decision)
+## M4. Choosing whom to watch (decided 2026-10-23, not built)
 
-A button to cycle teammates while down. Decide the input with the user first: the
-game's own input state is the most consistent with rebinding, XInput or keyboard
-polling are simpler. Add it only after M3 passes.
+The user chose the space bar (2026-10-23): keyboard only, no controller button, no
+INI key. A press must not change the camera while the player is typing in the chat
+box. Evidence for the game's text-entry state is in `research.md`, "Teammate
+cycling input".
+
+Behaviour:
+
+- A press of Space (a down edge, sampled in the `System::Update` call) while the
+  local player is down and view 0 is on a spectator camera moves the view to the
+  next standing teammate in slot order after the watched one, wrapping round. With
+  one standing teammate the press changes nothing.
+- The chosen teammate stays watched until they go down or leave. Then the automatic
+  rule continues from their slot, as it does today.
+- Holding the key is one press. The key is not read while the local player stands,
+  so jumping is untouched.
+- The press is ignored while the game's text entry is open: the byte at
+  `EDF+0x21360BA` is 1 from the chat box's open to its close, and the game's own
+  keyboard reader (`0x95F930`) drops every key for play while it is set. The plugin
+  applies the same rule, so a typed space only goes into the message. While the
+  byte is set the key counts as held, so the first press after the box closes needs
+  a release first.
+- The key is read only while the game window is in the foreground
+  (`GetForegroundWindow` belongs to this process), so a space typed in another
+  window after alt-tab does not cycle.
+
+Implementation:
+
+- `NextTarget(mates, count, followed, advance)`: with `advance` the "followed still
+  stands" case is skipped, so the search starts at the first slot after `followed`
+  and wraps, which is the existing second loop. Nothing else in `Follow` changes:
+  a new target goes through the same `FindCamera` / `ShowCamera` / `Create` path and
+  `createdThisDown` still limits creation to one attempt per slot per down.
+- Key: `GetAsyncKeyState(VK_SPACE)` high bit, edge-tracked in a static next to
+  `createdThisDown`, reset when the local player stands. Wine implements
+  `GetAsyncKeyState`, `GetForegroundWindow` and `GetWindowThreadProcessId`.
+- Text-entry gate: `At<std::uint8_t>(game + 0x21360BA)`. The byte is data, so the
+  hashed ranges are the code that defines it: IME association `0x1183160` (writes
+  it), its getter `0x1183CE0` (the game's keyboard reader calls it first) and the
+  text-entry window procedure `0x7D2C40` (turns it on and off). Add them to the
+  `kCode` table and to the main table in `research.md` when this lands.
+- Log: the existing `SPECTATE: following the player in slot N` line covers a cycle.
+  No new line.
+- Nothing is sent, so no netcode version gate.
+- Tests: `SpectateTarget` gets the advance cases (next standing slot after the
+  watched one; wrap to a lower slot; one standing teammate stays; watched teammate
+  down plus advance gives the next standing one). The key read and the gate are
+  Win32 and game memory and are live checks only.
+- Docs in the same change: `README.md` (spectator section and the settings table
+  row), `dist/README_EDF6Coop.txt` (replace "there is no button to pick a teammate
+  yet"), `design.md` Behavior, and the release notes.
+
+Live checks, online, with at least two standing teammates:
+
+1. Down: Space moves the view to the next standing teammate and the log names the
+   slot. The look direction is kept.
+2. Space again wraps round to the first standing teammate.
+3. The chosen teammate goes down: the view moves on to the next standing one.
+4. Open the chat box while down, type a sentence with spaces, send it, close the
+   box: the camera does not move while typing; Space cycles again after the box is
+   closed. Note whether a Space pressed before opening the box and still held when
+   it closes does anything.
+5. The chat shortcut window (phrase list) open while down: note whether Space does
+   anything in it and whether the camera cycles. The gate covers free-text entry
+   only.
+6. The pause menu open while down: the same note.
+7. Standing: Space does what the game binds it to and no `SPECTATE` line appears.
+8. Alt-tabbed: a space typed in another window does not cycle.
+9. The same checks under Proton.
 
 ## M5. Release packaging (done, then replaced)
 

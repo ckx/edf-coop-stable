@@ -650,6 +650,78 @@ Validation: MinGW/clang build and the non-stress suite under Wine with the game'
 EDF.dll; `PluginLoad_on` hashes the ten new ranges in the mapped DLL. Not
 live-tested; the live checks are M9 in `plan.md`.
 
+## Teammate cycling input, 2026-10-23
+
+The user chose the space bar to cycle teammates and asked that typing in the chat
+box never cycles. Static analysis with `tools/pe.py`; the running game was not read.
+Nothing here is checked by the plugin yet (plan M4).
+
+The game's text-entry state:
+
+- Window creation `0x1183470` stores the game window at `EDF+0x21360A8`, the result
+  of `ImmGetContext` at `EDF+0x2135FF8`, calls `ImmAssociateContext(hwnd, NULL)`
+  through the thunk `0x162C4BA` (`0x11837C0`) and clears the byte at
+  `EDF+0x21360BA` (`0x11837C5`). The IME starts detached.
+- `0x1183160(bool enable)` calls `ImmAssociateContext(hwnd, enable ? himc : NULL)`
+  and stores `enable` in the byte at `0x21360BA` (`0x1183181`). It is the only
+  writer besides window creation. `0x1183CE0` returns the byte; `0x95F320` jumps to
+  it.
+- The game's keyboard input builder `0x95F930` (it reads `GetKeyboardState` at
+  `0x95FA51`) calls `0x1183CE0` at `0x95F98A` as its first check and, when the byte
+  is set, skips every key (`jne 0x960419`) and marks the input idle. So while the
+  byte is set the game itself treats no key as play input. Its second check,
+  `0x1183D90`, reads the byte at `0x21360BB`, set through `0x1184540` from `0x917200`
+  and `0x917700`; its meaning was not traced.
+- `0x7D2C40(hwnd, msg, wParam, lParam)` is the window procedure the text-entry
+  manager installs. It handles `WM_IME_*` (`0x10D` to `0x10F`, `0x281`) and two
+  application messages: `0x1000` calls `0x1183160(1)` and then `0x7D0B50` on the
+  manager at `EDF+0x20B39B8`; `0x1001` calls `0x1183160(0)`. Other messages go to
+  `DefWindowProcW` (`0x1755FA8`).
+- `0x7D0B10` begins text entry: it installs `0x7D2C40` through `0x1184680` (stored
+  at `EDF+0x2135FF0`) and sends message `0x1000` to the game window with
+  `SendMessageW` (`0x1755F40`), so the byte turns on synchronously. `0x7D0580` ends
+  it: message `0x1001`, then it removes the field from the manager's list
+  (`0x20B39B8 +0x60/+0x68`). `0x7D0B10` has no direct caller or data pointer in the
+  image; it is reached through a stored function pointer, so the exact moment it
+  runs relative to the chat window opening is a live check.
+- `0x7D0580` is called from `0x7D4CE0`, slot 5 of the `HUiCommon_SoftkeyboardGUI`
+  vtable (`0x17F3ED0`, pointer at `0x17F3EF8`), which resets the vtable pointer and
+  tears the GUI down, and from `0x7D4910` (through `0x7D3AC0` and `0x7D2F60`), the
+  GUI's close path. `HUiChat::CreateTextChatWindow` (RTTI lambda names) builds the
+  text chat through `UiCommon_Softkeyboard`, whose PC front end is this GUI. So the
+  chat box is the soft keyboard, and its open and close bracket the byte.
+- `0x7D1E50` is the per-field message handler (the field holds the IME composition;
+  `EDF+0x20B2898` points at a pending-text buffer the field drains). It calls
+  `0x1183160(0)` when field `+0x10C` is set, another route to clearing the byte.
+- `Steam_SystemService` has `OnGamepadTextInputDismissed` callbacks: the Steam
+  overlay keyboard is a second text input path. Whether it sets the byte was not
+  traced; check 5 and 6 in the plan cover a keyboard that is not the chat box.
+
+Reading the key:
+
+- Chosen: `GetAsyncKeyState(VK_SPACE)` from the plugin, gated by
+  `GetForegroundWindow` belonging to this process. The game does the same compare
+  against its window (`0x1183947` to `0x118395F`). No game dependence for the key
+  itself.
+- Not chosen: the game's own keyboard array at `EDF+0x21360E0`, filled by
+  `0x1183880` with `GetKeyboardState` (`0x1183938`) once per frame under the flag
+  at `0x21360BE`. It would tie the plugin to the game's frame timing for no gain.
+- Not chosen: the game's bound actions. `0x95F930` builds play input from the
+  keyboard array and the bindings; its structures were not traced. This would be
+  the route for a rebindable key or a controller button.
+
+Ranges the implementation will hash (none holds a base relocation):
+
+| Range | RVA | Size | FNV-1a 64 |
+| --- | --- | --- | --- |
+| IME association and text-entry byte | `0x1183160` | `0x2D` | `0x18B1F50D6B101044` |
+| text-entry byte getter | `0x1183CE0` | `0x8` | `0x2BC3DE9F6A5D005F` |
+| text-entry window procedure | `0x7D2C40` | `0x9A` | `0xAD9CA65227696BA0` |
+
+Wine: `ImmAssociateContext`, `GetAsyncKeyState`, `GetForegroundWindow` and
+`GetWindowThreadProcessId` are implemented. The game stores its byte whatever
+`ImmAssociateContext` returns.
+
 ## Open questions
 
 - Capture the reported incorrect spectator direction, including whether it happens
@@ -670,6 +742,7 @@ live-tested; the live checks are M9 in `plan.md`.
   and whether anything other than the scene steps destroys it between the plugin's
   check and the camera update.
 - Whether any job thread reads view 0's camera while `Application::Update` runs.
-- Which input should cycle teammates. The prototype has none.
+- Who calls `0x7D0B10` (text entry begin), and whether the Steam overlay keyboard
+  sets the text-entry byte. Decided input: Space (plan M4).
 - Whether the orbit camera follows the downed player's look input in a live room,
   and whether the health gauge hides as the static analysis predicts.
