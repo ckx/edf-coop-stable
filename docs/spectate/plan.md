@@ -54,7 +54,7 @@ with at least two other players. Check:
 Record the results, with the log, in `research.md`. A green test run does not stand in
 for any of these.
 
-## M4. Choosing whom to watch (decided 2026-10-23, not built)
+## M4. Choosing whom to watch (built in 3.2.0, unverified online)
 
 The user chose the space bar (2026-10-23): keyboard only, no controller button, no
 INI key. A press must not change the camera while the player is typing in the chat
@@ -94,8 +94,8 @@ Implementation:
 - Text-entry gate: `At<std::uint8_t>(game + 0x21360BA)`. The byte is data, so the
   hashed ranges are the code that defines it: IME association `0x1183160` (writes
   it), its getter `0x1183CE0` (the game's keyboard reader calls it first) and the
-  text-entry window procedure `0x7D2C40` (turns it on and off). Add them to the
-  `kCode` table and to the main table in `research.md` when this lands.
+  text-entry window procedure `0x7D2C40` (turns it on and off). They are in the
+  `kCode` table and in the main table in `research.md`.
 - Log: the existing `SPECTATE: following the player in slot N` line covers a cycle.
   No new line.
 - Nothing is sent, so no netcode version gate.

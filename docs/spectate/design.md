@@ -45,10 +45,12 @@ watch, the view returns to their own camera.
   or class gauges are created for spectator cameras. The smaller HUD is unverified
   online. Full combat HUD support is deferred in favor of health and names.
 
-- Planned (plan M4, decided 2026-10-23): the space bar cycles to the next standing
-  teammate in slot order while down. The key is not read while the game's text
-  entry (the chat box) is open, nor while the game window is not in the foreground,
-  nor while the local player stands. Keyboard only.
+- From 3.2.0 a press of the space bar while down moves the view to the next
+  standing teammate in slot order, wrapping round; the chosen teammate stays watched
+  until they go down or leave. The key counts as held, so the next press needs a
+  release first, while the game's text entry (the chat box) is open, while the game
+  window is not in the foreground and while the local player stands. Keyboard only
+  (user decision 2026-10-23). Unverified online.
 
 Not in the prototype: a detached free-fly camera, watching while alive, and offline
 split screen.

@@ -26,8 +26,9 @@ constexpr std::uint32_t kOwnCamera = 0xFFFFFFFF;
 
 // Who a downed local player watches. `mates` are in slot order; `followed` is the slot followed now, or kOwnCamera.
 // Keeps `followed` while that teammate lives, else takes the next living teammate after it in slot order (wrapping),
-// else kOwnCamera.
-std::uint32_t NextTarget(const Teammate* mates, std::size_t count, std::uint32_t followed);
+// else kOwnCamera. `advance` (the space bar) moves on from a living `followed` the same way; with one teammate
+// standing it changes nothing.
+std::uint32_t NextTarget(const Teammate* mates, std::size_t count, std::uint32_t followed, bool advance);
 
 // Makes `camera`, a SceneCamera some shared_ptr keeps alive, the current camera of `view` through the game's own
 // weak_from_this (1198950) and view switch (1193FA0). The view keeps a weak_ptr to it.

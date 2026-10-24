@@ -32,6 +32,9 @@ constexpr std::uint32_t kSoldierBaseType = 0x2006428;
 constexpr std::uint32_t kTeamManager = 0x20B2978;  // TeamManager*
 constexpr std::uint32_t kGhostCameraVtable = 0x1768C10;
 constexpr std::uint32_t kGhostCameraParamVtable = 0x1762168;
+// Byte 1 while the game's text entry (the chat box, a soft keyboard GUI) is open: 1183160 writes it with the IME
+// association, and the game's own keyboard reader (95F930) drops every key for play while it is set.
+constexpr std::uint32_t kTextEntry = 0x21360BA;
 
 // System: four views of 0x188 bytes from +0x4D0. A view holds its current camera as a weak_ptr at +0x8 and its
 // cameras in a std::list<shared_ptr<SceneCamera>> at +0x18 (nodes: next +0, value +0x10). Online, the local
@@ -145,6 +148,9 @@ constexpr Code kCode[] = {
     {"IsPlayer", 0x550890, 0xA, 0x1D923A0DEC9EF9A4},
     {"IsAlive", 0x1C0BE0, 0x2E, 0xA905EB899CAEB9D9},
     {"IsOnlineMode", kIsOnlineMode, 0x2B, 0xA71A18502F48BC92},
+    {"IME association", 0x1183160, 0x2D, 0x18B1F50D6B101044},
+    {"text-entry byte getter", 0x1183CE0, 0x8, 0x2BC3DE9F6A5D005F},
+    {"text-entry window procedure", 0x7D2C40, 0x9A, 0xAD9CA65227696BA0},
     {"__RTDynamicCast import thunk", kDynamicCast, 0x6, 0xD6E2BD7734AF1D4E},
 };
 
@@ -176,6 +182,7 @@ bool stopped = false;
 // A slot no player has: the current camera follows someone who left the room.
 constexpr std::uint32_t kGone = kOwnCamera - 1;
 std::uint32_t createdThisDown = 0;  // slots whose camera was asked for since the local player went down
+bool cycleHeld = true;              // the space bar counted as down last frame, so it is not a new press
 
 struct Player {
     std::uintptr_t object;
@@ -342,6 +349,20 @@ void Orbit(std::uintptr_t soldier, const float* look) {
     }
 }
 
+// A new press of the space bar, which cycles teammates. The key counts as held, so the next press needs a release
+// first, while the game's text entry is open (a typed space goes into the message only) and while another window
+// has the focus.
+bool CyclePressed() {
+    DWORD process = 0;
+    GetWindowThreadProcessId(GetForegroundWindow(), &process);
+    const bool down = process != GetCurrentProcessId() ||
+                      At<std::uint8_t>(reinterpret_cast<std::uintptr_t>(game) + kTextEntry) != 0 ||
+                      (GetAsyncKeyState(VK_SPACE) & 0x8000) != 0;
+    const bool pressed = down && !cycleHeld;
+    cycleHeld = down;
+    return pressed;
+}
+
 void Follow(std::uintptr_t system) {
     if (!reinterpret_cast<IsOnlineModeFn>(game + kIsOnlineMode)()) {
         createdThisDown = 0;
@@ -369,10 +390,11 @@ void Follow(std::uintptr_t system) {
     std::uint32_t target = kOwnCamera;
     if (roster.local.alive) {
         createdThisDown = 0;
+        cycleHeld = true;  // a key held while going down (a jump, say) is not a press
     } else {
         Teammate mates[kMaxPlayers];
         for (std::size_t i = 0; i < roster.remotes; ++i) mates[i] = {roster.remote[i].slot, roster.remote[i].alive};
-        target = NextTarget(mates, roster.remotes, followedSlot);
+        target = NextTarget(mates, roster.remotes, followedSlot, CyclePressed());
     }
     // The watched teammate's camera looks where the downed local player looks.
     const std::uintptr_t local = roster.local.object;
@@ -416,10 +438,10 @@ void SystemUpdate(void* system, float step, std::uint32_t frames) {
 
 }  // namespace
 
-std::uint32_t NextTarget(const Teammate* mates, std::size_t count, std::uint32_t followed) {
+std::uint32_t NextTarget(const Teammate* mates, std::size_t count, std::uint32_t followed, bool advance) {
     std::size_t start = count;
     for (std::size_t i = 0; i < count; ++i) {
-        if (mates[i].slot == followed && mates[i].alive) return followed;
+        if (!advance && mates[i].slot == followed && mates[i].alive) return followed;
         if (start == count && mates[i].slot > followed) start = i;
     }
     for (std::size_t i = 0; i < count; ++i) {

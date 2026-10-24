@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # EDF6Coop.dll: the transport part (src/) and the game part (game/) as one plugin.
-project(EDF6Coop VERSION 3.1.2 LANGUAGES CXX RC)
+project(EDF6Coop VERSION 3.2.0 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Every file sees <windows.h> the same way.
@@ -53,7 +53,7 @@ list(TRANSFORM GAME_CORE APPEND ".cpp")
 add_library(GameCore STATIC ${GAME_CORE})
 # "src/config.h" and the like name the transport part's headers (both parts have a log.h).
 target_include_directories(GameCore PUBLIC "${CMAKE_SOURCE_DIR}")
-target_link_libraries(GameCore PUBLIC TransportPart)
+target_link_libraries(GameCore PUBLIC TransportPart user32)
 
 configure_file(game/version.rc.in version.rc @ONLY)
 add_library(EDF6Coop SHARED game/plugin.cpp "${CMAKE_CURRENT_BINARY_DIR}/version.rc")

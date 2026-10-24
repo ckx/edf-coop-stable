@@ -86,6 +86,9 @@ as evidence of parameter layout, but is never called by the plugin.
 | chat HUD draw | `0x802F10` | `0x102` | `0x8F50E7AEBAE1EE37` |
 | chat HUD update | `0x803020` | `0x214` | `0xB8C6C261062A53DC` |
 | chat message draw | `0x801420` | `0xEB2` | `0xDB38601F64406159` |
+| IME association and text-entry byte (3.2.0) | `0x1183160` | `0x2D` | `0x18B1F50D6B101044` |
+| text-entry byte getter | `0x1183CE0` | `0x8` | `0x2BC3DE9F6A5D005F` |
+| text-entry window procedure | `0x7D2C40` | `0x9A` | `0xAD9CA65227696BA0` |
 
 ## Hook: the System::Update call
 
@@ -654,7 +657,7 @@ live-tested; the live checks are M9 in `plan.md`.
 
 The user chose the space bar to cycle teammates and asked that typing in the chat
 box never cycles. Static analysis with `tools/pe.py`; the running game was not read.
-Nothing here is checked by the plugin yet (plan M4).
+Built in 3.2.0 (plan M4).
 
 The game's text-entry state:
 
@@ -710,13 +713,8 @@ Reading the key:
   keyboard array and the bindings; its structures were not traced. This would be
   the route for a rebindable key or a controller button.
 
-Ranges the implementation will hash (none holds a base relocation):
-
-| Range | RVA | Size | FNV-1a 64 |
-| --- | --- | --- | --- |
-| IME association and text-entry byte | `0x1183160` | `0x2D` | `0x18B1F50D6B101044` |
-| text-entry byte getter | `0x1183CE0` | `0x8` | `0x2BC3DE9F6A5D005F` |
-| text-entry window procedure | `0x7D2C40` | `0x9A` | `0xAD9CA65227696BA0` |
+The three ranges in the main table above (`0x1183160`, `0x1183CE0`, `0x7D2C40`)
+define the byte; none holds a base relocation.
 
 Wine: `ImmAssociateContext`, `GetAsyncKeyState`, `GetForegroundWindow` and
 `GetWindowThreadProcessId` are implemented. The game stores its byte whatever
