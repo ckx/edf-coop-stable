@@ -32,6 +32,10 @@ constexpr std::uint32_t kSoldierBaseType = 0x2006428;
 constexpr std::uint32_t kTeamManager = 0x20B2978;  // TeamManager*
 constexpr std::uint32_t kGhostCameraVtable = 0x1768C10;
 constexpr std::uint32_t kGhostCameraParamVtable = 0x1762168;
+// Slot 9: bool(camera), whether the camera's HUD widgets may show this frame. False while the camera orbits (byte
+// +0x3F0), which hides a downed local player's HUD while their own camera circles their body.
+constexpr std::uint32_t kGhostCameraHudVisibleSlot = kGhostCameraVtable + 9 * 8;
+constexpr std::uint32_t kGhostCameraHudVisible = 0xF7500;
 // Byte 1 while the game's text entry (the chat box, a soft keyboard GUI) is open: 1183160 writes it with the IME
 // association, and the game's own keyboard reader (95F930) drops every key for play while it is set.
 constexpr std::uint32_t kTextEntry = 0x21360BA;
@@ -43,8 +47,10 @@ constexpr std::size_t kView0 = 0x4D0;
 constexpr std::size_t kViewCurrent = 0x8;
 constexpr std::size_t kViewCameras = 0x18;
 constexpr std::size_t kNodeValue = 0x10;
-// CharacterGhostCamera follows the object in the weak_ptr at +0x350, taken from its InitParam's +0x80.
+// CharacterGhostCamera follows the object in the weak_ptr at +0x350, taken from its InitParam's +0x80, and caches
+// it as a raw SoldierBase* at +0x360.
 constexpr std::size_t kCameraTarget = 0x350;
+constexpr std::size_t kCameraTargetObject = 0x360;
 constexpr std::size_t kParamTarget = 0x80;
 constexpr std::size_t kParamSize = 0xA0;  // the game's own are 0x88 bytes
 // TeamManager +0x38 points at the players' std::map. Tree nodes: left +0, parent +8, right +0x10, nil flag +0x19,
@@ -87,6 +93,7 @@ using HudFactoryFn = void* (*)(void* camera, void* weakOut, void* param);
 using WeakFromThisFn = void* (*)(void* camera, void* out);
 using SetViewCameraFn = void (*)(void* view, void* weak);
 using IsOnlineModeFn = bool (*)();
+using HudVisibleFn = bool (*)(void* camera);
 using DynamicCastFn = void* (*)(void* object, long vfDelta, void* sourceType, void* targetType, int isReference);
 using ControlFn = void (*)(std::uintptr_t control);
 
@@ -100,6 +107,8 @@ struct Code {
 constexpr Code kCode[] = {
     {"System::Update", kSystemUpdate, 0x9FB, 0x7F0564B7A3BF2724},
     {"CharacterGhostCamera factory", kGhostCameraFactory, 0x1DC, 0x6F6DB55CC4005B3C},
+    {"ghost camera HUD visibility", kGhostCameraHudVisible, 0x48, 0x3E8A8467D6F818D0},
+    {"HUD widget shown flag clearing", 0x80FC50, 0xB88, 0x326E883AB7461031},
     {"native HUD call parameters", 0x7FE5D0, 0x988, 0x30B0F56AE0009F97},
     {"health HUD factory", 0x7FC9A0, 0x259, 0xC053F7AAE37CD46D},
     {"teammate names HUD factory", 0x7FD580, 0x257, 0xD3B9016D4F01994A},
@@ -178,6 +187,7 @@ bool Expired(std::uintptr_t control) { return !control || At<std::int32_t>(contr
 
 unsigned char* game = nullptr;
 SystemUpdateFn systemUpdate = nullptr;
+HudVisibleFn hudVisible = nullptr;  // the game's F7500
 bool stopped = false;
 // A slot no player has: the current camera follows someone who left the room.
 constexpr std::uint32_t kGone = kOwnCamera - 1;
@@ -458,6 +468,21 @@ void Follow(std::uintptr_t system) {
     }
 }
 
+// In the ghost camera's vtable in place of F7500. The health gauge's enable pass (8168B0, a render command the game
+// queues after System::Update) sets the widget's shown flag only when this says yes, and the widget's own update
+// (80FC50) clears the flag, so the game's no while the camera orbits leaves the gauge hidden. The free spectator
+// camera orbits too: for a camera following a remote player, which only the plugin makes, the answer is yes. Every
+// other camera gets the game's answer. Runs on the render thread with no guard, so it reads what F7500 reads under
+// the same checks: the target's control block first, then the cached pointer.
+bool HudVisible(void* camera) {
+    const auto at = reinterpret_cast<std::uintptr_t>(camera);
+    if (!Expired(Ptr(at + kCameraTarget + 8))) {
+        const std::uintptr_t target = Ptr(at + kCameraTargetObject);
+        if (target && (At<std::uint32_t>(target + kRemote) & 1)) return true;
+    }
+    return hudVisible(camera);
+}
+
 void SystemUpdate(void* system, float step, std::uint32_t frames) {
     Fault fault;
     if (!stopped && system && !Guarded([&] { Follow(reinterpret_cast<std::uintptr_t>(system)); }, &fault)) {
@@ -498,11 +523,20 @@ void ShowCamera(unsigned char* base, std::uintptr_t view, std::uintptr_t camera)
 
 CallSite UpdateCall() { return {"System::Update call", kSystemUpdateCall, kSystemUpdate}; }
 
+VtableSlot HudVisibleSlot() {
+    return {"ghost camera HUD visibility slot", kGhostCameraHudVisibleSlot, kGhostCameraHudVisible};
+}
+
 bool Install(unsigned char* base) {
     static ThunkPage page;
     const CallSite site = UpdateCall();
     if (!CallTargets(base + site.rva, site.rva, site.target)) {
         Log("SPECTATE: EDF+%X does not call EDF+%X; a downed player keeps their own camera", site.rva, site.target);
+        return false;
+    }
+    const VtableSlot slot = HudVisibleSlot();
+    if (!SlotTargets(base + slot.rva, reinterpret_cast<std::uint64_t>(base), slot.target)) {
+        Log("SPECTATE: EDF+%X does not hold EDF+%X; a downed player keeps their own camera", slot.rva, slot.target);
         return false;
     }
     for (const Code& code : kCode) {
@@ -521,15 +555,26 @@ bool Install(unsigned char* base) {
     }
     game = base;
     systemUpdate = reinterpret_cast<SystemUpdateFn>(base + site.target);
+    hudVisible = reinterpret_cast<HudVisibleFn>(base + slot.target);
+    const std::uintptr_t visible = reinterpret_cast<std::uintptr_t>(&HudVisible);
+    if (!WriteCode(base + slot.rva, reinterpret_cast<const unsigned char*>(&visible), sizeof(visible))) {
+        Log("SPECTATE: could not write EDF+%X (error %lu); a downed player keeps their own camera", slot.rva,
+            GetLastError());
+        page.Release();
+        return false;
+    }
     if (!WriteCode(base + site.rva, bytes.data(), bytes.size())) {
+        const std::uintptr_t original = reinterpret_cast<std::uintptr_t>(base + slot.target);
+        WriteCode(base + slot.rva, reinterpret_cast<const unsigned char*>(&original), sizeof(original));
         Log("SPECTATE: could not write EDF+%X (error %lu); a downed player keeps their own camera", site.rva,
             GetLastError());
         page.Release();
         return false;
     }
     Log("SPECTATE: a downed player online watches a living teammate until revived: a free camera aimed with their "
-        "own look controls, or the teammate's own view (E switches; System::Update call at EDF+%X)",
-        site.rva);
+        "own look controls, or the teammate's own view (E switches; System::Update call at EDF+%X, HUD visibility "
+        "slot at EDF+%X)",
+        site.rva, slot.rva);
     return true;
 }
 

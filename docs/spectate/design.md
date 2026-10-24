@@ -52,9 +52,15 @@ nobody is left to watch, the view returns to their own camera.
   `HudPlayer_Chat`), so chat stays readable while watching. It shows the messages
   received while it exists; the local camera's log keeps the full history and shows
   it again on revival.
+- From 3.4.0 the health gauge shows in both camera modes (user decision 2026-10-24:
+  whatever the spectator camera shows, it shows in both modes). The game hides a
+  camera's HUD widgets while the camera orbits, which is how a downed player's own
+  camera behaves; the plugin answers that question itself for cameras following a
+  remote player (`research.md`, "Health gauge in both camera modes").
 - Returning to the local camera returns its original HUD. No ammo, radar, damage
   or class gauges are created for spectator cameras. The smaller HUD is unverified
-  online. Full combat HUD support is deferred in favor of health and names.
+  online. Energy for Wing Divers, a spectator name caption and ammo are planned in
+  that order (`plan.md`, M11 onwards).
 
 - From 3.2.0 a press of the space bar (the W key from 3.2.1) while down moves the view to the next
   standing teammate in slot order, wrapping round; the chosen teammate stays watched
@@ -139,21 +145,27 @@ plugin's spectator cameras follow remote players. Nothing is sent to the network
 game runs inside `System::Update` (on a revive or some state changes) clears the byte
 for one frame, after which the plugin sets it again.
 
-Inference from static analysis: a ghost camera in orbit mode reports through vtable
-slot 9 that HUD widgets should hide. The health gauge checks that slot, so it is
-expected to be hidden while orbiting. The multiplayer name/health indicators do not
-call it. Whether the downed player's look input keeps working while the spectator
-camera is in orbit mode, and how the HUD behaves, are live checks.
+A ghost camera in orbit mode reports through vtable slot 9 that HUD widgets should
+hide, and the health gauge's enable pass checks that slot every frame. Up to 3.3.0
+the gauge was therefore expected hidden on the free camera and shown on the locked
+one. From 3.4.0 the plugin's own function sits in that slot: it answers yes for a
+camera whose target is a remote player and hands every other camera to the game's
+function, so the gauge shows in both modes. The multiplayer name/health indicators
+and the chat log do not call the slot. Whether the downed player's look input keeps
+working while the spectator camera is in orbit mode, and whether the gauge shows in
+both modes, are live checks.
 
 ## Installation and refusal
 
 EDF6Coop's `LoadGame` checks the image timestamp and size. With
 `[Display] SpectateWhenDown=1` (the default) it then calls `spectate::Install`,
-which checks that the call at `0x705715` targets `System::Update` and the FNV-1a 64
+which checks that the call at `0x705715` targets `System::Update`, that the ghost
+camera's vtable slot 9 (`0x1768C58`) holds the game's `0xF7500`, and the FNV-1a 64
 hash of every range listed in the research notes. It adds a stub to a thunk page of
 its own within rel32 reach of EDF.dll, registered with the unwinder like EDF6Coop's
-other stubs, and rewrites the call. Any failure before the write leaves the call
-alone and logs why. Only the spectator camera is then off; the rest of EDF6Coop
+other stubs, writes its HUD visibility function into the slot and rewrites the call.
+Any failure before the writes leaves both alone and logs why; a failed call write
+puts the slot back. Only the spectator camera is then off; the rest of EDF6Coop
 runs.
 
 ## Compatibility

@@ -248,7 +248,8 @@ Live checks, online, with a standing teammate:
    whether they were in a vehicle: the log should show the stale-aim line.
 3. Locked, the teammate boards a vehicle: predicted straight ahead along a fixed
    heading until they get out.
-4. The health gauge: predicted hidden while free and shown while locked.
+4. The health gauge: predicted hidden while free and shown while locked (3.3.0;
+   from 3.4.0 shown in both, M11).
 5. Revive while locked, then go down again: the camera is still locked. Restart
    the game: it starts free.
 6. E while the chat box is open, while standing and while alt-tabbed: no switch and
@@ -261,3 +262,31 @@ default, under EDF6Coop's terms. The source moved in one commit to `game/spectat
 and logs to `EDF6Coop.log` with a `SPECTATE` prefix. `[Display] SpectateWhenDown`
 turns it off. A standalone `EDF6Spectate.dll` is renamed `.disabled` at load and by
 the installers. The M3 and M7 live checks still apply to the merged build.
+
+## M11. Health gauge in both camera modes (built in 3.4.0, unverified online)
+
+The user asked for the watched teammate's health in both camera modes and set the
+rule that whatever the spectator camera shows, it shows in both modes (2026-10-24).
+Priorities after this: energy (a Wing Diver mechanic; other classes have other
+mechanics and matter less), a caption with the watched teammate's name at the top
+of the screen in both modes, then ammo. The board for this work is "Spectator HUD"
+in the Mods project of the Little Legion tracker.
+
+Up to 3.3.0 the health gauge was attached to every spectator camera but predicted
+hidden on the free camera: the game hides a camera's HUD widgets while the camera
+orbits. Version 3.4.0 puts a plugin function in the ghost camera's HUD visibility
+slot that answers yes for a camera following a remote player, which only the plugin
+makes. Evidence is in `research.md`, "Health gauge in both camera modes". Built and
+run against the existing tests; `PluginLoadTests` covers the slot write and its
+absence with `SpectateWhenDown=0`.
+
+Live checks, online, with a standing teammate:
+
+1. Down on the free camera: the teammate's armor bar is at its usual place with
+   their current and maximum health, and follows their health changes.
+2. E to the locked camera: the bar stays. E back: the bar stays.
+3. Revive: the own HUD returns complete. Go down again: the bar is back.
+4. The own crosshair and rescue text behave as before while down (they belong to
+   the own camera, which the plugin does not touch).
+5. The watched teammate boards a vehicle: the game's vehicle display takes over
+   the bar as it does for the own camera, or the bar hides; note which.

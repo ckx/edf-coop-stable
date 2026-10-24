@@ -38,12 +38,12 @@ the locked camera, the game's own view of that teammate, and back; the choice la
 follows the same rules as W. The locked view gets the teammate's aim from the network every sixth sync
 frame on foot and not at all while they ride a vehicle or are down, so it can stay fixed while they move.
 Being revived, or every teammate being down, returns your own camera.
-The watched teammate gets a health bar. The name/health indicators show the other players, your own downed body
-included, but not the teammate you watch; the chat log stays visible. Ammo, radar and class gauges are not
-shown for them. Only your screen changes; nothing is sent to other players. Offline play and split screen are
-left alone. This used to be the EDF6Spectate plugin; installing uninstalls it. Following and returning were
-checked online with EDF6Spectate 0.1.1; the free camera, the health bar, your own name indicator, the chat log
-and the W and E keys have not been checked online yet.
+The watched teammate gets a health bar, in both camera modes from 3.4.0. The name/health indicators show the
+other players, your own downed body included, but not the teammate you watch; the chat log stays visible.
+Ammo, radar and class gauges are not shown for them. Only your screen changes; nothing is sent to other
+players. Offline play and split screen are left alone. This used to be the EDF6Spectate plugin; installing
+uninstalls it. Following and returning were checked online with EDF6Spectate 0.1.1; the free camera, the
+health bar, your own name indicator, the chat log and the W and E keys have not been checked online yet.
 [Display] SpectateWhenDown=0: keep your own camera while down.
 
 [Install / uninstall]

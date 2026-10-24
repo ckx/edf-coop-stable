@@ -16,6 +16,17 @@ namespace multislot::spectate {
 // view 0's camera before calling the game's System::Update.
 CallSite UpdateCall();
 
+// A vtable slot whose game function is verified, then replaced by a plugin function.
+struct VtableSlot {
+    const char* name;
+    std::uint32_t rva;
+    std::uint32_t target;
+};
+// The ghost camera's slot 9 (F7500): whether the camera's HUD widgets may show. The game says no while the camera
+// orbits, which would hide the spectator camera's health bar in free mode; the plugin says yes for a camera
+// following a remote player, which only it makes.
+VtableSlot HudVisibleSlot();
+
 // A remote player in an online room, by the slot the game numbers players with (0 to 3).
 struct Teammate {
     std::uint32_t slot;

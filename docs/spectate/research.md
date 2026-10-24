@@ -89,6 +89,11 @@ as evidence of parameter layout, but is never called by the plugin.
 | IME association and text-entry byte (3.2.0) | `0x1183160` | `0x2D` | `0x18B1F50D6B101044` |
 | text-entry byte getter | `0x1183CE0` | `0x8` | `0x2BC3DE9F6A5D005F` |
 | text-entry window procedure | `0x7D2C40` | `0x9A` | `0xAD9CA65227696BA0` |
+| ghost camera HUD visibility, slot 9 (3.4.0) | `0xF7500` | `0x48` | `0x3E8A8467D6F818D0` |
+| HUD widget shown flag clearing | `0x80FC50` | `0xB88` | `0x326E883AB7461031` |
+
+Version 3.4.0 also checks that the ghost camera's vtable slot 9 (`0x1768C58`, a
+relocated pointer) holds `0xF7500` before replacing it.
 
 ## Hook: the System::Update call
 
@@ -783,6 +788,49 @@ Implementation: while locked and watching, the plugin compares the watched soldi
 for 120 frames, naming the slot. The line separates "no aim arrived" (a vehicle, a
 lost record) from a wrong aim in the user's next report. Nothing is written.
 
+## Health gauge in both camera modes, 2026-10-24
+
+The user asked for the watched teammate's health in both camera modes (2026-10-24:
+whatever the spectator camera shows, it shows in both modes). Static analysis with
+`tools/pe.py`; the running game was not read. Built in 3.4.0 (plan M11).
+
+How the game hides the gauge while a camera orbits:
+
+- Ghost camera slot 9 (`0xF7500`, vtable `0x1768C10` + `0x48`, 0x48 bytes to its
+  padding) returns false when camera byte `+0x3F0` is set. Otherwise, when byte
+  `+0x301` is set, it returns false unless the target's weak_ptr (`+0x358`) is alive
+  and the target's vehicle reference (`+0x360` → `+0x1550`) is alive; else true.
+- `0x8168B0`, slot 3 of `HUiHudBaseObject` (the health gauge's wrapper), returns at
+  once unless the wrapper's camera (`+0x18`) has byte `+0x200` set and its slot 9
+  returns true. Only then does it walk the wrapper's widgets (`+0x70..+0x78`), cast
+  each and set the widget's shown flag, byte `+0x770`, to 1 (`0x8169A4`). It never
+  clears the flag.
+- `0x80FC50` (0xB88 bytes, called from `0x80B824` in `0x80B610` and `0x80D1C9` in
+  `0x80B970`) clears `+0x770` first thing (`0x80FC86`); `0x80B693` in `0x80B610` writes
+  it from a register too. Since the game's own HUD hides as soon as the local
+  camera orbits (a downed player's camera), the clear runs at least as often as the
+  enable pass, which runs from render command `0x118D810` after `System::Update`.
+- The crosshair widget (`0x8039F0`, at `0x803AD9`) and the rescue message
+  (`0x808410`, at `0x80844F`) also ask slot 9; the names indicators and the chat log
+  do not.
+
+The plugin writes its own function into the slot. For a camera whose target weak_ptr
+is alive and whose cached `SoldierBase*` (`+0x360`) has the remote bit (`+0x128`
+bit 0) it returns true; every other camera gets the game's `0xF7500`. The stock game
+never builds a ghost camera on a remote player, so the local player's camera and
+the game's hide-while-orbiting behaviour are unchanged. The function runs on the
+render thread outside `Guarded`; it reads only what `0xF7500` reads itself (the
+control block's strong count, then the cached pointer), under the same checks. The
+plugin's own camera recognition still compares the vtable pointer, which the slot
+write does not change. `Install` verifies the slot's value and the two new hashes,
+writes the slot before the `System::Update` call and restores it if the call write
+fails. `PluginLoadTests` checks that the slot points into the plugin when the camera
+is on and at `0xF7500` when it is off.
+
+Not verified live: that the gauge appears in free mode, that it still appears in
+locked mode, and that the crosshair and rescue message (which the spectator camera
+does not own) are unaffected.
+
 ## Open questions
 
 - Whether the wrong directions reported for the pre-0.4.0 camera were in vehicles.
@@ -805,5 +853,4 @@ lost record) from a wrong aim in the user's next report. Nothing is written.
 - Who calls `0x7D0B10` (text entry begin), and whether the Steam overlay keyboard
   sets the text-entry byte. Decided input: W (plan M4).
 - Whether the orbit camera follows the downed player's look input in a live room,
-  and whether the health gauge hides as the static analysis predicts and shows
-  again on the locked camera.
+  and whether the health gauge shows in both camera modes from 3.4.0.

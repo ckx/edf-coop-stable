@@ -196,6 +196,9 @@ int wmain(int argc, wchar_t** argv) {
               "Enabled=0 leaves the radar alone");
         const CallSite update = spectate::UpdateCall();
         Check(CallTargets(base + update.rva, update.rva, update.target), "Enabled=0 leaves System::Update alone");
+        const spectate::VtableSlot visible = spectate::HudVisibleSlot();
+        Check(SlotTargets(base + visible.rva, reinterpret_cast<std::uint64_t>(base), visible.target),
+              "Enabled=0 leaves the ghost camera's HUD visibility alone");
         Check(Contains(log, "Enabled=0"), "Enabled=0 is logged");
         FreeLibrary(plugin);  // what EDFModLoader does with a plugin that refuses
         Check(GetModuleHandleW(dll.c_str()) == nullptr, "the refused plugin is unloaded completely");
@@ -222,6 +225,13 @@ int wmain(int argc, wchar_t** argv) {
         Check(keepRoom ? RedirectedInto(base + update.rva, plugin)
                        : CallTargets(base + update.rva, update.rva, update.target),
               update.name);
+        // The slot holds a plugin function while the spectator camera is on, else the game's own.
+        const spectate::VtableSlot visible = spectate::HudVisibleSlot();
+        std::uintptr_t visibleFn = 0;
+        std::memcpy(&visibleFn, base + visible.rva, sizeof(visibleFn));
+        Check(keepRoom ? InModule(visibleFn, plugin)
+                       : SlotTargets(base + visible.rva, reinterpret_cast<std::uint64_t>(base), visible.target),
+              visible.name);
         Check(Contains(log, "Crash log armed"), "the crash log is armed");
         if (mode == L"fresh") {
             const std::string written = ReadIniText(iniPath);
