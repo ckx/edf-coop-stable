@@ -831,6 +831,70 @@ Not verified live: that the gauge appears in free mode, that it still appears in
 locked mode, and that the crosshair and rescue message (which the spectator camera
 does not own) are unaffected.
 
+## Wing Diver energy, 2026-10-24
+
+The user's second HUD priority after health; a Wing Diver mechanic (user decision
+2026-10-24). Static analysis only; nothing built. Tracked on the Spectator HUD board.
+
+- Energy has no HUD object of its own. `lyt_HudEnergyGuage_R.sgo` (`0x17FD660`) is
+  the right weapon gauge's variant: the `HUiHudWeapon` constructor (`0x82E170`, from
+  factory `0x7FDA40`, object `0x90` bytes, vtable `0x17FD150` with 22 entries) picks
+  it at `0x82E3EC` for weapon slot 0 when InitParam byte `+0x20` is set, else
+  `lyt_HudWeaponGuageR` (`0x17FD6B0`); slot 1 takes `lyt_HudWeaponGuageL`
+  (`0x17FD6F0`). The HUD builder sets that byte at `0x7FE8CC` from a virtual call on
+  the slot-0 weapon record (table `0x179EA90` by the type word at `+0x1A0`), so it is
+  a property of the weapon, presumably whether it draws energy; the plugin could
+  set it for a `PaleWing` (vtable `0x17D0FF8`) directly. The InitParam is 0x28 bytes
+  like the health one: camera `+8`, player `+0x10`, flag `+0x20`, zero `+0x21`, view
+  index `+0x24`.
+- The game syncs the value. The Wing Diver's record element behind mask bit `0x800`
+  (writer `0x582E40`, reader `0x57FCC0`) carries `PaleWing +0x2360` (float),
+  `+0x2364` (int) and `+0x2478` (byte); `0x603A00` (through `0x604300`, vtable
+  `0x17D98D0`) reads `+0x2360`. A remote copy's energy is the sender's.
+- Local-player index use (the 0.2.0 crash: `SoldierBase +0x338`, -1 on a remote
+  copy, times `0x2800` into the settings table at `0x20B2890`). Direct 32-bit reads
+  of `+0x338` in `0x7C0000..0x850000`: `0x7FFDF4` (names helper `0x7FFBD0`, which runs
+  for the indicators and takes a different path for remote players), `0x803B74`
+  (crosshair `0x8039F0`), `0x8225C8` (damage `0x8224A0`), `0x82B62B` (radar
+  `0x82B4D0`). A capstone walk from the weapon HUD's constructor, factory and 22
+  vtable entries through four levels of direct calls (179 functions) found no
+  `+0x338` read, no `0x2800` stride and one settings-table read, `0x8318A0` (slot 3),
+  which reads the global option at `+0x14FF4` as the health layout setup does.
+  `0x831700` reads the same. The walk validated on the names and damage widgets.
+  It does not follow virtual calls or cold pdata chunks.
+- Not known: what a remote copy's weapon list (`+0x1970`, entries of `0x150`;
+  `+0x1950`) holds, which the constructor reads through `0x592F60` and `0x5A45B0`,
+  and whether any virtual callee uses the index. A read-only live inspection
+  decides before anything is attached.
+
+## Spectator name caption, 2026-10-24
+
+The user asked for the watched teammate's name at the top of the screen in both
+camera modes (2026-10-24), third priority. Static analysis only; nothing built.
+
+- The game draws HUD text through its 2D text path, not layout nodes. The smallest
+  template is `HudPlayer_RescueMessage` (vtable `0x17F6E08`, 7 entries, RTTI
+  locator `0x1CA19E0`; factory `0x7FD7E0`, object `0xB0` bytes, constructor
+  `0x8083A0` over `MultiPlayHud_Base` `0x7FF670`; the builder calls the factory at
+  `0x7FE70E` with the names InitParam, vtable `0x17F6738`). Its update (`0x8086F0`) is
+  `ret`; its draw (`0x808410`, 0x2D3 bytes; arguments: object, draw context, viewport
+  with width at `+8` and height at `+0xC`) checks the camera's byte `+0x200` and slot
+  9, calls `0x7FC380(object, out, {w*0.5, h*0.5, -600, 1}, viewport)` and `0x7FC760`
+  for the screen transform (stored at object `+0x20..+0x5F`), picks text id
+  `HUD_BOARD_RESCUE` or `HUD_BOARD_VEHICLE_RIDE` from the player's bytes `+0x1184` and
+  `+0x1185` through the text table `0x20B29A8` (`0x7A3500`), copies a style from the
+  font global `0x20B29C0` (`+0x80..+0x94`, `+0xB0/+0xB4`, sizes 2.5 and 1.33, colour
+  `0x1765B30`), builds a text object with `0x113A3F0` and `0x11517A0(global+8, out)`,
+  binds it with `0x113B4A0`, measures with `0x1139790(text, out, string, -1, 0)`,
+  centres, draws with `0x113C520(text, ctx, pos, colour 0x1765B90, string, -1)`,
+  then `0x113C6F0` and `0x1138630`.
+- Candidate design: build one through the factory for each spectator camera, then
+  point the object's vtable pointer at a plugin copy of the 7 entries (and the RTTI
+  locator before them) whose draw entry is the plugin's, which repeats the template
+  with the teammate's name near the top. The draw runs on the render thread outside
+  `Guarded`, so every structure in that chain is mapped and hashed before a live run.
+- Name source as the indicators: `0x7FFBD0` → `0x784830`, platform name `0x12ABFF0`.
+
 ## Open questions
 
 - Whether the wrong directions reported for the pre-0.4.0 camera were in vehicles.
