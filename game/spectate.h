@@ -6,9 +6,10 @@
 
 namespace multislot::spectate {
 
-// A downed player in an online room watches a standing teammate through the game's follow camera until revived,
-// aimed with their own look controls (docs/spectate/design.md; the evidence for every address is in
-// docs/spectate/research.md). Only this machine's view changes: nothing goes over the network.
+// A downed player in an online room watches a standing teammate through the game's follow camera until revived:
+// a free camera aimed with their own look controls, or (E) the teammate's own view (docs/spectate/design.md; the
+// evidence for every address is in docs/spectate/research.md). Only this machine's view changes: nothing goes over
+// the network.
 //
 // Application::Update calls System::Update (1198DA0) here once a frame, on the main thread, before the frame's
 // cameras are drawn. With [Display] SpectateWhenDown=1 (the default) the call comes to the plugin, which switches

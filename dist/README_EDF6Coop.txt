@@ -33,14 +33,17 @@ Player motion diagnostics are on by default. A correction of at least 0.25 m, a 
 Online, when you go down, your view switches to the standing teammate with the lowest slot, and moves to the
 next one when they go down or leave. Press W to watch the next standing teammate instead (keyboard only;
 ignored while the chat box is open, so a typed w does not move the camera). The camera orbits them and
-points where you look: turn it with your normal look controls (mouse or right stick). Being revived, or every
-teammate being down, returns your own camera.
+points where you look: turn it with your normal look controls (mouse or right stick). Press E to switch to
+the locked camera, the game's own view of that teammate, and back; the choice lasts until you quit, and E
+follows the same rules as W. The locked view gets the teammate's aim from the network every sixth sync
+frame on foot and not at all while they ride a vehicle or are down, so it can stay fixed while they move.
+Being revived, or every teammate being down, returns your own camera.
 The watched teammate gets a health bar. The name/health indicators show the other players, your own downed body
 included, but not the teammate you watch; the chat log stays visible. Ammo, radar and class gauges are not
 shown for them. Only your screen changes; nothing is sent to other players. Offline play and split screen are
 left alone. This used to be the EDF6Spectate plugin; installing uninstalls it. Following and returning were
-checked online with EDF6Spectate 0.1.1; the orbit camera, the health bar, your own name indicator, the chat log
-and the W key have not been checked online yet.
+checked online with EDF6Spectate 0.1.1; the free camera, the health bar, your own name indicator, the chat log
+and the W and E keys have not been checked online yet.
 [Display] SpectateWhenDown=0: keep your own camera while down.
 
 [Install / uninstall]

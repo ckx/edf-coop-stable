@@ -721,12 +721,73 @@ Wine: `ImmAssociateContext`, `GetAsyncKeyState`, `GetForegroundWindow` and
 `GetWindowThreadProcessId` are implemented. The game stores its byte whatever
 `ImmAssociateContext` returns.
 
+## Free and locked camera, 2026-10-24
+
+The user asked for a switch between the orbit camera (free, the default) and the
+camera as it was before 0.4.0 (locked: the teammate's own view), on the E key, and
+asked why the old camera sometimes drifted to a wrong direction. Static analysis
+with `tools/pe.py` and the 2026-10-17 capture; the running game was not read. Built
+in 3.3.0 (plan M10).
+
+The switch needs no new game interface. The locked camera is the ghost camera's own
+behaviour: `0xFAF29` takes the rotation from the cached target matrix while camera
+byte `+0x3F0` is clear, so the plugin leaves the orbit byte at 0 on every remote
+soldier while locked. The health gauge is expected to show while locked and hide
+while free (slot 9, above).
+
+What the locked camera shows, and why it can point wrong:
+
+- The 2026-10-17 capture (`local/camera-direction.jsonl`, 299 samples at 10 Hz,
+  local player down and watching slot 1 for 23 s) has the camera's forward equal to
+  the cached target forward in every sample, and the watched soldier's forward equal
+  to its received pitch/yaw (`+0x1230/+0x1234`) within 0.001 degrees, apart from
+  non-atomic reads (largest difference 4 degrees). The camera showed the teammate's
+  aim as the game had received it. A wrong direction comes from what the game knows
+  of the teammate's aim, not from the camera.
+- The received angles changed 205 times in 30 s, at the sync cadence: median
+  interval 0.10 s, eight gaps over 0.5 s, one of 1.1 s. The mask builder `0x59FB10`
+  includes aim (bit 2) only every sixth sync frame on foot (`0x59FB76`, divisor 6;
+  2 while byte `+0x1E41` is set), and the receiver `0x592180` stores each record as
+  it arrives, without interpolation. The locked camera turns in steps of up to
+  100 ms and freezes through a lost record.
+- No aim is sent while the sender holds a vehicle reference (`+0x1548/+0x1550`;
+  the control block's use count, `0x59FB3C`) or is dead or down (`+0x2E8`,
+  `0x59FB41`): those paths take `0x59FBBB`, whose mask never has bit 2. Boarding
+  (`0x5701B0`, from the state machine `0x572810`) sets the soldier's pitch to 0 and
+  its yaw to the yaw of its own matrix row `+0x80` (`0x5705A5`, `0x5705B8`;
+  `0x4E1F0` is atan2). If the remote copy runs the same boarding code (inferred
+  from the vehicle reference the HUD vehicle lookup `0x8024D0` reads on every
+  player), its aim stays at pitch 0 and the boarding yaw for the whole ride, and
+  the locked camera looks straight ahead along a fixed heading while the vehicle
+  moves. This matches "straight ahead" and "wrong direction" in the 2026-10-17
+  report. Whether those reports were in vehicles is not recorded.
+- The float writer `0x12B5350` truncates the angle to half precision (mantissa
+  `shr 13`, no rounding) and sends the 3-byte half when the truncation error is at
+  most 0.1 (`0x1765A0C`), else the 5-byte float. Yaw is unbounded (the capture has
+  18.8 and -11.4 rad; the clamp at `0x573C03` applies only with a limit at
+  `+0x1254`), so a player who has turned many times sends a yaw that is low by up
+  to the half step: 0.9 degrees between 16 and 32 rad, 1.8 up to 64, 3.6 up to 128,
+  then mostly the float. Pitch stays below 2 rad and loses nothing visible.
+- Other writers of the angles: `0x57ADF0` (from `0x5A190D`) zeroes
+  `+0x1230..+0x124F`; `0x573BB0` adds the input vector at `+0xD60` each frame under
+  the limits at `+0x1250/+0x1254`; `0x578680` (from `0x59B2F6`) rescales the delta
+  against `+0x1240` when `+0x1260` changes. None of them changed the remote copy's
+  angles between records in the capture.
+
+Not found: a camera-side source of drift. The follow state's `+0x301` branch
+(`0xFB123`) moves the camera position toward `+0x550` through the target's vtable
+slots 9 to 11 and leaves the rotation alone.
+
+Implementation: while locked and watching, the plugin compares the watched soldier's
+`+0x1230/+0x1234` with the previous frame's and logs once when they have not changed
+for 120 frames, naming the slot. The line separates "no aim arrived" (a vehicle, a
+lost record) from a wrong aim in the user's next report. Nothing is written.
+
 ## Open questions
 
-- Capture the reported incorrect spectator direction, including whether it happens
-  on foot or in a vehicle and which class/action triggers it. Version 0.4.0 no
-  longer takes the view direction from the teammate, so this applies only if a
-  fallback to the teammate's facing is kept.
+- Whether the wrong directions reported for the pre-0.4.0 camera were in vehicles.
+  The locked camera (3.3.0) is that camera; its stale-aim log line records the
+  case.
 
 - Live-check the isolated health/name components in 0.3.0, including name placement,
   health changes, revival, repeated deaths, vehicles and disconnected targets.
@@ -744,4 +805,5 @@ Wine: `ImmAssociateContext`, `GetAsyncKeyState`, `GetForegroundWindow` and
 - Who calls `0x7D0B10` (text entry begin), and whether the Steam overlay keyboard
   sets the text-entry byte. Decided input: W (plan M4).
 - Whether the orbit camera follows the downed player's look input in a live room,
-  and whether the health gauge hides as the static analysis predicts.
+  and whether the health gauge hides as the static analysis predicts and shows
+  again on the locked camera.

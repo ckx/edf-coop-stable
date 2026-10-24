@@ -182,7 +182,14 @@ bool stopped = false;
 // A slot no player has: the current camera follows someone who left the room.
 constexpr std::uint32_t kGone = kOwnCamera - 1;
 std::uint32_t createdThisDown = 0;  // slots whose camera was asked for since the local player went down
-bool cycleHeld = true;              // the W key counted as down last frame, so it is not a new press
+// The camera orbits the watched teammate at the downed player's own look angles (free), or looks along the
+// teammate's own facing (locked). E switches; the choice lasts the session.
+bool freeCam = true;
+// The watched teammate's received look angles and how many frames they have stayed the same, for the locked
+// camera's stale-aim line.
+float watchedAim[2] = {};
+std::uint32_t watchedAimSlot = kOwnCamera;
+unsigned watchedAimStill = 0;
 
 struct Player {
     std::uintptr_t object;
@@ -349,18 +356,40 @@ void Orbit(std::uintptr_t soldier, const float* look) {
     }
 }
 
-// A new press of the W key, which cycles teammates. The key counts as held, so the next press needs a release
-// first, while the game's text entry is open (a typed w goes into the message only) and while another window has
-// the focus.
-bool CyclePressed() {
-    DWORD process = 0;
-    GetWindowThreadProcessId(GetForegroundWindow(), &process);
-    const bool down = process != GetCurrentProcessId() ||
-                      At<std::uint8_t>(reinterpret_cast<std::uintptr_t>(game) + kTextEntry) != 0 ||
-                      (GetAsyncKeyState('W') & 0x8000) != 0;
-    const bool pressed = down && !cycleHeld;
-    cycleHeld = down;
-    return pressed;
+// A key read while the local player is down. It counts as held, so the next press needs a release first, while the
+// game's text entry is open (a typed letter goes into the message only) and while another window has the focus.
+struct Key {
+    int code;
+    bool held = true;  // counted as down last frame, so it is not a new press
+    bool Pressed() {
+        DWORD process = 0;
+        GetWindowThreadProcessId(GetForegroundWindow(), &process);
+        const bool down = process != GetCurrentProcessId() ||
+                          At<std::uint8_t>(reinterpret_cast<std::uintptr_t>(game) + kTextEntry) != 0 ||
+                          (GetAsyncKeyState(code) & 0x8000) != 0;
+        const bool pressed = down && !held;
+        held = down;
+        return pressed;
+    }
+};
+Key cycleKey{'W'};  // the next standing teammate
+Key modeKey{'E'};   // free or locked camera
+
+// The locked camera shows the teammate's aim as the game last received it (+0x1230/+0x1234, every six sync frames
+// on foot). The sender omits aim while riding a vehicle or down (59FB41), and boarding sets pitch 0 and the body's
+// yaw (5705A5), so the view can stay fixed while the teammate moves. One line per stale period says so.
+void NoteStaleAim(std::uintptr_t soldier, std::uint32_t slot) {
+    const float aim[2] = {At<float>(soldier + kLookPitch), At<float>(soldier + kLookYaw)};
+    if (slot != watchedAimSlot || aim[0] != watchedAim[0] || aim[1] != watchedAim[1]) {
+        watchedAimSlot = slot;
+        watchedAim[0] = aim[0];
+        watchedAim[1] = aim[1];
+        watchedAimStill = 0;
+    } else if (++watchedAimStill == 120) {
+        Log("SPECTATE: no aim update from the player in slot %u for 120 frames; the locked camera keeps their last "
+            "direction (in a vehicle or down, the game does not send aim)",
+            slot);
+    }
 }
 
 void Follow(std::uintptr_t system) {
@@ -390,24 +419,32 @@ void Follow(std::uintptr_t system) {
     std::uint32_t target = kOwnCamera;
     if (roster.local.alive) {
         createdThisDown = 0;
-        cycleHeld = true;  // W held while going down (running forward) is not a press
+        cycleKey.held = modeKey.held = true;  // a key held while going down (W runs forward) is not a press
+        watchedAimSlot = kOwnCamera;
     } else {
+        if (modeKey.Pressed()) {
+            freeCam = !freeCam;
+            Log(freeCam ? "SPECTATE: free camera, aimed with the look controls (E toggles)"
+                        : "SPECTATE: locked camera, the teammate's own view (E toggles)");
+        }
         Teammate mates[kMaxPlayers];
         for (std::size_t i = 0; i < roster.remotes; ++i) mates[i] = {roster.remote[i].slot, roster.remote[i].alive};
-        target = NextTarget(mates, roster.remotes, followedSlot, CyclePressed());
+        target = NextTarget(mates, roster.remotes, followedSlot, cycleKey.Pressed());
     }
-    // The watched teammate's camera looks where the downed local player looks.
-    const std::uintptr_t local = roster.local.object;
-    const float look[2] = {At<float>(local + kLookPitch),
-                           At<float>(local + kLookYaw) + At<float>(local + kLookYawOffset)};
-    const bool steerable = std::isfinite(look[0]) && std::isfinite(look[1]);
-    for (std::size_t i = 0; i < roster.remotes; ++i)
-        Orbit(roster.remote[i].object, steerable && roster.remote[i].slot == target ? look : nullptr);
-    if (target == followedSlot) return;
-
     std::uintptr_t object = roster.local.object;
     for (std::size_t i = 0; i < roster.remotes; ++i)
         if (roster.remote[i].slot == target) object = roster.remote[i].object;
+    // The free camera looks where the downed local player looks; the locked one keeps the game's own view of the
+    // teammate, which clearing the orbit byte restores.
+    const std::uintptr_t local = roster.local.object;
+    const float look[2] = {At<float>(local + kLookPitch),
+                           At<float>(local + kLookYaw) + At<float>(local + kLookYawOffset)};
+    const bool steerable = freeCam && std::isfinite(look[0]) && std::isfinite(look[1]);
+    for (std::size_t i = 0; i < roster.remotes; ++i)
+        Orbit(roster.remote[i].object, steerable && roster.remote[i].slot == target ? look : nullptr);
+    if (!freeCam && target != kOwnCamera) NoteStaleAim(object, target);
+    if (target == followedSlot) return;
+
     if (const std::uintptr_t camera = FindCamera(view, object)) {
         ShowCamera(game, view, camera);
         if (target == kOwnCamera) Log("SPECTATE: back to the player's own camera");
@@ -490,8 +527,8 @@ bool Install(unsigned char* base) {
         page.Release();
         return false;
     }
-    Log("SPECTATE: a downed player online orbits a living teammate with their own look controls until revived "
-        "(System::Update call at EDF+%X)",
+    Log("SPECTATE: a downed player online watches a living teammate until revived: a free camera aimed with their "
+        "own look controls, or the teammate's own view (E switches; System::Update call at EDF+%X)",
         site.rva);
     return true;
 }

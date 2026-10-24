@@ -34,13 +34,16 @@ In an online room, when you go down and wait for a revive, your view switches to
 
 Press **W** while down to watch the next standing teammate instead. It wraps round, and the one you chose stays watched until they go down or leave. Keyboard only, not rebindable. W is ignored while the chat box is open, so typing a w does not move the camera, and while the game window is not in the foreground. Holding W as you go down does not count as a press.
 
-- The camera orbits the watched teammate and points where you look. Turn it with your normal look controls (mouse or right stick, your own bindings and sensitivity). It does not copy the teammate's aim. There is no detached free camera.
+Press **E** while down to switch between the free camera and the locked camera. E follows the same rules as W (keyboard only, ignored while the chat box is open, while the window is not in the foreground and while standing). The choice lasts until you quit the game; it starts free.
+
+- The free camera (the default) orbits the watched teammate and points where you look. Turn it with your normal look controls (mouse or right stick, your own bindings and sensitivity). It does not copy the teammate's aim. There is no detached camera.
+- The locked camera is the game's follow camera as it is: you see what the teammate looks at. Their aim arrives from the network every sixth sync frame on foot, so the view turns in steps, and it does not arrive at all while they ride a vehicle or are down, so the view then stays fixed while they move. When that happens the log notes that no aim update arrived.
 - The watched teammate gets a health bar with current/maximum health. The multiplayer name/health indicators show the other players, your own downed body included, and not the teammate you are watching. The chat log stays visible. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
 - Only your own screen changes. Nothing is sent to other players, and they do not need it on.
 - Offline play and split screen are left alone.
 - `[Display] SpectateWhenDown=0` turns it off.
 
-This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The orbit camera, the health bar, your own name indicator, the chat log and the W key have not been checked online. Static analysis says the game hides the health bar while the camera orbits; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
+This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The free camera, the health bar, your own name indicator, the chat log and the W and E keys have not been checked online. Static analysis says the game hides the health bar while the camera is free and shows it while locked; that is unverified too. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
 
 ## Install
 
@@ -125,7 +128,7 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `HitAuthority` | `1` | The shooter decides hits. Used only while everyone has it on |
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
-| `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; W picks the next one (see above). Only your own screen. `0` = your own camera (original) |
+| `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; W picks the next one, E switches between the free and the locked camera (see above). Only your own screen. `0` = your own camera (original) |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
 | `[Diagnostics] Player` | `1` | Bounded player movement traces for jitter diagnosis. `0` disables them |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |

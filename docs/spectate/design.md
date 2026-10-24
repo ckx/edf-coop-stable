@@ -8,9 +8,10 @@ are EDF6Spectate releases.
 
 In an online room, a player who is down and waiting for a revive watches a living
 teammate through the game's own follow camera instead of looking at their own body.
-The camera orbits that teammate and points where the downed player looks, so they aim
-it with their normal look controls. When they are revived, or nobody is left to
-watch, the view returns to their own camera.
+By default the camera orbits that teammate and points where the downed player looks,
+so they aim it with their normal look controls (the free camera); the E key switches
+to the teammate's own view (the locked camera) and back. When they are revived, or
+nobody is left to watch, the view returns to their own camera.
 
 ## Behavior
 
@@ -22,9 +23,19 @@ watch, the view returns to their own camera.
   the view moves to the next standing teammate in slot order, wrapping round.
 - When the local player is revived, the view returns to their own camera. It also
   returns when every teammate is down.
-- The spectator camera orbits the watched teammate at the downed player's own look
-  pitch and yaw, as set by mouse or right stick through the game's bindings. It does
-  not copy the teammate's aim. Version 0.4.0 adds this; it is unverified online.
+- The spectator camera has two modes from 3.3.0, switched with the E key while
+  down (user decision 2026-10-24; the key follows the W key's rules below). The
+  choice lasts the session and starts free.
+  - Free (the default): the camera orbits the watched teammate at the downed
+    player's own look pitch and yaw, as set by mouse or right stick through the
+    game's bindings. It does not copy the teammate's aim. Version 0.4.0 adds this;
+    it is unverified online.
+  - Locked: the game's follow camera as it is, looking along the teammate's facing,
+    which is how 0.1.1 to 0.3.0 watched. It shows the teammate's aim as the game
+    received it: every sixth sync frame on foot, not at all while they ride a
+    vehicle or are down, so it can stay fixed while the teammate moves. The log
+    notes aim that has not changed for 120 frames (`research.md`, "Free and locked
+    camera").
 - A camera following someone who left the room is never left current.
 - While the game holds two sets of players at the end of a mission, the plugin does
   nothing, so the game's own camera change goes through.
@@ -70,8 +81,10 @@ Each frame, before calling the game's `System::Update`, it:
    or someone gone.
 4. Chooses the target with `NextTarget` when the local player is down, else the
    local player's own camera.
-5. Sets the target teammate's camera parameters to orbit at the local player's look
-   angles, and clears that setting on every other remote player (see Orbit camera).
+5. With the free camera, sets the target teammate's camera parameters to orbit at
+   the local player's look angles, and clears that setting on every other remote
+   player; with the locked camera, clears it on every remote player (see Orbit
+   camera).
 6. When the target differs, it makes an existing camera in view 0's list that follows
    the target current (`weak_from_this` and the view switch, as the game's
    `0x11932F0` does), or, for a teammate without one, creates a camera through the
@@ -85,9 +98,11 @@ Each frame, before calling the game's `System::Update`, it:
    objects. The full HUD builder at `0x7FE5D0` is never called. Invalid health/max
    values skip the health widget.
 
-The plugin keeps no game pointers between frames. Its only state is a bit per slot
-for cameras it asked for during the current downed period, so a camera that fails to
-appear is not requested every frame. Cameras it creates stay in view 0's list until
+The plugin keeps no game pointers between frames. Its state is a bit per slot for
+cameras it asked for during the current downed period, so a camera that fails to
+appear is not requested every frame, the held state of the W and E keys, the chosen
+camera mode and the last received aim of the watched teammate for the locked
+camera's log line. Cameras it creates stay in view 0's list until
 the System tears the views down at the end of the mission, and are reused if the
 player goes down again. The game updates only a view's current camera, so the extra
 cameras cost nothing while unused.
@@ -155,9 +170,12 @@ runs.
 
 ## Open decisions
 
-- A controller button or a rebindable key for cycling, and a key to return to the
-  own camera while down. W is decided; the game's bound actions would be the
-  route for these (`research.md`, "Teammate cycling input").
+- A controller button or a rebindable key for cycling and for the camera mode, and
+  a key to return to the own camera while down. W and E are decided; the game's
+  bound actions would be the route for these (`research.md`, "Teammate cycling
+  input").
+- Whether the locked camera should follow the vehicle's heading while the watched
+  teammate rides one, since no aim arrives then.
 - Whether to watch while the local player has bled out, if the game has such a state.
 - Whether a separate fixed spectator-name caption is needed, now that the watched
   teammate has no indicator of their own (3.1.2).

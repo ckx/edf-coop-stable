@@ -209,6 +209,51 @@ Live checks:
    the watched teammate going down or leaving, and mission end: the chat keeps
    working on the own camera in the next mission.
 
+## M10. Free and locked camera on the E key (built in 3.3.0, unverified online)
+
+The user asked to switch between the orbit camera (free) and the camera as it was
+before 0.4.0 (locked: the teammate's own view), with E as the key and free as the
+default (2026-10-24), and asked why the old camera sometimes drifted to a wrong
+direction. The analysis is in `research.md`, "Free and locked camera": the old
+camera showed the teammate's aim as the game received it, which arrives every
+sixth sync frame on foot and not at all while the teammate rides a vehicle or is
+down.
+
+Behaviour:
+
+- A press of E (the W key's rules: a down edge while down and on a spectator
+  camera, ignored while the chat box is open, while another window has the focus
+  and while standing) switches between free and locked. The choice lasts the
+  session and starts free.
+- Free: the orbit camera of M7. Locked: the plugin leaves the orbit byte clear on
+  every remote soldier, so the game's follow camera looks along the teammate's
+  facing. A switch takes effect in the next camera update, with the game's own
+  smoothing.
+- While locked and watching, the log notes once per stale period when the watched
+  teammate's received aim has not changed for 120 frames.
+
+Implementation: `Key` (the W key's edge logic with the key code as data) for W and
+E, `freeCam` as the mode, `NoteStaleAim` for the log line. `NextTarget`, camera
+creation and the HUD are unchanged. No test covers the key or the mode: both are
+Win32 and game memory. Docs in the same change: `README.md`, `dist/README_EDF6Coop.txt`,
+`design.md`, the release notes.
+
+Live checks, online, with a standing teammate:
+
+1. Down: the view starts free (turns with the look controls). E switches to the
+   teammate's own view, which turns as they turn; E again returns to free, facing
+   the current look direction. The log has a line per switch.
+2. Locked, the teammate aims up and down: the view follows within about 100 ms, in
+   steps. Note any direction the view holds while they clearly look elsewhere, and
+   whether they were in a vehicle: the log should show the stale-aim line.
+3. Locked, the teammate boards a vehicle: predicted straight ahead along a fixed
+   heading until they get out.
+4. The health gauge: predicted hidden while free and shown while locked.
+5. Revive while locked, then go down again: the camera is still locked. Restart
+   the game: it starts free.
+6. E while the chat box is open, while standing and while alt-tabbed: no switch and
+   no `SPECTATE` line.
+
 ## M8. Part of EDF6Coop (done in 3.1.0)
 
 The user asked for one install and one mod (2026-10-22), with the camera on by
