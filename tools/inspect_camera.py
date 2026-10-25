@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Sample EDF6's spectator direction on Linux/Proton without writing game memory.
 
+With --weapons, sample each player's weapon list and Wing Diver energy instead,
+the data the game's weapon HUD would read for a remote player.
+
 Run as a user permitted to read the game's /proc/PID/mem. Output is JSON Lines.
 Samples are not atomic: the game can advance between reads. Compare sustained
 differences, not a single frame. Field evidence is in docs/spectate/research.md.
@@ -13,6 +16,10 @@ import os
 from pathlib import Path
 import struct
 import time
+
+# Player class vtables (RVAs).
+CLASSES = {0x17CDF28: "Ranger", 0x17D0FF8: "Wing Diver", 0x17CF100: "Air Raider", 0x17CF5B8: "Fencer",
+           0x17D24D8: "SoldierBase"}
 
 
 class Game:
@@ -58,6 +65,99 @@ class Game:
     def live(self, control):
         return control and 0 < self.u32(control + 8) < 0x80000000
 
+    def players(self):
+        """(SoldierBase, network record) for each network player in TeamManager's map."""
+        head = self.ptr(self.ptr(self.ptr(self.base + 0x20B2978) + 0x38))
+        pending = [self.ptr(head + 8)]
+        visited = set()
+        while pending:
+            node = pending.pop()
+            if self.read(node + 0x19, 1) != b"\0":
+                continue
+            if node in visited or len(visited) >= 64:
+                raise ValueError("player tree changed or exceeded its traversal limit")
+            visited.add(node)
+            pending.extend((self.ptr(node), self.ptr(node + 0x10)))
+            player = self.ptr(node + 0x20)
+            # Only the known player class vtables have the SoldierBase fields below.
+            if self.ptr(player) - self.base not in CLASSES:
+                continue
+            net = self.ptr(player + 0x1ED0)
+            if net:
+                yield player, net
+
+    def type_name(self, obj):
+        """MSVC RTTI name of a polymorphic object in EDF.dll, or its vtable RVA."""
+        vtable = self.ptr(obj)
+        try:
+            locator = self.ptr(vtable - 8)
+            descriptor = self.base + self.u32(locator + 12)
+            return self.read(descriptor + 16, 64).split(b"\0", 1)[0].decode("ascii")
+        except (OSError, ValueError, UnicodeDecodeError):
+            return hex(vtable - self.base)
+
+    def count(self, address, limit, size=4):
+        value = struct.unpack("<I" if size == 4 else "<Q", self.read(address, size))[0]
+        if value > limit:
+            raise ValueError(f"count {value} at {address:#x} is over {limit}")
+        return value
+
+    def weapon(self, obj):
+        """The fields WeaponBase's HUD status (vtable slot 27, 692100) reads."""
+        if not obj:
+            return None
+        def i32(offset):
+            return struct.unpack("<i", self.read(obj + offset, 4))[0]
+
+        def f32(offset):
+            value = struct.unpack("<f", self.read(obj + offset, 4))[0]
+            return value if math.isfinite(value) else None
+
+        return {
+            "object": hex(obj),
+            "type": self.type_name(obj),
+            "i_0xBE8": i32(0xBE8), "i_0x248": i32(0x248), "i_0x20C": i32(0x20C),
+            "i_0xE68": i32(0xE68), "i_0x798": i32(0x798),
+            "f_0x22C": f32(0x22C), "f_0xE7C": f32(0xE7C), "f_0xE0C": f32(0xE0C),
+            "b_0xDD0": self.read(obj + 0xDD0, 1)[0], "q_0xF18": hex(self.ptr(obj + 0xF18)),
+        }
+
+    def weapon_sample(self):
+        players = []
+        for player, net in self.players():
+            # SoldierBase: weapon objects at +0x1950 (count +0x1960), weapon records of 0x150 bytes at
+            # +0x1970 (count +0x1980; the weapon object at +0x40), sub-weapon slots of 0x20 bytes at
+            # +0x1A00 (count +0x1A10; an index into +0x1950 at +0).
+            objects = self.ptr(player + 0x1950)
+            records = self.ptr(player + 0x1970)
+            subs = self.ptr(player + 0x1A00)
+            info = {
+                "slot": self.u32(net + 0x48),
+                "object": hex(player),
+                "remote": bool(self.u32(player + 0x128) & 1),
+                "class": CLASSES[self.ptr(player) - self.base],
+                # The weapon HUD's energy gauge (8353D0) reads +0x2FC (1: emergency charge), +0x304 and +0x308.
+                "energy": self.floats(player + 0x308, 1)[0],
+                "energy_max": self.floats(player + 0x304, 1)[0],
+                "emergency_charge": self.u32(player + 0x2FC),
+                "weapon_objects": [self.weapon(self.ptr(objects + 8 * i))
+                                   for i in range(self.count(player + 0x1960, 16))],
+                "weapon_records": [{
+                    "variant": struct.unpack("<H", self.read(records + 0x150 * i + 0x18, 2))[0],
+                    "i_0x38": self.u32(records + 0x150 * i + 0x38),
+                    "weapon": hex(self.ptr(records + 0x150 * i + 0x40)),
+                } for i in range(self.count(player + 0x1980, 16))],
+                "sub_weapon_indices": [struct.unpack("<i", self.read(subs + 0x20 * i, 4))[0]
+                                       for i in range(self.count(player + 0x1A10, 16, 8))],
+            }
+            if info["class"] == "Wing Diver":
+                # The Wing Diver's player record element (mask 0x800, 582E40) carries these three.
+                info["synced_0x2360"] = self.floats(player + 0x2360, 1)[0]
+                info["synced_0x2364"] = self.u32(player + 0x2364)
+                info["synced_0x2478"] = self.read(player + 0x2478, 1)[0]
+            players.append(info)
+        return {"state": "sampled", "players": sorted(players, key=lambda player: player["slot"])}
+
     def sample(self):
         system = self.ptr(self.base + 0x20B2958)
         camera = self.ptr(system + 0x4D8)
@@ -70,26 +170,8 @@ class Game:
         target = self.ptr(camera + 0x350)
         forward = self.floats(camera + 0x240)
         cached = self.floats(camera + 0x390)
-        head = self.ptr(self.ptr(self.ptr(self.base + 0x20B2978) + 0x38))
-        pending = [self.ptr(head + 8)]
-        visited = set()
         players = []
-        while pending:
-            node = pending.pop()
-            if self.read(node + 0x19, 1) != b"\0":
-                continue
-            if node in visited or len(visited) >= 64:
-                raise ValueError("player tree changed or exceeded its traversal limit")
-            visited.add(node)
-            pending.extend((self.ptr(node), self.ptr(node + 0x10)))
-            player = self.ptr(node + 0x20)
-            # Only the known player class vtables have the SoldierBase fields below.
-            if self.ptr(player) - self.base not in (
-                    0x17CDF28, 0x17CF100, 0x17CF5B8, 0x17D0FF8, 0x17D24D8):
-                continue
-            net = self.ptr(player + 0x1ED0)
-            if not net:
-                continue
+        for player, net in self.players():
             look = self.floats(player + 0x1230)
             actor = self.floats(player + 0x80)
             pitch, yaw = look[:2]
@@ -145,13 +227,15 @@ def main():
     parser.add_argument("pid", type=int, help="running EDF6.exe process ID")
     parser.add_argument("--duration", type=positive, default=30, help="seconds to capture")
     parser.add_argument("--interval", type=positive, default=0.1, help="seconds between samples")
+    parser.add_argument("--weapons", action="store_true",
+                        help="sample weapon lists and Wing Diver energy instead of the camera")
     args = parser.parse_args()
     game = Game(args.pid)
     try:
         end = time.monotonic() + args.duration
         while time.monotonic() < end:
             try:
-                sample = game.sample()
+                sample = game.weapon_sample() if args.weapons else game.sample()
             except (OSError, ValueError) as error:
                 sample = {"state": "unavailable", "reason": str(error)}
             print(json.dumps({"time": time.time(), **sample}, allow_nan=False), flush=True)

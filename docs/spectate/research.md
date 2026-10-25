@@ -858,38 +858,131 @@ does not own) are unaffected.
 ## Wing Diver energy, 2026-10-24
 
 The user's second HUD priority after health; a Wing Diver mechanic (user decision
-2026-10-24). Static analysis only; nothing built. Tracked on the Spectator HUD board.
+2026-10-24). Two static passes; nothing built. Tracked on the Spectator HUD board.
 
-- Energy has no HUD object of its own. `lyt_HudEnergyGuage_R.sgo` (`0x17FD660`) is
-  the right weapon gauge's variant: the `HUiHudWeapon` constructor (`0x82E170`, from
-  factory `0x7FDA40`, object `0x90` bytes, vtable `0x17FD150` with 22 entries) picks
-  it at `0x82E3EC` for weapon slot 0 when InitParam byte `+0x20` is set, else
-  `lyt_HudWeaponGuageR` (`0x17FD6B0`); slot 1 takes `lyt_HudWeaponGuageL`
-  (`0x17FD6F0`). The HUD builder sets that byte at `0x7FE8CC` from a virtual call on
-  the slot-0 weapon record (table `0x179EA90` by the type word at `+0x1A0`), so it is
-  a property of the weapon, presumably whether it draws energy; the plugin could
-  set it for a `PaleWing` (vtable `0x17D0FF8`) directly. The InitParam is 0x28 bytes
-  like the health one: camera `+8`, player `+0x10`, flag `+0x20`, zero `+0x21`, view
-  index `+0x24`.
-- The game syncs the value. The Wing Diver's record element behind mask bit `0x800`
-  (writer `0x582E40`, reader `0x57FCC0`) carries `PaleWing +0x2360` (float),
-  `+0x2364` (int) and `+0x2478` (byte); `0x603A00` (through `0x604300`, vtable
-  `0x17D98D0`) reads `+0x2360`. A remote copy's energy is the sender's.
-- Local-player index use (the 0.2.0 crash: `SoldierBase +0x338`, -1 on a remote
-  copy, times `0x2800` into the settings table at `0x20B2890`). Direct 32-bit reads
-  of `+0x338` in `0x7C0000..0x850000`: `0x7FFDF4` (names helper `0x7FFBD0`, which runs
-  for the indicators and takes a different path for remote players), `0x803B74`
-  (crosshair `0x8039F0`), `0x8225C8` (damage `0x8224A0`), `0x82B62B` (radar
-  `0x82B4D0`). A capstone walk from the weapon HUD's constructor, factory and 22
-  vtable entries through four levels of direct calls (179 functions) found no
-  `+0x338` read, no `0x2800` stride and one settings-table read, `0x8318A0` (slot 3),
-  which reads the global option at `+0x14FF4` as the health layout setup does.
-  `0x831700` reads the same. The walk validated on the names and damage widgets.
-  It does not follow virtual calls or cold pdata chunks.
-- Not known: what a remote copy's weapon list (`+0x1970`, entries of `0x150`;
-  `+0x1950`) holds, which the constructor reads through `0x592F60` and `0x5A45B0`,
-  and whether any virtual callee uses the index. A read-only live inspection
-  decides before anything is attached.
+The energy gauge is not a HUD object of its own. `lyt_HudEnergyGuage_R.sgo`
+(`0x17FD660`) is the right weapon gauge's variant, chosen for weapon 0 when the
+builder's InitParam byte `+0x20` is set (`0x82E3EC`), else `lyt_HudWeaponGuageR`
+(`0x17FD6B0`); other weapons take `lyt_HudWeaponGuageL` (`0x17FD6F0`). The builder's
+InitParam for the weapon HUD factory `0x7FDA40` is 0x28 bytes like the health one:
+camera `+8`, player `+0x10`, flag `+0x20`, zero `+0x21`, view index `+0x24`.
+
+Local-player index use (the 0.2.0 crash: `SoldierBase +0x338`, -1 on a remote copy,
+times `0x2800` into the settings table at `0x20B2890`). Direct 32-bit reads of `+0x338`
+in `0x7C0000..0x850000`: `0x7FFDF4` (names helper `0x7FFBD0`, which runs for the
+indicators and takes a different path for remote players), `0x803B74` (crosshair
+`0x8039F0`), `0x8225C8` (damage `0x8224A0`), `0x82B62B` (radar `0x82B4D0`).
+
+The first pass (four levels of direct calls from `0x82E170`, `0x7FDA40` and the
+22-entry vtable `0x17FD150`, 179 functions) found none in the weapon HUD. The second
+pass corrected its picture of the classes and went further:
+
+Static analysis with `tools/pe.py` and capstone, with the unwind table's chained entries
+merged so cold chunks count as part of their function. The running game was not read.
+
+Corrections to the first pass:
+
+- `0x82E170` is the constructor of `HuiHudWeaponObject` (vtable `0x17FD208`, 7 entries),
+  the wrapper factory `0x7FDA40` builds. It is not `HUiHudWeapon`. The `0x90`-byte
+  allocation at `0x82E420` creates the `ui::System` singleton (`EDF+0x20B2960`) when it does
+  not exist yet.
+- `HUiHudWeapon` (vtable `0x17FD150`, 22 entries) is the gauge widget. The wrapper makes
+  each one through `ui::System` `0x119C600` from a layout path, with an
+  `InitParam@HUiHudBase` (vtable `0x17F84C8`) holding the soldier at `+0x28`, the wrapper at
+  `+0x30`, the weapon record index at `+0x38`, the gauge number at `+0x3C`, the energy flag
+  at `+0x40` (from the builder's InitParam `+0x20`), the vehicle flag at `+0x41`, the
+  sub-weapon flag at `+0x44`, the sub-weapon index at `+0x48` and the view index at `+0x4C`.
+  The layout's factory (`Factory@HUiHudWeapon`, create `0x82C890`) allocates `0xCA0` bytes
+  and runs the constructor `0x82D070`.
+- `0x603A00` and `0x604300` are the destructor and deleting destructor of
+  `Vehicle501_FortressRobo` (vtable `0x17D98C8`), which has its own field at `+0x2360`. They
+  are not an energy getter.
+- The energy flag at `0x7FE8CC` comes from an integer parameter of the slot-0 weapon
+  record, read through the parameter visitors at `0x179EAF0`, `0x179EA90` and `0x1765220`.
+  It is weapon data, not a virtual method of a weapon class.
+
+What the wrapper builds:
+
+- For each weapon record at soldier `+0x1970` (`0x150` bytes each, count `+0x1980`), the
+  variant visitor at `0x179EEF0` (`0x240AE0`, `0x240AD0`, `0x240AF0`, trivial) gives the
+  number of gauges, and the wrapper makes one widget per gauge: weapon 0 takes
+  `lyt_HudEnergyGuage_R` when the energy flag is set, else `lyt_HudWeaponGuageR`; other
+  weapons take `lyt_HudWeaponGuageL`.
+- For each sub-weapon slot (`+0x1A00`, `0x20` bytes each, count `+0x1A10`) whose weapon
+  (`0x592F60`, an index into `+0x1950`) has `+0x248` set, one widget with
+  `lyt_HudSubWeaponGuageR`.
+
+What a widget reads:
+
+- The constructor locks the soldier through `HUiHudBase`'s weak reference (`+0x778/+0x780`,
+  bound by `0x815810`) and casts it to `SoldierBase` (`0x82DA86`). For a main gauge it stores
+  the weapon object at `+0x7E8`: soldier `+0x1950[i]`, where `i` comes from the weapon
+  record's parameter data through `0x5A2220` (`0x82DFCC` to `0x82DFDE`). There is no bound
+  check against the count at `+0x1960` and no null check; the constructor reads the
+  object's `+0x1B0` at once. For a sub gauge it is `0x592F60(soldier, index)`, which checks
+  the bound.
+- Every update (slot 1, `0x832B30`) calls `+0x7E8`'s vtable slot 27 (`+0xD8`) at `0x832D75`
+  with no null check, and copies the 32-byte result to `+0x9D0`. Slot 27 is `0x692100` for
+  `WeaponBase` and every non-drone weapon class; the four Air Raider drone classes override
+  it (`0x681A60`, `0x683E90`, `0x685970`, `0x6AEBA0`) and call `0x692100` plus direct drone
+  helpers. `0x692100` reads only the weapon object's own fields (`+0xBE8`, `+0x248`, `+0x20C`,
+  `+0xE68`, `+0xE7C`, `+0x22C`, `+0xE0C`, `+0xF18`, `+0xF28`, `+0xDD0`, `+0x1538`, `+0x142`,
+  `+0x78D`, `+0x798`). So ammunition and reload on a remote teammate's gauge are the remote
+  copy's own weapon counters, as the game simulates them on this machine.
+- The energy gauge (the widget's energy path, `0x8353D0`, called from slot 2 `0x831A40` with
+  soldier `+0x2E0`) reads soldier `+0x2FC` (1 during emergency charge), `+0x304` (maximum)
+  and `+0x308` (current). It does not read `+0x2360`.
+- Other soldier fields read by the widget: the vehicle reference `+0x1540/+0x1550`, the
+  class id through soldier vtable slot 83 (`+0x298`: Ranger `0x550A20` returns 0, Wing Diver
+  `0x580510` 1, Air Raider `0x563D90` 2, Fencer `0x567240` 3), and the Fencer hammer through a
+  cast of `+0x7E8` to `Weapon_ImpactHammer` (`0x82FBD9`).
+
+Local-player settings: a direct-call walk six levels deep from the factory, both
+constructors, the wrapper's 7 and the widget's 22 vtable entries, slot 27's five
+implementations and `0x8353D0` (609 functions, 115 with cold chunks) found no read of
+`SoldierBase +0x338` and no `0x2800` stride. Its settings-table reads all use fixed
+offsets: `+0x14FF4` (`0x8161B3`, `0x8318E8`), `+0x2E8` (`0x7F6410`, `0x8D59AB`) and `+0x15000`
+or `+0x48` (`0x83E886`). The one `+0x338` access (`0x1159A09`) is a pointer field of a render
+object, not the soldier. The resolved indirect calls are the class id, slot 27, the
+parameter visitors, the widget's own vtable, `HUiHudBase` slot 21 (`0x816763`) and
+`ui::Object` transforms and animations (`+0x10`, `+0x20`, `+0x28` on layout objects, the
+`+0x860` animation). Not followed: virtual calls inside the generic UI and engine code
+(`0x7E0000` to `0x7F0000`, `0x84B000` to `0x851000`, `0x1100000` and above). At the call
+sites inspected they receive layout objects, never the soldier or a weapon.
+
+Energy on a remote copy:
+
+- `SoldierBase`'s constructor (`0x545670`) sets `+0x304` and `+0x308` to 100. The Wing
+  Diver's update (vtable slot 5, `0x5808B0`) recharges `+0x308` by `+0x2374` (or `+0x2378`
+  during emergency charge, `+0x2FC` = 1) and clamps it to `+0x304`.
+- Wing Diver slot 54 (`0x5802A0`) does two different things by the remote bit
+  (`+0x128` bit 0). On the local player it packs `+0x2FC == 1` and `+0x1EF1` bit 0 into the
+  byte `+0x2478`, which the record element behind mask `0x800` sends (`0x582E40`). On a
+  remote copy it sets `+0x308` from that received byte: 0 when the sender is in emergency
+  charge, the maximum `+0x304` otherwise, and copies the flag to `+0x2FC`.
+- No read of `+0x304` or `+0x308` was found in the player record writer `0x59FDB0`, the
+  reader `0x592180` or the mask builder `0x59FB10` (two call levels), nor in the Wing Diver
+  element (`0x582E40`, `0x57FCC0`). The record carries `+0x2360`, `+0x2364` and `+0x2478`;
+  `+0x2360` and `+0x2364` are set from a scaled 32-bit value at `0x57EDC5` and `0x580444`,
+  not from the energy.
+- So the remote copy has no copy of the sender's energy. Its `+0x308` is pinned to full or
+  empty by the emergency-charge flag whenever slot 54 runs, and moves by the local recharge
+  in between. Whether the copy also spends energy from replicated flight input, and how
+  often slot 54 runs (it has no direct caller), were not traced.
+
+Remote copies and their weapons: `SoldierBase::CreateOnlinePlayerObject` (`0x591130`)
+builds a remote copy through `0x5A3F90` with the member's `EquipWeaponType` (from
+`0x595960`) and stores the network record at `+0x1ED0`. Whether `+0x1950` and `+0x1970` on
+that copy hold the sender's weapons, with a non-null object for every record, was not
+established statically.
+
+Conclusion of the static half: no local-settings dependency was found in the weapon HUD,
+so the 0.2.0 crash pattern does not apply to it. Two facts block attaching it before a
+live read. The main gauge dereferences `+0x1950[i]` without a bound or null check, both at
+construction and on every update, so a remote copy with a missing weapon object would crash
+the game outside `Guarded`. And the energy it would show on a remote Wing Diver is the
+copy's own value, which slot 54 resets to full or empty from the emergency-charge flag; the
+true level is not sent. `tools/inspect_camera.py --weapons` samples both.
 
 ## Spectator name caption, 2026-10-24
 

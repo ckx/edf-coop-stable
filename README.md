@@ -254,7 +254,7 @@ Release packages are built on a machine with the game, so every test against the
 | `dist/` | Install scripts, the bundled readme and the loader fix note |
 | `docs/spectate/` | The spectator camera's design, the game interfaces it uses with their evidence, and its live checks |
 | `tests/` | Tests: the transport part; `tests/game/` the game part; `tests/gamenet/` rooms of several processes on the real `EDF.dll` |
-| `tools/`, `third_party/` | The loader fix tool and its inputs, the MSVC environment script, a read-only spectator camera inspector for Linux (`inspect_camera.py`); EDFModLoader's plugin header and license |
+| `tools/`, `third_party/` | The loader fix tool and its inputs, the MSVC environment script, a read-only spectator camera and teammate weapon inspector for Linux (`inspect_camera.py`); EDFModLoader's plugin header and license |
 
 ## Known limitations
 
