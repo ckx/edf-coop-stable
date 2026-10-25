@@ -1,5 +1,8 @@
 # Spectator camera plan
 
+Project: mods
+Board: #12000 (plan)
+
 Milestones and live checks. Versions up to 0.4.0 are standalone EDF6Spectate
 releases; from 3.1.0 the camera ships in EDF6Coop.
 
