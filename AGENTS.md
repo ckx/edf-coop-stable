@@ -1,6 +1,6 @@
 # AI coding instructions
 
-Shared instructions for the mods workspace, including how to use the Little Legion tracker, are in `../AGENTS.md`. Read it before tracker work.
+Shared instructions for the mods workspace, including how to use the Little Legion tracker, are in `../../AGENTS.md`. Read it before tracker work.
 
 EDF6Coop.dll is an EDFModLoader plugin for EARTH DEFENSE FORCE 6 (PC / Steam). It fixes online desync caused by packet loss, holds dropped peers while EOS reconnects and adds an optional direct UDP link, in the game's rooms of four. It also lets a downed player watch a standing teammate until revived (the spectator camera, formerly the EDF6Spectate plugin). Players install released builds by hand and update when they choose, so wire and config changes reach a mixed population.
 
