@@ -290,3 +290,28 @@ Live checks, online, with a standing teammate:
    the own camera, which the plugin does not touch).
 5. The watched teammate boards a vehicle: the game's vehicle display takes over
    the bar as it does for the own camera, or the bar hides; note which.
+
+## M12. Name caption (built in 3.5.0, unverified online)
+
+The user asked for the watched teammate's name at the top of the screen in both
+camera modes (2026-10-24), third in the HUD priorities. Version 3.5.0 attaches the
+game's rescue message widget to each spectator camera, bound to the watched teammate,
+and gives that object a copy of its vtable whose draw writes the teammate's name,
+centred a tenth of the view's height from the top. The name is the one the name
+indicators show, from the same game function. Evidence and the layouts of every call
+are in `research.md`, "Spectator name caption". Built and run against the existing
+tests; `PluginLoadTests` hashes the new ranges and checks the rescue message's vtable
+in the mapped DLL. Nothing tests the draw itself: it needs the game's renderer.
+
+Live checks, online, with two standing teammates if possible:
+
+1. Down on the free camera: the watched teammate's name is near the top centre, in
+   white, readable and not overlapping other HUD elements. Note its size and place.
+2. E to the locked camera and back: the name stays.
+3. W to the other teammate: the name changes with the view.
+4. Revive: the name goes and the own HUD is as before, including the rescue text
+   while down. Go down again: the name is back.
+5. A teammate whose name has characters outside ASCII (Japanese or Chinese, if one
+   is in the room): the name shows as in the name indicators.
+6. With the game's platform-name setting on, the name has the platform name in
+   brackets, as the indicators do.

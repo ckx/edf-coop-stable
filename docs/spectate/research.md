@@ -91,9 +91,33 @@ as evidence of parameter layout, but is never called by the plugin.
 | text-entry window procedure | `0x7D2C40` | `0x9A` | `0xAD9CA65227696BA0` |
 | ghost camera HUD visibility, slot 9 (3.4.0) | `0xF7500` | `0x48` | `0x3E8A8467D6F818D0` |
 | HUD widget shown flag clearing | `0x80FC50` | `0xB88` | `0x326E883AB7461031` |
+| rescue message HUD factory (3.5.0) | `0x7FD7E0` | `0x257` | `0x749A67C36F8046A6` |
+| rescue message HUD construction | `0x8083A0` | `0x21` | `0xACDF1813DE907759` |
+| rescue message HUD destructor | `0x8083D0` | `0x34` | `0xA084B6851CE38CB1` |
+| rescue message draw (the caption's template) | `0x808410` | `0x2D3` | `0xA77E2074C4927895` |
+| HUD view matrix (vtable slot 5) | `0x7FC6D0` | `0x80` | `0x47DF0BDBF265D186` |
+| HUD projection (vtable slot 6) | `0x7FC630` | `0x94` | `0x1933F2BD66CA6745` |
+| HUD screen point | `0x7FC380` | `0x298` | `0x8E1D5E60A18102D9` |
+| HUD screen transform | `0x7FC760` | `0x23E` | `0x7128546B2A55BAA6` |
+| wstring deallocation | `0x3D3C0` | `0x62` | `0x001F8BD145A9B42F` |
+| font text object | `0x11517A0` | `0x4F` | `0x9B63E0BB4001FB42` |
+| text object construction | `0x11379B0` | `0xFA` | `0x26813887C10E97EB` |
+| text style | `0x113B4A0` | `0x9` | `0x6EF651AD1E09BE2A` |
+| text renderer style | `0x113B2A0` | `0x1F5` | `0x27667DDC1ADBAFB7` |
+| text style copy | `0x11388E0` | `0x84` | `0xC636B896D8191BCC` |
+| text measure | `0x1139790` | `0x257` | `0xD1BECF90B85D50AA` |
+| text draw | `0x113C520` | `0x9` | `0x1FF136490574DAE0` |
+| text renderer draw | `0x113B4B0` | `0x106C` | `0x5B28649E627DA012` |
+| text flush | `0x113C6F0` | `0x9` | `0x9F2FCD3A8BCD3B1B` |
+| text renderer flush | `0x113C5C0` | `0x127` | `0x96DA45BA9FC16254` |
+| text object destruction | `0x1138630` | `0x79` | `0x6D074C61B1186916` |
 
 Version 3.4.0 also checks that the ghost camera's vtable slot 9 (`0x1768C58`, a
-relocated pointer) holds `0xF7500` before replacing it.
+relocated pointer) holds `0xF7500` before replacing it. Version 3.5.0 checks that
+`HudPlayer_RescueMessage`'s vtable (`0x17F6E08`) holds `0x7FC750`, `0x8086F0`,
+`0x11D43D0`, `0x808410`, `0x8083D0`, `0x7FC6D0` and `0x7FC630`, and that the pointer
+before it is the RTTI locator `0x1CA19E0`. Its pdata entry stops short for
+`0x1139790`; the hashed range runs to its `ret` at `0x11399E6`.
 
 ## Hook: the System::Update call
 
@@ -870,30 +894,83 @@ The user's second HUD priority after health; a Wing Diver mechanic (user decisio
 ## Spectator name caption, 2026-10-24
 
 The user asked for the watched teammate's name at the top of the screen in both
-camera modes (2026-10-24), third priority. Static analysis only; nothing built.
+camera modes (2026-10-24), third priority. Static analysis with `tools/pe.py`; the
+running game was not read. Built in 3.5.0 (plan M12).
 
-- The game draws HUD text through its 2D text path, not layout nodes. The smallest
-  template is `HudPlayer_RescueMessage` (vtable `0x17F6E08`, 7 entries, RTTI
-  locator `0x1CA19E0`; factory `0x7FD7E0`, object `0xB0` bytes, constructor
-  `0x8083A0` over `MultiPlayHud_Base` `0x7FF670`; the builder calls the factory at
-  `0x7FE70E` with the names InitParam, vtable `0x17F6738`). Its update (`0x8086F0`) is
-  `ret`; its draw (`0x808410`, 0x2D3 bytes; arguments: object, draw context, viewport
-  with width at `+8` and height at `+0xC`) checks the camera's byte `+0x200` and slot
-  9, calls `0x7FC380(object, out, {w*0.5, h*0.5, -600, 1}, viewport)` and `0x7FC760`
-  for the screen transform (stored at object `+0x20..+0x5F`), picks text id
-  `HUD_BOARD_RESCUE` or `HUD_BOARD_VEHICLE_RIDE` from the player's bytes `+0x1184` and
-  `+0x1185` through the text table `0x20B29A8` (`0x7A3500`), copies a style from the
-  font global `0x20B29C0` (`+0x80..+0x94`, `+0xB0/+0xB4`, sizes 2.5 and 1.33, colour
-  `0x1765B30`), builds a text object with `0x113A3F0` and `0x11517A0(global+8, out)`,
-  binds it with `0x113B4A0`, measures with `0x1139790(text, out, string, -1, 0)`,
-  centres, draws with `0x113C520(text, ctx, pos, colour 0x1765B90, string, -1)`,
-  then `0x113C6F0` and `0x1138630`.
-- Candidate design: build one through the factory for each spectator camera, then
-  point the object's vtable pointer at a plugin copy of the 7 entries (and the RTTI
-  locator before them) whose draw entry is the plugin's, which repeats the template
-  with the teammate's name near the top. The draw runs on the render thread outside
-  `Guarded`, so every structure in that chain is mapped and hashed before a live run.
-- Name source as the indicators: `0x7FFBD0` → `0x784830`, platform name `0x12ABFF0`.
+The template is `HudPlayer_RescueMessage`, the game's smallest HUD text widget:
+
+- Factory `0x7FD7E0(camera, weakOut, param)`: writes the camera into the InitParam's
+  `+8`, allocates `0xB0` bytes, constructs through `0x8083A0` (`MultiPlayHud_Base`
+  `0x7FF670`, then vtable `0x17F6E08`), moves the strong reference into the camera's
+  HUD list through `0x7FF390` and returns a weak reference whose pointer is the
+  result of `__RTDynamicCast` from `xgs::game::Hud` to `HudPlayer_RescueMessage`. The
+  RTTI locator `0x1CA19E0` has class offset 0, so that pointer is the object. The
+  builder calls the factory at `0x7FE70E` with the names InitParam (vtable `0x17F6738`,
+  player at `+0x10`), the contract `AttachHud` already serves.
+- Vtable (7 entries): `0x7FC750` (returns false), `0x8086F0` (update, a bare `ret`),
+  `0x11D43D0` (`ret 0`), `0x808410` (draw), `0x8083D0` (destructor: `0x800940`, then
+  frees `0xB0` bytes when asked), `0x7FC6D0` (view matrix), `0x7FC630` (projection).
+  Slots 5 and 6 choose their matrices by the object's int at `+0x60`.
+- Draw `0x808410(hud, context, viewport)`, viewport width and height ints at `+8` and
+  `+0xC`. It returns unless the camera at `hud+0x18` has byte `+0x200` set and its
+  slot 9 says yes. `+0x200` is a HUD switch on the camera, not a current-camera flag: the
+  `SceneCamera` constructor sets it to 1 (`0x118B03A`), and the only other writer found
+  in the camera code (`0xF0000..0x110000`, `0x1180000..0x11A0000`) is the setter
+  `0x118DF30`, called from `0x1BA790` and `0x14ED330`. Inferred from the health gauge,
+  which shares the camera: a camera's HUD draws while it is its view's current camera.
+- Placement: `0x7FC380(hud, out, {w*0.5, h*0.5, -600, 1}, viewport)` turns a pixel
+  position (y down) into the HUD's space through slots 5 and 6, writing the point with
+  w = 1. The draw stores an identity matrix moved to that point at `hud+0x20..+0x5F`
+  and calls `0x7FC760(hud, context, viewport)`, which hands it and the projection to
+  the draw context. The text's own matrix is the same, moved by the measured size
+  (`x - width/2`, `y - (height + 45)`).
+- Text: the font global `0x20B29C0` (a pointer). `0x11517A0(font+8, text)` builds a
+  `0x38`-byte text object through `0x11379B0`: it enters the font's critical section
+  at `font+0x10` (`0x50C10`, `EnterCriticalSection`) and holds the renderer at
+  `+0x18`; `0x1138630` releases the renderer and leaves the section (`0x50BE0`). The
+  `0x38`-byte style on the stack: the font's floats `+0x80..+0x94`, int 1, colour
+  `0x1765B30` (0, 0, 0, 1), 2.5 (`0x1768188`), the font's ints `+0xB0/+0xB4`; `0x113A3F0`
+  then writes the scale 1.33 (`0x17F6E98`) to `+4` and `+8`. `0x113B4A0` jumps to
+  `0x113B2A0`, whose `0x11388E0` copies the 0x38 bytes into the renderer and points
+  the renderer at the copy. `0x1139790(text, out, string, -1, 0)` writes width and
+  height as a 16-byte aligned vector (`movdqa`). `0x113C520` jumps to the draw
+  `0x113B4B0(renderer, context, matrix, colour, string, -1)` with colour `0x1765B90`
+  (1, 1, 1, 1). `0x113C6F0` jumps to `0x113C5C0`, which clears the renderer's style
+  pointer. The names indicators' draw (`0x804C90`) uses the same font and the same
+  calls for players' names (`0x804F95`, `0x80625A`, `0x806333`).
+- Name: the indicators call `0x7FFBD0(weak, &slot, &colour, &name, &platform)` from
+  their draw (`0x804EBF`) with the player's weak_ptr by value, the caller adding a weak
+  reference (`0x804E98`) that the callee releases (`0x7FFEB5`). It locks the player
+  itself (`0x7FF4A0`) and leaves slot -1 when that fails. Online it reads the network
+  record (`+0x1ED0/+0x1ED8`) and gets the display name through `0x784830`, plus the
+  platform name in brackets when the game's setting `+0x579D` asks. `name` is an MSVC
+  `std::wstring` the caller constructs empty (size 0, capacity 7) and frees;
+  `0x3D3C0` is the game's deallocation of one (it frees with the game's allocator when
+  the capacity is 8 or more and resets it to empty).
+
+The caption in 3.5.0:
+
+- Each new spectator camera gets a rescue message through `0x7FD7E0` with the watched
+  teammate as its player. When the returned object's vtable pointer is `0x17F6E08`,
+  the plugin points it at its own copy of the table, the locator and the six other
+  entries unchanged, with its draw in slot 3. Destruction, update and the matrices
+  stay the game's, and `dynamic_cast` still finds the class through the locator.
+- The draw repeats `0x808410` with three differences: the text is the name from
+  `0x7FFBD0`, the pixel position is (w*0.5, h*0.1), and the text is centred on that
+  point (`x - width/2`, `y - height/2`). It draws nothing while the slot is -1 or the
+  name is empty, and frees the name through `0x3D3C0` in either case. The arguments
+  are laid out as `0x808410` lays out its own: 16-byte aligned matrix, colour and
+  size, a `0x38`-byte style and text object.
+- The draw runs where the game draws its HUD, without `Guarded`, like the 3.4.0 slot
+  function. It calls only functions that `0x808410` and `0x804C90` call there.
+- No message is sent and no game code is patched beyond the object's own vtable
+  pointer.
+
+Not verified live: where the caption lands and how large it is, that it follows W and
+both camera modes, that it goes on revival, and names with characters outside ASCII.
+The vertical centring assumes the text grows down from its matrix point in the HUD's
+y-down space, as `0x808410`'s offset suggests; if it does not, the caption sits one
+text height higher.
 
 ## Open questions
 
@@ -904,7 +981,6 @@ camera modes (2026-10-24), third priority. Static analysis only; nothing built.
 - Live-check the isolated health/name components in 0.3.0, including name placement,
   health changes, revival, repeated deaths, vehicles and disconnected targets.
   The basic 0.1.1 camera follow and return were confirmed by the user and log.
-- A separate fixed spectator-name caption if the native indicators are hard to read.
 - Full combat HUD support is deferred; remote ammo and class gauges remain unverified.
 - Whether a player can stay down until the mission ends, or bleeds out, and what
   happens to the object then.

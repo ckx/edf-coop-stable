@@ -20,6 +20,7 @@ constexpr std::uint32_t kGhostCameraFactory = 0x82B40;  // System's factory for 
 constexpr std::uint32_t kHealthHudFactory = 0x7FC9A0;  // (SceneCamera*, weak_ptr* out, HUiHudBaseObject::InitParam*)
 constexpr std::uint32_t kNamesHudFactory = 0x7FD580;   // (SceneCamera*, weak_ptr* out, HudPlayer::InitParam*)
 constexpr std::uint32_t kChatHudFactory = 0x7FCE60;    // (SceneCamera*, weak_ptr* out, HudPlayer::InitParam*)
+constexpr std::uint32_t kRescueHudFactory = 0x7FD7E0;  // (SceneCamera*, weak_ptr* out, HudPlayer::InitParam*)
 constexpr std::uint32_t kHealthHudParamVtable = 0x17F6768;
 constexpr std::uint32_t kNamesHudParamVtable = 0x17F6738;
 constexpr std::uint32_t kHealthHudLayout = 0x17F6790;  // app:/ui/lyt_HudPowerGauge01.sgo
@@ -36,6 +37,34 @@ constexpr std::uint32_t kGhostCameraParamVtable = 0x1762168;
 // +0x3F0), which hides a downed local player's HUD while their own camera circles their body.
 constexpr std::uint32_t kGhostCameraHudVisibleSlot = kGhostCameraVtable + 9 * 8;
 constexpr std::uint32_t kGhostCameraHudVisible = 0xF7500;
+// Byte +0x200, set by SceneCamera's constructor (118B03A): the camera's HUD draws at all.
+constexpr std::size_t kCameraHudOn = 0x200;
+// HudPlayer_RescueMessage: 7 entries after its RTTI locator, whose class offset is 0. Slot 3 draws (Hud*,
+// DrawContext*, Viewport*); the viewport's width and height are ints at +8 and +0xC. The caption takes a copy of the
+// table with its own draw.
+constexpr std::uint32_t kRescueHudVtable = 0x17F6E08;
+constexpr std::uint32_t kRescueHudLocator = 0x1CA19E0;
+constexpr std::uint32_t kRescueHudSlots[] = {0x7FC750, 0x8086F0, 0x11D43D0, 0x808410, 0x8083D0, 0x7FC6D0, 0x7FC630};
+constexpr std::size_t kRescueHudDraw = 3;
+// A HudPlayer (MultiPlayHud_Base, 7FF670): its camera at +0x18, its 4x4 matrix at +0x20 (the screen transform
+// 7FC760 hands the draw context), its player's weak_ptr at +0x70.
+constexpr std::size_t kHudCamera = 0x18;
+constexpr std::size_t kHudMatrix = 0x20;
+constexpr std::size_t kHudPlayer = 0x70;
+// The draw calls of the rescue message's draw (808410), which the caption repeats with its own text and place.
+constexpr std::uint32_t kHudScreenPoint = 0x7FC380;  // (Hud*, float4* out, const float4* {x, y, depth, 1}, Viewport*)
+constexpr std::uint32_t kHudTransform = 0x7FC760;    // (Hud*, DrawContext*, Viewport*)
+constexpr std::uint32_t kPlayerName = 0x7FFBD0;  // (weak_ptr<SoldierBase> by value, int* slot, int*, wstring* out, bool*)
+constexpr std::uint32_t kStringFree = 0x3D3C0;   // std::wstring's _Tidy_deallocate
+// The HUD font: style defaults at +0x80..+0x94 and +0xB0/+0xB4. Its text objects lock its critical section at +0x10
+// from 11517A0 to 1138630.
+constexpr std::uint32_t kFont = 0x20B29C0;
+constexpr std::uint32_t kTextBegin = 0x11517A0;    // (font + 8, Text* out)
+constexpr std::uint32_t kTextStyle = 0x113B4A0;    // (Text*, DrawContext*, const TextStyle*), kept until kTextFlush
+constexpr std::uint32_t kTextMeasure = 0x1139790;  // (Text*, float4* out width/height, const wchar_t*, length, bool)
+constexpr std::uint32_t kTextDraw = 0x113C520;  // (Text*, DrawContext*, const float4x4*, const float4* colour, text, length)
+constexpr std::uint32_t kTextFlush = 0x113C6F0;    // (Text*, DrawContext*)
+constexpr std::uint32_t kTextEnd = 0x1138630;      // (Text*)
 // Byte 1 while the game's text entry (the chat box, a soft keyboard GUI) is open: 1183160 writes it with the IME
 // association, and the game's own keyboard reader (95F930) drops every key for play while it is set.
 constexpr std::uint32_t kTextEntry = 0x21360BA;
@@ -96,6 +125,41 @@ using IsOnlineModeFn = bool (*)();
 using HudVisibleFn = bool (*)(void* camera);
 using DynamicCastFn = void* (*)(void* object, long vfDelta, void* sourceType, void* targetType, int isReference);
 using ControlFn = void (*)(std::uintptr_t control);
+using HudDrawFn = void (*)(void* hud, void* context, const std::int32_t* viewport);
+using HudScreenPointFn = void (*)(void* hud, float* out, const float* point, const std::int32_t* viewport);
+using HudTransformFn = void (*)(void* hud, void* context, const std::int32_t* viewport);
+using TextBeginFn = void (*)(void* font, void* text);
+using TextStyleFn = void (*)(void* text, void* context, const void* style);
+using TextMeasureFn = void (*)(void* text, float* out, const wchar_t* string, std::int64_t length, bool);
+using TextDrawFn = void (*)(void* text, void* context, const float* matrix, const float* colour, const wchar_t* string,
+                            std::int64_t length);
+using TextFlushFn = void (*)(void* text, void* context);
+using TextEndFn = void (*)(void* text);
+
+// std::wstring as MSVC lays it out: 7 characters inline, else a pointer to them; then size and capacity.
+struct GameString {
+    union {
+        wchar_t inlineChars[8];
+        wchar_t* heapChars;
+    };
+    std::size_t size;
+    std::size_t capacity;
+    const wchar_t* Chars() const { return capacity > 7 ? heapChars : inlineChars; }
+};
+static_assert(sizeof(GameString) == 0x20);
+using PlayerNameFn = void (*)(std::uintptr_t* weak, std::int32_t* slot, std::int32_t* colour, GameString* name,
+                              bool* platform);
+using StringFreeFn = void (*)(GameString* string);
+
+// The text style 808410 builds on its stack; 11388E0 copies its 0x38 bytes into the font's renderer.
+struct TextStyle {
+    float defaults[6];  // the font's +0x80..+0x94; [1] and [2] are the scale (113A3F0 writes them)
+    std::int32_t one;
+    float black[4];
+    float size;
+    std::int32_t flags[2];  // the font's +0xB0/+0xB4
+};
+static_assert(sizeof(TextStyle) == 0x38);
 
 // Game code the spectator calls or relies on, by FNV-1a 64 of its bytes. None of these ranges holds a relocation.
 struct Code {
@@ -145,6 +209,26 @@ constexpr Code kCode[] = {
     {"chat HUD draw", 0x802F10, 0x102, 0x8F50E7AEBAE1EE37},
     {"chat HUD update", 0x803020, 0x214, 0xB8C6C261062A53DC},
     {"chat message draw", 0x801420, 0xEB2, 0xDB38601F64406159},
+    {"rescue message HUD factory", kRescueHudFactory, 0x257, 0x749A67C36F8046A6},
+    {"rescue message HUD construction", 0x8083A0, 0x21, 0xACDF1813DE907759},
+    {"rescue message HUD destructor", 0x8083D0, 0x34, 0xA084B6851CE38CB1},
+    {"rescue message draw", 0x808410, 0x2D3, 0xA77E2074C4927895},
+    {"HUD view matrix", 0x7FC6D0, 0x80, 0x47DF0BDBF265D186},
+    {"HUD projection", 0x7FC630, 0x94, 0x1933F2BD66CA6745},
+    {"HUD screen point", kHudScreenPoint, 0x298, 0x8E1D5E60A18102D9},
+    {"HUD screen transform", kHudTransform, 0x23E, 0x7128546B2A55BAA6},
+    {"wstring deallocation", kStringFree, 0x62, 0x001F8BD145A9B42F},
+    {"font text object", kTextBegin, 0x4F, 0x9B63E0BB4001FB42},
+    {"text object construction", 0x11379B0, 0xFA, 0x26813887C10E97EB},
+    {"text style", kTextStyle, 0x9, 0x6EF651AD1E09BE2A},
+    {"text renderer style", 0x113B2A0, 0x1F5, 0x27667DDC1ADBAFB7},
+    {"text style copy", 0x11388E0, 0x84, 0xC636B896D8191BCC},
+    {"text measure", kTextMeasure, 0x257, 0xD1BECF90B85D50AA},
+    {"text draw", kTextDraw, 0x9, 0x1FF136490574DAE0},
+    {"text renderer draw", 0x113B4B0, 0x106C, 0x5B28649E627DA012},
+    {"text flush", kTextFlush, 0x9, 0x9F2FCD3A8BCD3B1B},
+    {"text renderer flush", 0x113C5C0, 0x127, 0x96DA45BA9FC16254},
+    {"text object destruction", kTextEnd, 0x79, 0x6D074C61B1186916},
     {"view camera switch", kSetViewCamera, 0x18D, 0xF859E0B97E448F2F},
     {"weak_from_this", kWeakFromThis, 0x9C, 0x580BFED010D5E37E},
     {"camera flush", 0x1195A80, 0x159, 0xFAAA5CBBF9469555},
@@ -297,11 +381,63 @@ struct HudParam {
 };
 static_assert(sizeof(HudParam) == 0x28 && offsetof(HudParam, view) == 0x24);
 
-void AttachHud(std::uintptr_t camera, std::uint32_t factory, HudParam& param) {
+// The new HUD object, which the camera owns.
+std::uintptr_t AttachHud(std::uintptr_t camera, std::uint32_t factory, HudParam& param) {
     alignas(16) std::uintptr_t hud[2]{};
     reinterpret_cast<HudFactoryFn>(game + factory)(reinterpret_cast<void*>(camera), hud, &param);
-    // Both factories move the strong reference into camera+208 and return only a weak reference.
+    // The factories move the strong reference into camera+208 and return only a weak reference.
     ReleaseWeak(hud[1]);
+    return hud[0];
+}
+
+// HudPlayer_RescueMessage's table with DrawCaption as its draw, after the RTTI locator. Filled by Install.
+std::uintptr_t captionVtable[1 + std::size(kRescueHudSlots)] = {};
+
+// The caption's draw, in place of the rescue message's (808410): the same calls with the watched teammate's name for
+// the text, centred a tenth of the view's height from its top. The name comes from 7FFBD0, as the name indicators
+// get theirs in their own draw (804EBF). Runs where the game draws its HUD, with no guard, so it calls only the
+// functions 808410 and 804C90 call there, with their arguments laid out as theirs are.
+void DrawCaption(void* hud, void* context, const std::int32_t* viewport) {
+    const auto at = reinterpret_cast<std::uintptr_t>(hud);
+    const std::uintptr_t camera = Ptr(at + kHudCamera);
+    if (!At<std::uint8_t>(camera + kCameraHudOn) ||
+        !reinterpret_cast<HudVisibleFn>(Ptr(Ptr(camera) + 9 * 8))(reinterpret_cast<void*>(camera)))
+        return;
+    const auto font = Ptr(reinterpret_cast<std::uintptr_t>(game) + kFont);
+    if (!font) return;
+    // 7FFBD0 takes the weak_ptr by value and releases it; it locks it itself and names nobody once the player is gone.
+    std::uintptr_t player[2] = {Ptr(at + kHudPlayer), Ptr(at + kHudPlayer + 8)};
+    if (player[1]) InterlockedIncrement(reinterpret_cast<volatile LONG*>(player[1] + kWeaks));
+    GameString name{{}, 0, 7};
+    std::int32_t slot = -1, colour = -1;
+    bool platform = false;
+    reinterpret_cast<PlayerNameFn>(game + kPlayerName)(player, &slot, &colour, &name, &platform);
+    if (slot >= 0 && name.size > 0) {
+        alignas(16) const float place[4] = {viewport[2] * 0.5f, viewport[3] * 0.1f, -600.0f, 1.0f};
+        alignas(16) float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        reinterpret_cast<HudScreenPointFn>(game + kHudScreenPoint)(hud, matrix + 12, place, viewport);
+        std::memcpy(reinterpret_cast<void*>(at + kHudMatrix), matrix, sizeof(matrix));
+        reinterpret_cast<HudTransformFn>(game + kHudTransform)(hud, context, viewport);
+        // 808410's style: the font's defaults, scale 1.33, then 1, black and 2.5.
+        TextStyle style{{At<float>(font + 0x80), 1.33f, 1.33f, At<float>(font + 0x8C), At<float>(font + 0x90),
+                         At<float>(font + 0x94)},
+                        1,
+                        {0, 0, 0, 1},
+                        2.5f,
+                        {At<std::int32_t>(font + 0xB0), At<std::int32_t>(font + 0xB4)}};
+        alignas(16) unsigned char text[0x38];
+        reinterpret_cast<TextBeginFn>(game + kTextBegin)(reinterpret_cast<void*>(font + 8), text);
+        reinterpret_cast<TextStyleFn>(game + kTextStyle)(text, context, &style);
+        alignas(16) float size[4];
+        reinterpret_cast<TextMeasureFn>(game + kTextMeasure)(text, size, name.Chars(), -1, false);
+        matrix[12] -= size[0] * 0.5f;
+        matrix[13] -= size[1] * 0.5f;
+        alignas(16) const float white[4] = {1, 1, 1, 1};
+        reinterpret_cast<TextDrawFn>(game + kTextDraw)(text, context, matrix, white, name.Chars(), -1);
+        reinterpret_cast<TextFlushFn>(game + kTextFlush)(text, context);
+        reinterpret_cast<TextEndFn>(game + kTextEnd)(text);
+    }
+    reinterpret_cast<StringFreeFn>(game + kStringFree)(&name);
 }
 
 // A ghost camera following `object` on view 0, made as the game's create_remote_camera (CCCA0) makes one. The System
@@ -346,6 +482,13 @@ bool Create(std::uintptr_t system, std::uintptr_t object, std::uintptr_t local, 
     Log("SPECTATE: creating the chat log for the spectator camera");
     HudParam chatParam{reinterpret_cast<std::uintptr_t>(game + kNamesHudParamVtable), 0, local, nullptr, {}, 0, 0};
     AttachHud(camera[0], kChatHudFactory, chatParam);
+    // The caption is a rescue message bound to the watched teammate whose table draws their name instead. Its
+    // destructor and its other slots are the game's.
+    Log("SPECTATE: creating the name caption for the spectator camera");
+    HudParam captionParam{reinterpret_cast<std::uintptr_t>(game + kNamesHudParamVtable), 0, object, nullptr, {}, 0, 0};
+    const std::uintptr_t caption = AttachHud(camera[0], kRescueHudFactory, captionParam);
+    if (caption && Ptr(caption) == reinterpret_cast<std::uintptr_t>(game + kRescueHudVtable))
+        Put(caption, reinterpret_cast<std::uintptr_t>(&captionVtable[1]));
     // The System's queue owns the camera. Releasing a strong reference here would destroy it before the flush.
     ReleaseWeak(camera[1]);
     return true;
@@ -462,7 +605,7 @@ void Follow(std::uintptr_t system) {
     } else if (target != kOwnCamera && target < 32 && !(createdThisDown & (1u << target))) {
         createdThisDown |= 1u << target;
         if (Create(system, object, roster.local.object, target))
-            Log("SPECTATE: following the player in slot %u (new camera with health, names and chat)", target);
+            Log("SPECTATE: following the player in slot %u (new camera with health, names, chat and caption)", target);
         else
             Log("SPECTATE: could not create a camera for the player in slot %u", target);
     }
@@ -539,6 +682,15 @@ bool Install(unsigned char* base) {
         Log("SPECTATE: EDF+%X does not hold EDF+%X; a downed player keeps their own camera", slot.rva, slot.target);
         return false;
     }
+    const auto image = reinterpret_cast<std::uint64_t>(base);
+    bool rescueTable = SlotTargets(base + kRescueHudVtable - 8, image, kRescueHudLocator);
+    for (std::size_t i = 0; i < std::size(kRescueHudSlots); ++i)
+        rescueTable &= SlotTargets(base + kRescueHudVtable + i * 8, image, kRescueHudSlots[i]);
+    if (!rescueTable) {
+        Log("SPECTATE: EDF+%X is not the rescue message's table; a downed player keeps their own camera",
+            kRescueHudVtable);
+        return false;
+    }
     for (const Code& code : kCode) {
         if (Fnv1a(base + code.rva, code.size) != code.hash) {
             Log("SPECTATE: EDF+%X (%s) is not the expected code; a downed player keeps their own camera", code.rva,
@@ -554,6 +706,9 @@ bool Install(unsigned char* base) {
         return false;
     }
     game = base;
+    captionVtable[0] = image + kRescueHudLocator;
+    for (std::size_t i = 0; i < std::size(kRescueHudSlots); ++i) captionVtable[1 + i] = image + kRescueHudSlots[i];
+    captionVtable[1 + kRescueHudDraw] = reinterpret_cast<std::uintptr_t>(static_cast<HudDrawFn>(&DrawCaption));
     systemUpdate = reinterpret_cast<SystemUpdateFn>(base + site.target);
     hudVisible = reinterpret_cast<HudVisibleFn>(base + slot.target);
     const std::uintptr_t visible = reinterpret_cast<std::uintptr_t>(&HudVisible);

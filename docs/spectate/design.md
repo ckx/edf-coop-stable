@@ -57,10 +57,15 @@ nobody is left to watch, the view returns to their own camera.
   camera's HUD widgets while the camera orbits, which is how a downed player's own
   camera behaves; the plugin answers that question itself for cameras following a
   remote player (`research.md`, "Health gauge in both camera modes").
+- From 3.5.0 the spectator camera shows the watched teammate's name at the top of
+  the view, in both modes. It is the game's rescue message widget bound to the
+  watched teammate, with the plugin's draw in a copy of its vtable: the same text
+  calls, the name as the indicators get it, centred a tenth of the view's height
+  from the top (`research.md`, "Spectator name caption").
 - Returning to the local camera returns its original HUD. No ammo, radar, damage
   or class gauges are created for spectator cameras. The smaller HUD is unverified
-  online. Energy for Wing Divers, a spectator name caption and ammo are planned in
-  that order (`plan.md`, M11 onwards).
+  online. Energy for Wing Divers and ammo are planned in that order (`plan.md`, M11
+  onwards).
 
 - From 3.2.0 a press of the space bar (the W key from 3.2.1) while down moves the view to the next
   standing teammate in slot order, wrapping round; the chosen teammate stays watched
@@ -100,7 +105,9 @@ Each frame, before calling the game's `System::Update`, it:
    `lyt_HudPowerGauge01.sgo` layout and the watched player. Attach multiplayer
    indicators through `0x7FD580` with the watched teammate as the viewer, and the
    chat log through `0x7FCE60` with the local player as the viewer, as on the game's
-   own camera. Release all three returned weak references; the camera owns the
+   own camera. Attach the caption through `0x7FD7E0` (the rescue message) with the
+   watched teammate as its player and point the object at the plugin's copy of its
+   vtable. Release all four returned weak references; the camera owns the
    objects. The full HUD builder at `0x7FE5D0` is never called. Invalid health/max
    values skip the health widget.
 
@@ -150,7 +157,8 @@ hide, and the health gauge's enable pass checks that slot every frame. Up to 3.3
 the gauge was therefore expected hidden on the free camera and shown on the locked
 one. From 3.4.0 the plugin's own function sits in that slot: it answers yes for a
 camera whose target is a remote player and hands every other camera to the game's
-function, so the gauge shows in both modes. The multiplayer name/health indicators
+function, so the gauge shows in both modes. The caption's draw asks the slot as
+the rescue message's does, so it shows in both modes too. The multiplayer name/health indicators
 and the chat log do not call the slot. Whether the downed player's look input keeps
 working while the spectator camera is in orbit mode, and whether the gauge shows in
 both modes, are live checks.
@@ -160,7 +168,8 @@ both modes, are live checks.
 EDF6Coop's `LoadGame` checks the image timestamp and size. With
 `[Display] SpectateWhenDown=1` (the default) it then calls `spectate::Install`,
 which checks that the call at `0x705715` targets `System::Update`, that the ghost
-camera's vtable slot 9 (`0x1768C58`) holds the game's `0xF7500`, and the FNV-1a 64
+camera's vtable slot 9 (`0x1768C58`) holds the game's `0xF7500`, that the rescue
+message's vtable (`0x17F6E08`) holds its seven functions after its RTTI locator, and the FNV-1a 64
 hash of every range listed in the research notes. It adds a stub to a thunk page of
 its own within rel32 reach of EDF.dll, registered with the unwinder like EDF6Coop's
 other stubs, writes its HUD visibility function into the slot and rewrites the call.
@@ -189,5 +198,3 @@ runs.
 - Whether the locked camera should follow the vehicle's heading while the watched
   teammate rides one, since no aim arrives then.
 - Whether to watch while the local player has bled out, if the game has such a state.
-- Whether a separate fixed spectator-name caption is needed, now that the watched
-  teammate has no indicator of their own (3.1.2).

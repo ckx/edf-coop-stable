@@ -38,12 +38,12 @@ Press **E** while down to switch between the free camera and the locked camera. 
 
 - The free camera (the default) orbits the watched teammate and points where you look. Turn it with your normal look controls (mouse or right stick, your own bindings and sensitivity). It does not copy the teammate's aim. There is no detached camera.
 - The locked camera is the game's follow camera as it is: you see what the teammate looks at. Their aim arrives from the network every sixth sync frame on foot, so the view turns in steps, and it does not arrive at all while they ride a vehicle or are down, so the view then stays fixed while they move. When that happens the log notes that no aim update arrived.
-- The watched teammate gets a health bar with current/maximum health, in both camera modes from 3.4.0 (the game hides a camera's HUD while that camera orbits, which is what the free camera does; the plugin keeps the bar on for spectator cameras). The multiplayer name/health indicators show the other players, your own downed body included, and not the teammate you are watching. The chat log stays visible. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
+- The watched teammate gets a health bar with current/maximum health, in both camera modes from 3.4.0 (the game hides a camera's HUD while that camera orbits, which is what the free camera does; the plugin keeps the bar on for spectator cameras). From 3.5.0 their name is shown at the top of the screen, also in both modes. The multiplayer name/health indicators show the other players, your own downed body included, and not the teammate you are watching. The chat log stays visible. Ammo, radar, damage effects and class gauges are not shown for them. Your own HUD returns on revival.
 - Only your own screen changes. Nothing is sent to other players, and they do not need it on.
 - Offline play and split screen are left alone.
 - `[Display] SpectateWhenDown=0` turns it off.
 
-This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The free camera, the health bar in either mode, your own name indicator, the chat log and the W and E keys have not been checked online. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
+This used to be the separate EDF6Spectate plugin. Following a teammate and returning to your own camera were checked online with EDF6Spectate 0.1.1. The free camera, the health bar in either mode, the name at the top, your own name indicator, the chat log and the W and E keys have not been checked online. If the camera does something wrong, note the time and attach `EDF6Coop.log` (its lines start with `SPECTATE`).
 
 ## Install
 
