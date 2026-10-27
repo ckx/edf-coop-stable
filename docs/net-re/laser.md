@@ -5,7 +5,7 @@ Root.cpk WEAPON/PWEAPON128.SGO confirms name.en `Closed Laser M2`,
 `Weapon_ChargeShoot`, AmmoClass `LaserBullet01`, and `LaserMuzzleFlash01`.
 Other weapons share LaserBullet01, so these logs are not exclusive to M2.
 
-The diagnostic wraps three native vtable slots and always forwards the original arguments:
+The diagnostic wraps three native vtable slots and four sender calls, always forwarding the original arguments. The sender evidence is below.
 
 | Role | Slot RVA | Native target |
 |---|---|---|
@@ -17,7 +17,7 @@ Update increments age +0xF38 and reads lifetime +0xB48. The constructor initiali
 age to zero at 0x251EFB. SyncRender at 0x253417 subtracts the endpoints at +0xF90
 and +0xFA0, computes rendered length +0xFB0, and copies width to +0xFB4.
 Draw uses the forward basis at +0x80 and position +0x90, and only renders pass 1.
-Snapshots run before Update or Receive, so render values may describe the previous
+Snapshots run before Update and after Receive. Render values may describe the previous
 render synchronization. Age-zero values may precede the first render altogether.
 
 NetworkBullet's owner query 0x22F3C0 reads a weak reference at object+0xAE8/0xAF0.
@@ -28,18 +28,18 @@ is acquired and no network object id is allocated for logging.
 
 Aggregate update, first-update, receive and pass-1 draw callbacks are reported every
 30 seconds on the next update/receive callback. At most eight detailed snapshots are
-emitted per window. A fixed 64-entry table counts draw callbacks for recently observed
+emitted per window; a message event also has a decoded-message line. A fixed 64-entry table counts draw callbacks for recently observed
 beams; it can evict entries, and pointer reuse or concurrent rendering makes those
 counts observational rather than a persistent projectile identity. Raw object addresses
-are local to one process. Compare owner ids, wall-clock times and beam geometry across
-machines, not object addresses. A receive callback is not every shot announcement, and
+are local to one process. Compare owner ids and native bullet IDs across machines;
+message type and payload hash can further identify a corresponding message. A receive callback is not every shot announcement, and
 a draw callback is not proof that pixels were visible. These hooks do not trace target
 HP or prove damage delivery.
 
 LaserDiagnosticsGameCode exercises the installed hooks against the real, privately
 mapped EDF.dll. Spies replace only the native physics/render/receive functions. It
 checks whole-install refusal for a foreign slot, argument and stream preservation,
-owner and beam reads, fault-safe fallback, draw association, logging limits and renewal.
+post-receive state, owner and beam reads, bounded decoding, draw association, logging limits and renewal.
 Live laser behavior remains unverified. There is no laser gameplay fix in 3.0.2.
 
 ## 2026-10-17 wrong-direction report
@@ -94,3 +94,84 @@ then corresponding sent/received native aim records and the remote actor,
 projectile or spectator-camera direction during that interval. Neither existing
 log establishes whether the symptom is delayed aim, pose, projectile construction
 or camera orientation. No gameplay change is justified by this evidence yet.
+
+## 2026-10-26 owner message capture
+
+The diagnostic now records the native bullet identity at `bullet+0x128` in initial
+update snapshots and in sent and received messages. Pair it with the owner EOS id
+and the room/session. Its low eight bits select the weapon component; its upper
+24 bits are the native sequence. Registration at `0x7639FC..0x763A07` writes this
+packed value. `0x7650BA..0x7650DC` splits it into the registry key. The sender
+serializes owner reference, low byte and upper sequence at `0x7645F8..0x764616`;
+the receiver matches them at `0x764B10..0x764B26` before calling the registered
+NetworkBullet receive. Logging reads the existing identity and allocates no ids.
+An unknown owner or bullet id -1 cannot establish a cross-machine match.
+
+The owner send is `0x765570`, with NetworkBullet in RCX, the Serialize writer in
+RDX and an immediate-route bool in R8b. The diagnostic wraps only the four calls
+at `0x22F21B`, `0x22F28C`, `0x22F309` and `0x2A5764`, filtering LaserBullet01
+before logging and always preserving the native call. The first three calls are
+inside main-object slot 13 at `0x22F0B0`; the last sends type 3 from `0x2A56B0`.
+`0x773DA0` is a different NetworkObject path. Writer bytes start at +0x10, and
++0x5F0 holds their length, as `0x12B4630` confirms.
+
+Receive captures a bounded private copy of the unread bytes before invoking the
+original callback, then decodes that copy and logs the bullet's post-receive
+matrix. The live stream is never marked, rewound or modified by diagnostics.
+This avoids decoding from the cursor the native callback has already consumed.
+The copied stream uses the native integer reader only after checking its tag and
+encoded length. Vector bins use `ReadBinElement` with an exact destination size.
+The parser does not resolve object references or invoke collision code.
+
+| Type | Fields after the type |
+| --- | --- |
+| 0, 3 | 12-byte velocity bin, then 12-byte position bin |
+| 1 | target reference id, part, 12-byte vector bin, packed vector |
+| 2 | target reference id, part, event integer, 12-byte vector bin, packed vector |
+
+The reference and part precede the geometry for types 1 and 2. The review's
+suggested read order was incomplete. Their final packed vector is bounds-checked
+but not interpreted in the log. The meanings of their event and attachment
+geometry still need live evidence.
+
+Types 0 and 3 update physics fields +0xCD0 and +0xCC0. Constructor code
+`0x231D97..0x231E7B` copies matrix translation into +0xCC0 and builds +0xCD0
+from forward, a scalar and inherited motion divided by 1/60 second. Thus
+`vector1` is velocity and `vector2` is position. Compare vector2 with the
+sample's position to measure the matrix discrepancy when the correction arrives.
+The matrix may change only on the next Update; receipt alone does not prove
+that the displayed beam moved immediately.
+
+Every new game range used by the capture is checked with FNV-1a64 before any
+hook installs. The four original call targets and three vtable slots are checked
+too. The test maps the supported EDF.dll privately and executes installed hooks,
+uses the game's integer writer and reader, and replaces native simulation and
+network delivery with spies. It checks post-receive observation, untouched live
+bytes and cursor, type decoding, malformed length refusal and send arguments.
+
+The limit remains eight detailed events per 30-second window, including initial
+update snapshots and messages, plus activity summaries. A message event has a
+`LASER sample` line followed by `LASER message`. Match owner, bulletId, type and
+payload hash across machines. The hash is an observation of bytes, not an
+authentication check; identical repeated messages remain ambiguous. Independent
+window limits can omit corresponding events. Native sequences wrap and are not
+global identifiers. A type 0 correction is conditional on the bullet's flags,
+callback argument and physics state, so zero received messages is not proof of
+missing shot announcements. Initial update snapshots remain useful when no
+corrections are sent, but age zero is the first observed update, not construction.
+
+For the live capture, both players install the diagnostic prerelease and keep
+`[Diagnostics] Laser=1`. Start a new two-player room, hold still, and fire one
+Closed Laser M2 shot at a distinct point. Wait at least 31 seconds between shots
+so one burst cannot consume the next capture window. Repeat while turning, then
+with the previously reported wall/ant discrepancy if reproducible. Close the
+game and collect both logs. Match a known owner and bulletId before comparing
+initial positions or messages. Record which questions the matched lines answer:
+initial observed position/direction, whether corrections arrive, and the position
+discrepancy at receipt. If caps omit a counterpart, repeat that shot; do not infer
+loss from the absent detail line.
+
+No matched two-machine capture has been made in this change. Initial construction
+agreement and the reported live aim failure remain unverified. The decoded
+diagnostic stays on by default for this prerelease so the requested capture can
+be collected. A stable default-off decision remains after that capture.

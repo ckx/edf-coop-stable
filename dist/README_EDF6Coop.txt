@@ -24,8 +24,9 @@ Player correction measures movement per second, so uneven frame times do not tur
 
 The default [NetPlayer] MaxExtrapolateMs is 350 ms, retaining diagnostic 5’s prediction window. Explicit INI overrides are preserved. Longer prediction bridges short update gaps but can overshoot when a player stops or turns; the stale-data fallback remains 400 ms.
 
-Laser diagnostics write up to eight LASER sample lines per 30 seconds and an activity summary when the next laser callback occurs. Samples include owner identity when available, position, forward direction, age, lifetime, beam endpoints and render dimensions, and observed draw callbacks. receive-before means the laser’s native network callback ran; it does not count every shot announcement. Draw callbacks do not prove visible pixels, and zero callbacks before the first render do not prove a missing beam. These diagnostics do not establish whether damage synchronized. When a beam differs, note the time and collect the shooter’s and observers’ logs after closing the game.
+Laser diagnostics record up to eight detailed events per 30 seconds, plus activity summaries. Initial update snapshots include owner identity, native bullet ID, position, direction and beam geometry. A message event adds decoded fields and a payload hash. send-before observes an owner message before transmission; receive-after shows the copy after its native callback. Match owner and bullet ID across machines, then message type and hash. The first vector in type 0/3 messages is velocity, the second is position. These messages are conditional corrections or events, not a count of shots. Independent logging limits may omit a counterpart, and draw callbacks do not prove visible pixels or damage. For a capture, fire individual shots at least 31 seconds apart, then close the game and collect both logs. [Diagnostics] Laser=0 disables this diagnostic.
 [Diagnostics] Laser=0: disable laser diagnostics.
+Out-of-range LinkTimeoutMs and GraceSeconds values produce a CONFIG warning and use their defaults.
 
 Player motion diagnostics are on by default. A correction of at least 0.25 m, a warp, or a sample age of at least 200 ms captures up to eight preceding and sixteen current/following driven frames. Each object can trigger once per 30 seconds, with a total limit of 96 PLAYER motion lines per 30 seconds. The lines record received positions and velocities, proxy and object positions, observed movement, requested corrections and the estimated local velocity. t is the original hook time in milliseconds; preceding frames are logged later. These traces do not prove that physics applied a requested correction. Set [Diagnostics] Player=0 to disable them. When reporting jitter, note the time and collect the host and affected joiners' logs after closing the game.
 
@@ -34,9 +35,10 @@ Online, when you go down, your view switches to the standing teammate with the l
 next one when they go down or leave. Press W to watch the next standing teammate instead (keyboard only;
 ignored while the chat box is open, so a typed w does not move the camera). The camera orbits them and
 points where you look: turn it with your normal look controls (mouse or right stick). Press E to switch to
-the locked camera, the game's own view of that teammate, and back; the choice lasts until you quit, and E
-follows the same rules as W. The locked view gets the teammate's aim from the network every sixth sync
-frame on foot and not at all while they ride a vehicle or are down, so it can stay fixed while they move.
+the locked camera and back; the choice lasts until you quit, and E follows the same rules as W.
+The locked view smooths received aim on foot. In a vehicle it follows the seated teammate's heading
+with level pitch and the same camera offsets. It does not copy their exact screen or independent gun
+aim, and cannot recover aim updates lost on the network.
 Being revived, or every teammate being down, returns your own camera.
 The watched teammate gets a health bar, in both camera modes from 3.4.0, and from 3.5.0 their name at the
 top of the screen, also in both modes. The name/health indicators show the other players, your own downed
