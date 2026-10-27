@@ -254,6 +254,7 @@ private:
     std::shared_ptr<const Identity> identity_;
     std::deque<Delivered> inbox_;
     std::vector<Stranded> stranded_;
+    std::atomic<bool> hasStranded_{false};
 
     // Host mode.
     std::map<std::string, Link> clients_;

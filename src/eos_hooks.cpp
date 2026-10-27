@@ -158,6 +158,7 @@ struct State {
     // over EOS.
     std::mutex strandedMutex;
     std::vector<Stranded> stranded;
+    std::atomic<bool> hasStranded{false};
     // Fragments (fragment.h): ours going out get ids from here, theirs come together here (receive thread only).
     std::atomic<uint32_t> fragmentIds{0};
     // This process's fragment id epoch (fragment.h): random, so ids of a restarted sender never repeat its last run's.
@@ -619,6 +620,7 @@ void retire(std::shared_ptr<DirectNet> net) {
         if (!left.empty()) {
             std::lock_guard<std::mutex> lock(g.strandedMutex);
             g.stranded.insert(g.stranded.end(), std::make_move_iterator(left.begin()), std::make_move_iterator(left.end()));
+            g.hasStranded = true;
         }
         for (Delivered d; net->pop(nullptr, UINT32_MAX, d);) {
             if (!takeArrival(d.src, d.socketName, d.channel, d.data.data(), static_cast<uint32_t>(d.data.size()))) continue;
@@ -1012,10 +1014,11 @@ EOS_EResult sendFragments(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, const 
 // from the game's send call, the thread the game calls EOS from.
 void sendStranded(EOS_HP2P h, const EOS_P2P_SendPacketOptions& o, const std::shared_ptr<DirectNet>& net) {
     std::vector<Stranded> left = net ? net->takeStranded() : std::vector<Stranded>();
-    {
+    if (g.hasStranded) {
         std::lock_guard<std::mutex> lock(g.strandedMutex);
         if (!g.stranded.empty()) left.insert(left.begin(), std::make_move_iterator(g.stranded.begin()), std::make_move_iterator(g.stranded.end()));
         g.stranded.clear();
+        g.hasStranded = false;
     }
     if (left.empty()) return;
     size_t failed = 0;

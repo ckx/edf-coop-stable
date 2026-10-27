@@ -581,9 +581,9 @@ void TestReviewFixes() {
 }
 
 void TestRoomTrackCapacity() {
-    // Receive a whole room's samples before its frame update: no player is evicted before UpdateHook uses its samples
-    // and convergence history.
-    for (const int count : {4}) {
+    // Receive a whole room's samples, including the overlapping mission-end copies, before its frame update.
+    // No live copy may lose its samples or convergence history before UpdateHook uses them.
+    for (const int count : {4, 8}) {
         PlayerTracks<RemoteTrack> tracks;
         std::vector<int> objects(static_cast<std::size_t>(count) + 1);
         NetPlayerParams params;
@@ -608,7 +608,7 @@ void TestRoomTrackCapacity() {
                 }
             }
         }
-        if (count == 4) {
+        if (count == 8) {
             // The first player departs; keep the others fresh, then admit its replacement.
             for (int i = 1; i < count; ++i) tracks.Find(&objects[i], 200.0, false);
             auto* newcomer = tracks.Find(&objects[count], 201.0, true);

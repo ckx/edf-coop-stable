@@ -4,7 +4,7 @@
 
 namespace multislot {
 
-// One track for every player of a room of four. An inactive object yields its slot first when a new player arrives.
+// Mission transitions hold two copies of the room's four players. An inactive object yields its slot first.
 template <typename Track>
 class PlayerTracks {
 public:
@@ -28,7 +28,7 @@ private:
         double touched = -1.0;
         Track track{};
     };
-    static constexpr std::size_t kPlayers = 4;
+    static constexpr std::size_t kPlayers = 8;
     std::array<Entry, kPlayers> entries_{};
 };
 

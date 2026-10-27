@@ -1848,7 +1848,11 @@ void testAbandonAndSkip() {
     // The lost packet turning up late is not delivered any more; the next ones flow normally.
     ready.clear();
     rx.onData(lost, ready);
-    tx.onAck(rx.onData(data(1, 3000), ready), 3010);
+    CHECK(ready.empty() && rx.duplicates() == 0 && rx.skipped() == 1);
+    dn::DataMsg next = data(1, 3000);
+    tx.onAck(rx.onData(next, ready), 3010);
+    rx.onData(next, ready);
+    CHECK(rx.duplicates() == 1);  // real duplicates above the Forward floor still count
     CHECK(ready.size() == 1 && ready[0].seq == 4 && tx.pendingCount() == 0);
 
     // Packets the game sent reliably never expire, and only they count towards a stalled link.
@@ -2591,6 +2595,27 @@ void testConfigParsing() {
     for (const std::string& w : c.warnings) mentionsPort = mentionsPort || w.find("ListenPort=abc") != std::string::npos;
     CHECK(mentionsPort);
 
+    // Values formerly clamped silently must name the setting and its real range, and keep the default.
+    for (const auto& values : {std::pair{1000, 0}, std::pair{300001, 601}}) {
+        putFile(path, "[DirectNet]\r\nLinkTimeoutMs=" + std::to_string(values.first) +
+                      "\r\n[Resilience]\r\nGraceSeconds=" + std::to_string(values.second) + "\r\n");
+        c = dn::loadConfig(path);
+        CHECK(c.direct.linkTimeoutMs == 60000 && c.direct.stallTimeoutMs == 60000 && c.graceMs == 30000);
+        CHECK(c.warnings.size() == 2);
+        CHECK(c.warnings[0].find("CONFIG [DirectNet] LinkTimeoutMs=" + std::to_string(values.first) +
+                                 " is not a number from 3000 to 300000; using 60000") != std::string::npos);
+        CHECK(c.warnings[1].find("CONFIG [Resilience] GraceSeconds=" + std::to_string(values.second) +
+                                 " is not a number from 1 to 600; using 30") != std::string::npos);
+    }
+    for (const auto& values : {std::pair{3000, 1}, std::pair{17000, 42}, std::pair{300000, 600}}) {
+        putFile(path, "[DirectNet]\r\nLinkTimeoutMs=" + std::to_string(values.first) +
+                      "\r\n[Resilience]\r\nGraceSeconds=" + std::to_string(values.second) + "\r\n");
+        c = dn::loadConfig(path);
+        CHECK(c.direct.linkTimeoutMs == static_cast<uint32_t>(values.first) &&
+              c.direct.stallTimeoutMs == c.direct.linkTimeoutMs && c.graceMs == static_cast<uint32_t>(values.second) * 1000u);
+        CHECK(c.warnings.empty());
+    }
+
     // A misspelt choice keeps the default and says so; a value in another case is no misspelling.
     putFile(path, "[DirectNet]\r\nMode=hots\r\n[EOS]\r\nRelay=Default\r\n[Resilience]\r\nHoldDisconnects=always\r\n");
     c = dn::loadConfig(path);
@@ -2620,6 +2645,16 @@ void testConfigParsing() {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+    if (argc == 2 && std::wstring(argv[1]) == L"--network-cleanup") {
+        testAbandonAndSkip();
+        testRetransmitTimeout();
+        testConfigParsing();
+        testLinkStopsAnswering();
+        testRelayReturnsUndelivered();
+        testReceiveStateFollowsSession();
+        printf("\n%d checks, %d failures\n", g_checks, g_failures);
+        return g_failures == 0 ? 0 : 1;
+    }
     if (argc == 2 && std::wstring(argv[1]) == L"--receive-lifecycle") {
         testReceiveStateFollowsSession();
         printf("\n%d checks, %d failures\n", g_checks, g_failures);

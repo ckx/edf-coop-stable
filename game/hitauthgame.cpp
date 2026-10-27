@@ -206,7 +206,7 @@ RuleNow ReadRule(std::uint64_t now) {
     return r;
 }
 
-// The room's gate, four times a second: the hooks never ask it themselves (it builds a string per question).
+// HitRuleClock needs a steady 250 ms beat for its 5 s settle and grace timers, even when no hit hook runs.
 DWORD WINAPI SampleRule(void*) {
     RuleNow said;
     for (;;) {

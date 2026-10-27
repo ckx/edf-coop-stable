@@ -222,9 +222,9 @@ void ReliableReceiver::releaseContiguous(std::vector<DataMsg>& deliver) {
 
 AckMsg ReliableReceiver::onData(DataMsg msg, std::vector<DataMsg>& deliver) {
     uint32_t seq = msg.seq;
-    // Already delivered (below the cumulative point) or already held: a retransmitted duplicate.
+    // Below the cumulative point or already held: never deliver it twice.
     if (seq < expected_ || buffer_.count(seq)) {
-        ++duplicates_;  // the sender resent it: our ACK was late or lost (or the resend was spurious)
+        if (seq >= forwardFloor_) ++duplicates_;  // below the Forward floor it may never have arrived
         return currentAck(seq);
     }
     if (seq == expected_) {
@@ -254,6 +254,7 @@ AckMsg ReliableReceiver::onForward(uint32_t floor, std::vector<DataMsg>& deliver
         }
         skipped_ += floor - expected_ - held;
         expected_ = floor;
+        forwardFloor_ = floor;
         releaseContiguous(deliver);
     }
     return currentAck(0);

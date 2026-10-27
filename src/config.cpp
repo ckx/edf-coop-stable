@@ -351,7 +351,7 @@ Config loadConfig(const std::wstring& iniPath) {
     c.direct.hostAddress = toUtf8(readString(ini, s, L"HostAddress", L""));
     c.direct.key = toUtf8(readString(ini, s, L"Key", L""));
     c.direct.linkTimeoutMs =
-        static_cast<uint32_t>(std::clamp(readInt(ini, s, L"LinkTimeoutMs", 60000, 0, 999999999, w), 3000, 300000));
+        static_cast<uint32_t>(readInt(ini, s, L"LinkTimeoutMs", 60000, 3000, 300000, w));
     c.direct.stallTimeoutMs = c.direct.linkTimeoutMs;  // one setting for both ways a link can die
     c.publicAddress = toUtf8(readString(ini, s, L"PublicAddress", L""));
     c.autoJoin = readBool(ini, s, L"AutoJoin", true, w);
@@ -367,7 +367,7 @@ Config loadConfig(const std::wstring& iniPath) {
     c.reliableGameTraffic = readBool(ini, L"Sync", L"ReliableGameTraffic", true, w);
     c.direct.upgradeUnreliable = c.reliableGameTraffic;
     c.graceMs =
-        static_cast<uint32_t>(std::clamp(readInt(ini, L"Resilience", L"GraceSeconds", 30, 0, 999999999, w), 1, 600)) * 1000u;
+        static_cast<uint32_t>(readInt(ini, L"Resilience", L"GraceSeconds", 30, 1, 600, w)) * 1000u;
     c.direct.testOutageAfterMs = static_cast<uint64_t>(readInt(ini, L"Test", L"DirectOutageAfterMs", 0, 0, 999999999, w));
     c.direct.testOutageForMs = static_cast<uint64_t>(readInt(ini, L"Test", L"DirectOutageForMs", 0, 0, 999999999, w));
     return c;

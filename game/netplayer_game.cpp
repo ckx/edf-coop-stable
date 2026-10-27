@@ -141,6 +141,26 @@ PlayerTracks<MotionTrace> motionTraces;
 double motionWindowMs = 0.0;
 unsigned motionLines = 0;
 
+void ObservePlayerRoom(const LobbyView& view) {
+    std::vector<std::string> members;
+    for (const auto& member : view.members) members.push_back(member.id);
+    std::sort(members.begin(), members.end());
+    AcquireSRWLockExclusive(&lock);
+    static std::string lobby, self, owner;
+    static std::vector<std::string> previousMembers;
+    if (view.lobbyId != lobby || view.self != self || view.owner != owner || members != previousMembers) {
+        // Player addresses can be reused in another room or after a member leaves.
+        sent = {};
+        remotes = {};
+        motionTraces = {};
+        lobby = view.lobbyId;
+        self = view.self;
+        owner = view.owner;
+        previousMembers = std::move(members);
+    }
+    ReleaseSRWLockExclusive(&lock);
+}
+
 void LogMotion(void* soldier, const MotionFrame& f) {
     if (motionLines >= 96) return;  // Includes bursts from objects recreated during this window.
     ++motionLines;
@@ -258,8 +278,6 @@ template <int F>
 void UpdateHook(void* soldier) {
     const UpdateFn original = GameFn<UpdateFn>(kOriginal[F][kUpdate]);
     const double now = NowMs();
-    AcquireSRWLockExclusive(&lock);
-    ReleaseSRWLockExclusive(&lock);
     if (!Remote(soldier) || !NetFeatureActive(NetFeature::PlayerSync)) return original(soldier);
     AcquireSRWLockExclusive(&lock);
     RemoteTrack* track = remotes.Find(soldier, now, false);
@@ -399,6 +417,7 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
             return false;
         }
     }
+    WatchMemberTexts({}, &ObservePlayerRoom);
     Log("PLAYER sync: hooks installed (%zu vtable slots%s). Players send position, velocity and time every %d sync "
         "frame(s); remote players with that data are extrapolated (up to %.0f ms) and converge in %.0f ms (warp above "
         "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms",

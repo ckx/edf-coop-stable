@@ -122,7 +122,8 @@ public:
     uint32_t expected() const { return expected_; }
     size_t buffered() const { return buffer_.size(); }
     // Reliable packets received again after they had arrived: set against the sender's retransmits,
-    // the share of its resends that were not needed.
+    // the share of its resends that were not needed. Packets below a Forward floor are excluded because
+    // they may have been skipped rather than delivered.
     uint64_t duplicates() const { return duplicates_; }
     // Sequence numbers the sender gave up that never arrived here.
     uint64_t skipped() const { return skipped_; }
@@ -139,6 +140,7 @@ private:
     };
 
     uint32_t expected_ = 1;
+    uint32_t forwardFloor_ = 1;
     std::map<uint32_t, Slot> buffer_;
     uint64_t duplicates_ = 0;
     uint64_t skipped_ = 0;

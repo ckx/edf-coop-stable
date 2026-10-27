@@ -310,6 +310,7 @@ void DirectNet::setLocalUser(const std::string& puid) {
         roster_.clear();
         inbox_.clear();
         stranded_.clear();
+        hasStranded_ = false;
         newLocalSession();
     }
     localPuid_ = puid;
@@ -402,7 +403,9 @@ bool DirectNet::pop(const uint8_t* channel, uint32_t maxSize, Delivered& out) {
 }
 
 std::vector<Stranded> DirectNet::takeStranded() {
+    if (!hasStranded_) return {};
     std::lock_guard<std::mutex> lock(mu_);
+    hasStranded_ = false;
     return std::exchange(stranded_, {});
 }
 
@@ -446,6 +449,7 @@ void DirectNet::setActive(bool active) {
     // Unread game packets, and ours not delivered, belong to the room just left, not the next one.
     inbox_.clear();
     stranded_.clear();
+    hasStranded_ = false;
     newLocalSession();  // a later room starts fresh sessions
     logf("DIRECT closed %zu direct link(s): not in a room", closed);
 }
@@ -588,6 +592,7 @@ void DirectNet::keepStranded(DataMsg msg) {
         return;
     }
     stranded_.push_back({std::move(msg.dst), std::move(msg.socketName), msg.channel, msg.reliability, std::move(msg.payload)});
+    hasStranded_ = true;
 }
 
 void DirectNet::returnToSender(DataMsg msg, uint64_t now) {
