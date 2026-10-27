@@ -212,7 +212,35 @@ Live checks:
    the watched teammate going down or leaving, and mission end: the chat keeps
    working on the own camera in the next mission.
 
-## M10. Free and locked camera on the E key (built in 3.3.0, unverified online)
+## M10. Free and locked camera on the E key
+
+The original 3.3.0 behavior below is historical. User decision on 2026-10-26,
+issue #12005, changes locked mode to smoothed received aim on foot and the
+teammate's seated matrix heading in vehicles, preserving camera offsets. It also
+removes the stale-aim log, which could not distinguish unchanged aim from a
+missing packet. The free camera and W/E input rules remain the same.
+
+Live acceptance for the revised locked view:
+
+1. Go down in an online mission. Press E and have the watched teammate turn on
+   foot, including several complete turns in each direction. The camera follows
+   without the old 100 ms steps or a full spin at the yaw wrap. Check that its lag
+   is acceptable and that a pause in aim stops the camera without overshoot.
+2. Have them enter and turn a tank, then exit and aim again. The camera follows
+   the seated heading during the ride and received aim after exit. Repeat with
+   other vehicle types or passenger seats used in play. It follows seat heading,
+   not necessarily the hull or gun direction.
+3. Press E for the free camera. Mouse/right-stick input still controls the orbit.
+   Cycle with W, type W and E in chat, revive, go down again, and let the watched
+   teammate leave. Camera selection, return and the HUD work in both modes.
+4. If packet loss can be reproduced, check that a gap holds the last observed aim
+   without an invented continued turn, then resumes when fresh aim arrives.
+
+Automated coverage in `SpectateTarget` checks the production locked-angle reader
+and smoothing. Both toolchains and the non-stress suite are required; the live
+checks above remain unverified until played.
+
+### Original 3.3.0 behavior and checks
 
 The user asked to switch between the orbit camera (free) and the camera as it was
 before 0.4.0 (locked: the teammate's own view), with E as the key and free as the

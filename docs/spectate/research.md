@@ -45,6 +45,15 @@ functions. Any mismatch refuses installation before anything is written.
 | Ghost camera orbit rotation | `0xFAF20` | `0xF0` | `0x5A931A41EBC8898A` |
 | Network look angles | `0x59FE04` | `0x38` | `0x5271702E19DA8061` |
 
+Locked aim smoothing, issue #12005, additionally checks:
+
+| Range | RVA | Size | FNV-1a 64 |
+| --- | --- | --- | --- |
+| Received look angle storage | `0x5921BC` | `0x3D` | `0x61920059725219C0` |
+| Seated soldier matrix copy | `0x5751B9` | `0x53` | `0x56EAF9A8BA8CBB62` |
+| Vehicle exit aim reset | `0x5705A5` | `0x1B` | `0xA0B16F34405F61E1` |
+| Matrix forward yaw | `0x4E1F0` | `0x23` | `0xB2489B4CE99D04C6` |
+
 Version 0.3.0 additionally checks these HUD ranges. The native builder is verified
 as evidence of parameter layout, but is never called by the plugin.
 
@@ -781,15 +790,13 @@ What the locked camera shows, and why it can point wrong:
   100 ms and freezes through a lost record.
 - No aim is sent while the sender holds a vehicle reference (`+0x1548/+0x1550`;
   the control block's use count, `0x59FB3C`) or is dead or down (`+0x2E8`,
-  `0x59FB41`): those paths take `0x59FBBB`, whose mask never has bit 2. Boarding
+  `0x59FB41`): those paths take `0x59FBBB`, whose mask never has bit 2. Vehicle exit
   (`0x5701B0`, from the state machine `0x572810`) sets the soldier's pitch to 0 and
   its yaw to the yaw of its own matrix row `+0x80` (`0x5705A5`, `0x5705B8`;
-  `0x4E1F0` is atan2). If the remote copy runs the same boarding code (inferred
-  from the vehicle reference the HUD vehicle lookup `0x8024D0` reads on every
-  player), its aim stays at pitch 0 and the boarding yaw for the whole ride, and
-  the locked camera looks straight ahead along a fixed heading while the vehicle
-  moves. This matches "straight ahead" and "wrong direction" in the 2026-10-17
-  report. Whether those reports were in vehicles is not recorded.
+  `0x4E1F0` is atan2). The original notes called this boarding, but the function
+  clears the vehicle references at `0x5705DE..0x57060D`. That was corrected during
+  issue #12005. The old capture does not establish that a frozen camera occurred
+  in a vehicle or prove the exact origin of the reported wrong direction.
 - The float writer `0x12B5350` truncates the angle to half precision (mantissa
   `shr 13`, no rounding) and sends the 3-byte half when the truncation error is at
   most 0.1 (`0x1765A0C`), else the 5-byte float. Yaw is unbounded (the capture has
@@ -1065,11 +1072,58 @@ The vertical centring assumes the text grows down from its matrix point in the H
 y-down space, as `0x808410`'s offset suggests; if it does not, the caption sits one
 text height higher.
 
+## Smoothed locked aim and vehicle heading, 2026-10-26
+
+User decision, issue #12005: locked mode may use smoothed received aim on foot and
+teammate matrix heading in vehicles, with the same camera offsets. This supersedes
+the 2026-10-24 decision to use the native follow rotation unchanged.
+
+Static inspection with `tools/pe.py` found:
+
+- `0x5921BC..0x5921F8` tests record mask `0x02` and writes decoded pitch and yaw to
+  soldier `+0x1230/+0x1234`. Reading them each frame exposes values, not arrival
+  events. The same values can mean still aim, a repeated packet or no packet.
+- The soldier update at `0x5750E0` has a vehicle branch at `0x5751B9`. It requires
+  a non-null control block at soldier `+0x1550` with a nonzero strong count at
+  control `+8`. At `0x5751D3..0x57520B` it takes the seat object at `+0x1540`,
+  copying its matrix `+0x270..+0x2AF` into soldier `+0x60..+0x9F`. The fallback
+  therefore reads the seated soldier's current forward row, not the received aim.
+- `0x4E1F0` takes a forward vector and returns `atan2(x, z)`, or 0 when both
+  components are zero. Vehicle exit uses it on soldier `+0x80` and writes the
+  result to `+0x1234`. This establishes the yaw convention. The plugin rejects
+  nonfinite and nearly vertical or degenerate horizontal vectors instead of
+  choosing an arbitrary yaw.
+
+Both spectator modes now set the existing orbit parameters. Locked mode uses a
+50 ms exponential time constant, measured with `steady_clock`, and wraps yaw
+before taking the shortest angular difference. It approaches the observed sample
+without overshoot or extrapolation. It does not estimate an arrival interval from
+angle changes. At steady 60 fps, each frame covers about 28% of the remaining gap.
+A vehicle state change starts at the new source immediately, with pitch 0 in the
+vehicle. Changing target or mode, revival and invalid input reset the filter.
+The stale-aim message was removed because equal angles never proved packet loss.
+
+`SpectateTarget` exercises the production reader and filter on soldier-shaped
+storage: wrapped yaw, missing samples, different frame rates, target changes,
+vehicle turns with unchanged aim, expired vehicle references and nonfinite input.
+The added hash ranges contain no base relocations. No network code changes.
+The MinGW build with `EDF6_GAME_DIR` and `./build.sh -r` passed. The focused Wine
+run passed all seven Spectate and PluginLoad tests with the supported EDF.dll;
+none skipped. This does not establish live camera behavior.
+
+Evidence limits: no live vehicle capture was made for this change. Static code
+establishes the seated matrix copy and yaw convention, but vehicle classes and
+seat orientations still need live checks. The matrix represents the teammate's
+seat heading, which need not equal the vehicle hull or its gun direction. On-foot
+smoothness and added lag also need player acceptance; the filter cannot recover
+turns that never reached this machine. Existing camera offsets, position following
+and native camera smoothing remain in use.
+
 ## Open questions
 
 - Whether the wrong directions reported for the pre-0.4.0 camera were in vehicles.
-  The locked camera (3.3.0) is that camera; its stale-aim log line records the
-  case.
+  The old capture did not record vehicle state. Equal received angles could not
+  distinguish missing updates from a stationary aim.
 
 - Live-check the isolated health/name components in 0.3.0, including name placement,
   health changes, revival, repeated deaths, vehicles and disconnected targets.

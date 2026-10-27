@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -102,6 +103,9 @@ constexpr std::size_t kNetSlot = 0x48;
 constexpr std::size_t kLookPitch = 0x1230;
 constexpr std::size_t kLookYaw = 0x1234;
 constexpr std::size_t kLookYawOffset = 0x1E44;
+// The soldier update copies the seat transform into +0x60..+0x9F while this weak reference lives (5751B9).
+constexpr std::size_t kVehicleControl = 0x1550;
+constexpr std::size_t kForward = 0x80;
 // Camera parameters a ghost camera copies from its target each update (F8745): the block at +0x230 while byte
 // +0x224 is set, else the one at +0x170. A block's byte +0x40 makes the camera orbit the target at the pitch/yaw
 // pair at +0x50 instead of looking along the target's own facing (FAF3C). No game code sets that byte to anything
@@ -237,6 +241,10 @@ constexpr Code kCode[] = {
     {"CharacterGhostCamera constructor", 0xF4860, 0x974, 0xB9D5E9BDAA015326},
     {"ghost camera target copy", 0xF86A0, 0x4A7, 0xC8F39D3D226684CB},
     {"ghost camera orbit rotation", 0xFAF20, 0xF0, 0x5A931A41EBC8898A},
+    {"received look angle storage", 0x5921BC, 0x3D, 0x61920059725219C0},
+    {"seated soldier matrix copy", 0x5751B9, 0x53, 0x56EAF9A8BA8CBB62},
+    {"vehicle exit aim reset", 0x5705A5, 0x1B, 0xA0B16F34405F61E1},
+    {"matrix forward yaw", 0x4E1F0, 0x23, 0xB2489B4CE99D04C6},
     {"network look angles", 0x59FE04, 0x38, 0x5271702E19DA8061},
     {"IsPlayer", 0x550890, 0xA, 0x1D923A0DEC9EF9A4},
     {"IsAlive", 0x1C0BE0, 0x2E, 0xA905EB899CAEB9D9},
@@ -277,13 +285,9 @@ bool stopped = false;
 constexpr std::uint32_t kGone = kOwnCamera - 1;
 std::uint32_t createdThisDown = 0;  // slots whose camera was asked for since the local player went down
 // The camera orbits the watched teammate at the downed player's own look angles (free), or looks along the
-// teammate's own facing (locked). E switches; the choice lasts the session.
+// teammate's smoothed aim or seated heading (locked). E switches; the choice lasts the session.
 bool freeCam = true;
-// The watched teammate's received look angles and how many frames they have stayed the same, for the locked
-// camera's stale-aim line.
-float watchedAim[2] = {};
-std::uint32_t watchedAimSlot = kOwnCamera;
-unsigned watchedAimStill = 0;
+LockedAim lockedAim;
 
 struct Player {
     std::uintptr_t object;
@@ -528,37 +532,30 @@ struct Key {
 Key cycleKey{'W'};  // the next standing teammate
 Key modeKey{'E'};   // free or locked camera
 
-// The locked camera shows the teammate's aim as the game last received it (+0x1230/+0x1234, every six sync frames
-// on foot). The sender omits aim while riding a vehicle or down (59FB41), and boarding sets pitch 0 and the body's
-// yaw (5705A5), so the view can stay fixed while the teammate moves. One line per stale period says so.
-void NoteStaleAim(std::uintptr_t soldier, std::uint32_t slot) {
-    const float aim[2] = {At<float>(soldier + kLookPitch), At<float>(soldier + kLookYaw)};
-    if (slot != watchedAimSlot || aim[0] != watchedAim[0] || aim[1] != watchedAim[1]) {
-        watchedAimSlot = slot;
-        watchedAim[0] = aim[0];
-        watchedAim[1] = aim[1];
-        watchedAimStill = 0;
-    } else if (++watchedAimStill == 120) {
-        Log("SPECTATE: no aim update from the player in slot %u for 120 frames; the locked camera keeps their last "
-            "direction (in a vehicle or down, the game does not send aim)",
-            slot);
-    }
-}
-
-void Follow(std::uintptr_t system) {
+void Follow(std::uintptr_t system, float elapsed) {
     if (!reinterpret_cast<IsOnlineModeFn>(game + kIsOnlineMode)()) {
         createdThisDown = 0;
+        lockedAim = {};
         return;
     }
     const std::uintptr_t view = system + kView0;
     const std::uintptr_t current = Ptr(view + kViewCurrent);
-    if (!current || Expired(Ptr(view + kViewCurrent + 8))) return;
+    if (!current || Expired(Ptr(view + kViewCurrent + 8))) {
+        lockedAim = {};
+        return;
+    }
     // Another kind of camera is none of the plugin's business. None was seen in online play.
-    if (Ptr(current) != reinterpret_cast<std::uintptr_t>(game + kGhostCameraVtable)) return;
+    if (Ptr(current) != reinterpret_cast<std::uintptr_t>(game + kGhostCameraVtable)) {
+        lockedAim = {};
+        return;
+    }
     const std::uintptr_t followed = Followed(current);
 
     const Roster roster = ReadRoster();
-    if (!roster.hasLocal || roster.doubled) return;
+    if (!roster.hasLocal || roster.doubled) {
+        lockedAim = {};
+        return;
+    }
     std::uint32_t followedSlot = kOwnCamera;
     if (followed != roster.local.object) {
         // A teammate, or someone who left the room. The ghost camera's update (slot 3, F8210, which 11978D0 runs for
@@ -573,12 +570,12 @@ void Follow(std::uintptr_t system) {
     if (roster.local.alive) {
         createdThisDown = 0;
         cycleKey.held = modeKey.held = true;  // a key held while going down (W runs forward) is not a press
-        watchedAimSlot = kOwnCamera;
+        lockedAim = {};
     } else {
         if (modeKey.Pressed()) {
             freeCam = !freeCam;
             Log(freeCam ? "SPECTATE: free camera, aimed with the look controls (E toggles)"
-                        : "SPECTATE: locked camera, the teammate's own view (E toggles)");
+                        : "SPECTATE: locked camera, smoothed aim or vehicle heading (E toggles)");
         }
         Teammate mates[kMaxPlayers];
         for (std::size_t i = 0; i < roster.remotes; ++i) mates[i] = {roster.remote[i].slot, roster.remote[i].alive};
@@ -587,15 +584,20 @@ void Follow(std::uintptr_t system) {
     std::uintptr_t object = roster.local.object;
     for (std::size_t i = 0; i < roster.remotes; ++i)
         if (roster.remote[i].slot == target) object = roster.remote[i].object;
-    // The free camera looks where the downed local player looks; the locked one keeps the game's own view of the
-    // teammate, which clearing the orbit byte restores.
     const std::uintptr_t local = roster.local.object;
-    const float look[2] = {At<float>(local + kLookPitch),
-                           At<float>(local + kLookYaw) + At<float>(local + kLookYawOffset)};
-    const bool steerable = freeCam && std::isfinite(look[0]) && std::isfinite(look[1]);
+    const float ownLook[2] = {At<float>(local + kLookPitch),
+                             At<float>(local + kLookYaw) + At<float>(local + kLookYawOffset)};
+    const float* look = nullptr;
+    if (freeCam || target == kOwnCamera) {
+        lockedAim = {};
+        if (freeCam && std::isfinite(ownLook[0]) && std::isfinite(ownLook[1])) look = ownLook;
+    } else {
+        // A replacement in the same slot must not inherit its predecessor's view.
+        if (object != followed) lockedAim = {};
+        if (lockedAim.Update(object, target, elapsed)) look = lockedAim.look;
+    }
     for (std::size_t i = 0; i < roster.remotes; ++i)
-        Orbit(roster.remote[i].object, steerable && roster.remote[i].slot == target ? look : nullptr);
-    if (!freeCam && target != kOwnCamera) NoteStaleAim(object, target);
+        Orbit(roster.remote[i].object, roster.remote[i].slot == target ? look : nullptr);
     if (target == followedSlot) return;
 
     if (const std::uintptr_t camera = FindCamera(view, object)) {
@@ -627,8 +629,12 @@ bool HudVisible(void* camera) {
 }
 
 void SystemUpdate(void* system, float step, std::uint32_t frames) {
+    const auto now = std::chrono::steady_clock::now();
+    static auto previous = now;
+    const float elapsed = std::chrono::duration<float>(now - previous).count();
+    previous = now;
     Fault fault;
-    if (!stopped && system && !Guarded([&] { Follow(reinterpret_cast<std::uintptr_t>(system)); }, &fault)) {
+    if (!stopped && system && !Guarded([&] { Follow(reinterpret_cast<std::uintptr_t>(system), elapsed); }, &fault)) {
         stopped = true;
         const auto base = reinterpret_cast<std::uintptr_t>(game);
         if (fault.instruction >= base && fault.instruction - base < kImageSize)
@@ -642,6 +648,45 @@ void SystemUpdate(void* system, float step, std::uint32_t frames) {
 }
 
 }  // namespace
+
+bool LockedAim::Update(std::uintptr_t soldier, std::uint32_t slot, float elapsed) {
+    const bool vehicle = !Expired(Ptr(soldier + kVehicleControl));
+    float pitch = 0.0f;
+    float yaw;
+    if (vehicle) {
+        const float x = At<float>(soldier + kForward);
+        const float z = At<float>(soldier + kForward + 8);
+        if (!std::isfinite(x) || !std::isfinite(z) || std::hypot(x, z) < 0.0001f) {
+            *this = {};
+            return false;
+        }
+        yaw = std::atan2(x, z);
+    } else {
+        pitch = At<float>(soldier + kLookPitch);
+        yaw = At<float>(soldier + kLookYaw);
+    }
+    if (!std::isfinite(pitch) || !std::isfinite(yaw)) {
+        *this = {};
+        return false;
+    }
+    constexpr double turn = 6.2831853071795864769;
+    const double wrappedYaw = std::remainder(static_cast<double>(yaw), turn);
+    if (!ready_ || slot != slot_ || vehicle != vehicle_) {
+        look[0] = pitch;
+        look[1] = static_cast<float>(wrappedYaw);
+    } else if (std::isfinite(elapsed) && elapsed > 0.0f) {
+        // These fields expose no arrival counter. Smooth toward the latest value, including unchanged samples,
+        // without guessing packet times or extrapolating. A 50 ms time constant removes the 100 ms aim steps.
+        const double amount = -std::expm1(-static_cast<double>(elapsed) / 0.05);
+        look[0] = static_cast<float>(look[0] + (static_cast<double>(pitch) - look[0]) * amount);
+        const double delta = std::remainder(wrappedYaw - look[1], turn);
+        look[1] = static_cast<float>(std::remainder(look[1] + delta * amount, turn));
+    }
+    slot_ = slot;
+    vehicle_ = vehicle;
+    ready_ = true;
+    return true;
+}
 
 std::uint32_t NextTarget(const Teammate* mates, std::size_t count, std::uint32_t followed, bool advance) {
     std::size_t start = count;

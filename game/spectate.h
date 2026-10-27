@@ -7,9 +7,9 @@
 namespace multislot::spectate {
 
 // A downed player in an online room watches a standing teammate through the game's follow camera until revived:
-// a free camera aimed with their own look controls, or (E) the teammate's own view (docs/spectate/design.md; the
-// evidence for every address is in docs/spectate/research.md). Only this machine's view changes: nothing goes over
-// the network.
+// a free camera aimed with their own look controls, or (E) smoothed teammate aim and vehicle heading.
+// Behavior is in docs/spectate/design.md; address evidence is in docs/spectate/research.md.
+// Only this machine's view changes: nothing goes over the network.
 //
 // Application::Update calls System::Update (1198DA0) here once a frame, on the main thread, before the frame's
 // cameras are drawn. With [Display] SpectateWhenDown=1 (the default) the call comes to the plugin, which switches
@@ -41,6 +41,19 @@ constexpr std::uint32_t kOwnCamera = 0xFFFFFFFF;
 // else kOwnCamera. `advance` (the W key) moves on from a living `followed` the same way; with one teammate
 // standing it changes nothing.
 std::uint32_t NextTarget(const Teammate* mates, std::size_t count, std::uint32_t followed, bool advance);
+
+// Per-frame locked view, using received aim on foot and the seated soldier's matrix in a vehicle.
+// The caller guards the read and resets this state whenever the target object or camera mode changes.
+// Only angles and slot identity survive the frame, never game pointers.
+struct LockedAim {
+    float look[2]{};
+    bool Update(std::uintptr_t soldier, std::uint32_t slot, float elapsed);
+
+private:
+    std::uint32_t slot_ = kOwnCamera;
+    bool vehicle_ = false;
+    bool ready_ = false;
+};
 
 // Makes `camera`, a SceneCamera some shared_ptr keeps alive, the current camera of `view` through the game's own
 // weak_from_this (1198950) and view switch (1193FA0). The view keeps a weak_ptr to it.
