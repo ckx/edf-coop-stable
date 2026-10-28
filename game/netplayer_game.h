@@ -25,6 +25,9 @@ struct PlayerSyncSettings {
     bool diagnostics = true;
 };
 
+// Read-only frame observation for the watched teammate, rate-limited by the player diagnostic.
+void TraceSpectatorAim(void* soldier, bool freeCamera);
+
 PlayerSyncSettings ReadPlayerSyncSettings(const wchar_t* iniPath);
 // True when installed (logged either way). The feature gate (netfeature.h) is asked every frame, not here.
 bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& settings);

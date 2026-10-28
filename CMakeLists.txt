@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # EDF6Coop.dll: the transport part (src/) and the game part (game/) as one plugin.
-project(EDF6Coop VERSION 3.6.0 LANGUAGES CXX RC)
+project(EDF6Coop VERSION 3.6.1 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Every file sees <windows.h> the same way.
@@ -123,6 +123,14 @@ game_test(SpectateCameraGameCode SpectateCameraTests "${EDF_DLL}")
 add_executable(LaserTraceTests tests/game/lasertrace_test.cpp)
 target_link_libraries(LaserTraceTests PRIVATE GameCore)
 game_test(LaserDiagnosticsGameCode LaserTraceTests "${EDF_DLL}")
+
+add_executable(PlayerAimTests tests/game/aimtrace_test.cpp)
+target_link_libraries(PlayerAimTests PRIVATE GameCore)
+game_test(PlayerAimGameCode PlayerAimTests "${EDF_DLL}")
+add_executable(RoomLabelTests tests/game/roomlabel_test.cpp)
+target_link_libraries(RoomLabelTests PRIVATE GameCore)
+game_test(RoomLabelGameCode RoomLabelTests "${EDF_DLL}")
+
 
 unit_test(LoaderProxyRace LoaderProxyTests tests/game/loader_proxy_test.cpp ""
     "${CMAKE_SOURCE_DIR}/third_party/EDFModLoader/winmm.dll" "${OUT_DIR}/winmm.dll")

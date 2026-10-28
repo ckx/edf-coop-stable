@@ -5,11 +5,14 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cwchar>
+#include <span>
 #include <vector>
 
 #include "code.h"
 #include "guard.h"
 #include "log.h"
+#include "netplayer_game.h"
 
 namespace multislot::spectate {
 namespace {
@@ -172,6 +175,29 @@ struct Code {
     std::uint32_t size;
     std::uint64_t hash;
 };
+constexpr Code kTextCode[] = {
+    {"rescue message draw", 0x808410, 0x2D3, 0xA77E2074C4927895},
+    {"font text object", kTextBegin, 0x4F, 0x9B63E0BB4001FB42},
+    {"text object construction", 0x11379B0, 0xFA, 0x26813887C10E97EB},
+    {"text style", kTextStyle, 0x9, 0x6EF651AD1E09BE2A},
+    {"text renderer style", 0x113B2A0, 0x1F5, 0x27667DDC1ADBAFB7},
+    {"text style copy", 0x11388E0, 0x84, 0xC636B896D8191BCC},
+    {"text measure", kTextMeasure, 0x257, 0xD1BECF90B85D50AA},
+    {"text draw", kTextDraw, 0x9, 0x1FF136490574DAE0},
+    {"text renderer draw", 0x113B4B0, 0x106C, 0x5B28649E627DA012},
+    {"text flush", kTextFlush, 0x9, 0x9F2FCD3A8BCD3B1B},
+    {"text renderer flush", 0x113C5C0, 0x127, 0x96DA45BA9FC16254},
+    {"text object destruction", kTextEnd, 0x79, 0x6D074C61B1186916},
+};
+
+constexpr Code kRoomCode[] = {
+    {"room draw dispatch", 0x7FA970, 0x291, 0x3D6A8B2C16BE38C7},
+    {"room after-draw thunk", 0x7D6C30, 0x5, 0x66B2A3BE4A140012},
+    {"room after-draw", 0x7E57C0, 0x3, 0x69BC481C23DE2D4D},
+    {"UI orthographic projection", 0x4E000, 0xF5, 0x4ACE14A1FA13B040},
+    {"UI shader transform", 0x112F590, 0x673, 0x5647453FEC87AE40},
+};
+
 constexpr Code kCode[] = {
     {"System::Update", kSystemUpdate, 0x9FB, 0x7F0564B7A3BF2724},
     {"CharacterGhostCamera factory", kGhostCameraFactory, 0x1DC, 0x6F6DB55CC4005B3C},
@@ -216,23 +242,11 @@ constexpr Code kCode[] = {
     {"rescue message HUD factory", kRescueHudFactory, 0x257, 0x749A67C36F8046A6},
     {"rescue message HUD construction", 0x8083A0, 0x21, 0xACDF1813DE907759},
     {"rescue message HUD destructor", 0x8083D0, 0x34, 0xA084B6851CE38CB1},
-    {"rescue message draw", 0x808410, 0x2D3, 0xA77E2074C4927895},
     {"HUD view matrix", 0x7FC6D0, 0x80, 0x47DF0BDBF265D186},
     {"HUD projection", 0x7FC630, 0x94, 0x1933F2BD66CA6745},
     {"HUD screen point", kHudScreenPoint, 0x298, 0x8E1D5E60A18102D9},
     {"HUD screen transform", kHudTransform, 0x23E, 0x7128546B2A55BAA6},
     {"wstring deallocation", kStringFree, 0x62, 0x001F8BD145A9B42F},
-    {"font text object", kTextBegin, 0x4F, 0x9B63E0BB4001FB42},
-    {"text object construction", 0x11379B0, 0xFA, 0x26813887C10E97EB},
-    {"text style", kTextStyle, 0x9, 0x6EF651AD1E09BE2A},
-    {"text renderer style", 0x113B2A0, 0x1F5, 0x27667DDC1ADBAFB7},
-    {"text style copy", 0x11388E0, 0x84, 0xC636B896D8191BCC},
-    {"text measure", kTextMeasure, 0x257, 0xD1BECF90B85D50AA},
-    {"text draw", kTextDraw, 0x9, 0x1FF136490574DAE0},
-    {"text renderer draw", 0x113B4B0, 0x106C, 0x5B28649E627DA012},
-    {"text flush", kTextFlush, 0x9, 0x9F2FCD3A8BCD3B1B},
-    {"text renderer flush", 0x113C5C0, 0x127, 0x96DA45BA9FC16254},
-    {"text object destruction", kTextEnd, 0x79, 0x6D074C61B1186916},
     {"view camera switch", kSetViewCamera, 0x18D, 0xF859E0B97E448F2F},
     {"weak_from_this", kWeakFromThis, 0x9C, 0x580BFED010D5E37E},
     {"camera flush", 0x1195A80, 0x159, 0xFAAA5CBBF9469555},
@@ -397,6 +411,55 @@ std::uintptr_t AttachHud(std::uintptr_t camera, std::uint32_t factory, HudParam&
 // HudPlayer_RescueMessage's table with DrawCaption as its draw, after the RTTI locator. Filled by Install.
 std::uintptr_t captionVtable[1 + std::size(kRescueHudSlots)] = {};
 
+void DrawText(void* context, float* matrix, const wchar_t* label, float scale, float align) {
+    const auto font = Ptr(reinterpret_cast<std::uintptr_t>(game) + kFont);
+    if (!font) return;
+    // 808410's outlined text style, with the caller's scale.
+    TextStyle style{{At<float>(font + 0x80), scale, scale, At<float>(font + 0x8C), At<float>(font + 0x90),
+                     At<float>(font + 0x94)},
+                    1,
+                    {0, 0, 0, 1},
+                    2.5f,
+                    {At<std::int32_t>(font + 0xB0), At<std::int32_t>(font + 0xB4)}};
+    alignas(16) unsigned char text[0x38];
+    reinterpret_cast<TextBeginFn>(game + kTextBegin)(reinterpret_cast<void*>(font + 8), text);
+    reinterpret_cast<TextStyleFn>(game + kTextStyle)(text, context, &style);
+    alignas(16) float size[4];
+    reinterpret_cast<TextMeasureFn>(game + kTextMeasure)(text, size, label, -1, false);
+    matrix[12] -= size[0] * align;
+    matrix[13] -= size[1] * 0.5f;
+    alignas(16) const float white[4] = {1, 1, 1, 1};
+    reinterpret_cast<TextDrawFn>(game + kTextDraw)(text, context, matrix, white, label, -1);
+    reinterpret_cast<TextFlushFn>(game + kTextFlush)(text, context);
+    reinterpret_cast<TextEndFn>(game + kTextEnd)(text);
+}
+
+// HUiRoom's slot 16 runs after its layout draws, only when the root is visible (7FAB70..7FABCB).
+// The native implementation is a no-op. Use the same 1920x1080 projection as 7FAA49..7FAA86.
+void DrawRoomVersion(void* room, void* context) {
+    reinterpret_cast<void (*)(void*, void*)>(game + 0x7D6C30)(room, context);
+    static bool failed = false;
+    if (failed) return;
+    if (!Guarded([&] {
+        const auto shader = Ptr(reinterpret_cast<std::uintptr_t>(game) + 0x2139A98);
+        if (!shader || !Ptr(reinterpret_cast<std::uintptr_t>(game) + kFont)) return;
+        alignas(16) const float view[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+        alignas(16) float projection[16];
+        using OrthoFn = float* (*)(float*, float, float, float, float, float, float);
+        reinterpret_cast<OrthoFn>(game + 0x4E000)(projection, 960, -540, 1920, 1080, 0, -4000);
+        using TransformFn = void (*)(void*, void*, const float*, const float*);
+        reinterpret_cast<TransformFn>(game + 0x112F590)(reinterpret_cast<void*>(shader), context, view, projection);
+        wchar_t version[48];
+        std::swprintf(version, std::size(version), L"EDF6Coop %d.%d.%d",
+                      EDF6COOP_VERSION_MAJOR, EDF6COOP_VERSION_MINOR, EDF6COOP_VERSION_PATCH);
+        alignas(16) float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 930, 510, -600, 1};
+        DrawText(context, matrix, version, 0.85f, 1.0f);
+    })) {
+        failed = true;
+        Log("LOBBY version label stopped after a drawing fault; restart the game");
+    }
+}
+
 // The caption's draw, in place of the rescue message's (808410): the same calls with the watched teammate's name for
 // the text, centred a tenth of the view's height from its top. The name comes from 7FFBD0, as the name indicators
 // get theirs in their own draw (804EBF). Runs where the game draws its HUD, with no guard, so it calls only the
@@ -422,24 +485,16 @@ void DrawCaption(void* hud, void* context, const std::int32_t* viewport) {
         reinterpret_cast<HudScreenPointFn>(game + kHudScreenPoint)(hud, matrix + 12, place, viewport);
         std::memcpy(reinterpret_cast<void*>(at + kHudMatrix), matrix, sizeof(matrix));
         reinterpret_cast<HudTransformFn>(game + kHudTransform)(hud, context, viewport);
-        // 808410's style: the font's defaults, scale 1.33, then 1, black and 2.5.
-        TextStyle style{{At<float>(font + 0x80), 1.33f, 1.33f, At<float>(font + 0x8C), At<float>(font + 0x90),
-                         At<float>(font + 0x94)},
-                        1,
-                        {0, 0, 0, 1},
-                        2.5f,
-                        {At<std::int32_t>(font + 0xB0), At<std::int32_t>(font + 0xB4)}};
-        alignas(16) unsigned char text[0x38];
-        reinterpret_cast<TextBeginFn>(game + kTextBegin)(reinterpret_cast<void*>(font + 8), text);
-        reinterpret_cast<TextStyleFn>(game + kTextStyle)(text, context, &style);
-        alignas(16) float size[4];
-        reinterpret_cast<TextMeasureFn>(game + kTextMeasure)(text, size, name.Chars(), -1, false);
-        matrix[12] -= size[0] * 0.5f;
-        matrix[13] -= size[1] * 0.5f;
-        alignas(16) const float white[4] = {1, 1, 1, 1};
-        reinterpret_cast<TextDrawFn>(game + kTextDraw)(text, context, matrix, white, name.Chars(), -1);
-        reinterpret_cast<TextFlushFn>(game + kTextFlush)(text, context);
-        reinterpret_cast<TextEndFn>(game + kTextEnd)(text);
+        DrawText(context, matrix, name.Chars(), 1.33f, 0.5f);
+
+    }
+    if (slot >= 0) {
+        alignas(16) const float place[4] = {viewport[2] * 0.5f, viewport[3] * 0.94f, -600.0f, 1.0f};
+        alignas(16) float matrix[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0};
+        reinterpret_cast<HudScreenPointFn>(game + kHudScreenPoint)(hud, matrix + 12, place, viewport);
+        std::memcpy(reinterpret_cast<void*>(at + kHudMatrix), matrix, sizeof(matrix));
+        reinterpret_cast<HudTransformFn>(game + kHudTransform)(hud, context, viewport);
+        DrawText(context, matrix, L"W: switch player / E: switch camera", 1.0f, 0.5f);
     }
     reinterpret_cast<StringFreeFn>(game + kStringFree)(&name);
 }
@@ -584,6 +639,7 @@ void Follow(std::uintptr_t system, float elapsed) {
     std::uintptr_t object = roster.local.object;
     for (std::size_t i = 0; i < roster.remotes; ++i)
         if (roster.remote[i].slot == target) object = roster.remote[i].object;
+    if (target != kOwnCamera) TraceSpectatorAim(reinterpret_cast<void*>(object), freeCam);
     const std::uintptr_t local = roster.local.object;
     const float ownLook[2] = {At<float>(local + kLookPitch),
                              At<float>(local + kLookYaw) + At<float>(local + kLookYawOffset)};
@@ -715,6 +771,27 @@ VtableSlot HudVisibleSlot() {
     return {"ghost camera HUD visibility slot", kGhostCameraHudVisibleSlot, kGhostCameraHudVisible};
 }
 
+bool InstallLobbyVersion(unsigned char* base) {
+    constexpr std::uint32_t slot = 0x180ACC0;
+    if (!SlotTargets(base + slot, reinterpret_cast<std::uint64_t>(base), 0x7D6C30)) {
+        Log("LOBBY version label OFF: unexpected room draw slot");
+        return false;
+    }
+    for (const auto& codes : {std::span<const Code>(kTextCode), std::span<const Code>(kRoomCode)}) {
+        for (const Code& code : codes) {
+            if (Fnv1a(base + code.rva, code.size) != code.hash) {
+                Log("LOBBY version label OFF: EDF+%X (%s) differs; nothing changed", code.rva, code.name);
+                return false;
+            }
+        }
+    }
+    game = base;
+    const auto draw = reinterpret_cast<std::uintptr_t>(&DrawRoomVersion);
+    if (!WriteCode(base + slot, reinterpret_cast<const unsigned char*>(&draw), sizeof(draw))) return false;
+    Log("LOBBY: mod version shown in the bottom right of the room screen");
+    return true;
+}
+
 bool Install(unsigned char* base) {
     static ThunkPage page;
     const CallSite site = UpdateCall();
@@ -735,6 +812,12 @@ bool Install(unsigned char* base) {
         Log("SPECTATE: EDF+%X is not the rescue message's table; a downed player keeps their own camera",
             kRescueHudVtable);
         return false;
+    }
+    for (const Code& code : kTextCode) {
+        if (Fnv1a(base + code.rva, code.size) != code.hash) {
+            Log("SPECTATE: EDF+%X (%s) is not the expected code; nothing changed", code.rva, code.name);
+            return false;
+        }
     }
     for (const Code& code : kCode) {
         if (Fnv1a(base + code.rva, code.size) != code.hash) {

@@ -14,6 +14,8 @@ Everyone in a room should run the same version. A host refuses a player whose ne
 
 Installing renames an old `EDF6DirectNet.dll` / `EDF6MultiSlot.dll` to `.disabled`. Their settings files stay but are not read. The installer uninstalls a standalone EDF6Spectate: it deletes `EDF6Spectate.dll`, a `.disabled` copy of it and `EDF6Spectate.log`.
 
+The online room screen shows the running mod version in the bottom right, even with `SpectateWhenDown=0`.
+
 ## What it fixes
 
 | Symptom | Cause | What the plugin does | Who needs it |
@@ -33,6 +35,8 @@ Everything is on by default, except the direct link, which the host enables.
 In an online room, when you go down and wait for a revive, your view switches to the standing teammate with the lowest slot. If they go down or leave, it moves to the next one. Being revived, or every teammate being down, returns your own camera.
 
 Press **W** while down to watch the next standing teammate instead. It wraps round, and the one you chose stays watched until they go down or leave. Keyboard only, not rebindable. W is ignored while the chat box is open, so typing a w does not move the camera, and while the game window is not in the foreground. Holding W as you go down does not count as a press.
+
+While spectating, the bottom of the screen shows `W: switch player / E: switch camera` in both camera modes.
 
 Press **E** while down to switch between the free camera and the locked camera. E follows the same rules as W (keyboard only, ignored while the chat box is open, while the window is not in the foreground and while standing). The choice lasts until you quit the game; it starts free.
 
@@ -130,11 +134,13 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
 | `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; W picks the next one, E switches between the free and the locked camera (see above). Only your own screen. `0` = your own camera (original) |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
-| `[Diagnostics] Player` | `1` | Bounded player movement traces for jitter diagnosis. `0` disables them |
+| `[Diagnostics] Player` | `1` | Player movement and aim traces for jitter and facing diagnosis. `0` disables them |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
 | `CrashDump` | `0` | Also write `EDF6Coop-crash.dmp` for the first crash. It holds game memory (room name, chat), so turn it on only when asked |
 
 Values outside the documented `LinkTimeoutMs` and `GraceSeconds` ranges produce a `CONFIG` warning and use their defaults.
+
+Player aim diagnostics record selected native aim records at send and receive, then remote facing after network update and while spectating. Match user, seq and senderMs within the same room across logs. The sent yaw includes the logged offset; received yaw already includes it. These are read-only observations, not a fix for the reported facing reversal after a hit. Keep [Diagnostics] Player=1 on all machines for a capture. If the reversal happens, note the time and watched player, then collect everyone's logs after closing the game.
 
 Player motion diagnostics are on by default. A correction of at least 0.25 m, a warp, or a sample age of at least 200 ms captures up to eight preceding and sixteen current/following driven frames. Each object can trigger once per 30 seconds, with a total limit of 96 `PLAYER motion` lines per 30 seconds. The lines record received positions and velocities, proxy and object positions, observed movement, requested corrections and the estimated local velocity. `t` is the original hook time in milliseconds; preceding frames are logged later. These traces do not prove that physics applied a requested correction. Set `[Diagnostics] Player=0` to disable them. When reporting jitter, note the time and collect the host and affected joiners' logs after closing the game.
 

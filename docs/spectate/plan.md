@@ -346,3 +346,17 @@ Live checks, online, with two standing teammates if possible:
    is in the room): the name shows as in the name indicators.
 6. With the game's platform-name setting on, the name has the platform name in
    brackets, as the indicators do.
+
+## Control hint and lobby version
+
+User request, 2026-10-27: show W and E controls at the bottom while spectating,
+and the current mod version at the bottom right of the online room screen.
+Tracker issue #12010 owns implementation and verification.
+
+Acceptance: both spectator modes show the hint without obscuring the chat log;
+W and E remain ignored during chat entry. Revival, all teammates down and mission
+exit return the original HUD. The room label matches the installed DLL version,
+remains visible with SpectateWhenDown disabled, and fits the room screen on
+Windows and Proton at the player's resolution. Opening room submenus must not
+leave the label over unrelated screens. Native ABI checks supplement these live
+checks; they cannot establish the visible result.

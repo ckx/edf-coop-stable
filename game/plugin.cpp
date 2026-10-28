@@ -186,6 +186,7 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     // Only this machine's radar: nothing goes over the network.
     if (GetPrivateProfileIntW(L"Display", L"RadarItemColors", 1, iniPath) != 0) InstallRadarItemColors(base);
     else Log("RadarItemColors=0: every pickup on the radar stays green");
+    spectate::InstallLobbyVersion(base);
     if (GetPrivateProfileIntW(L"Display", L"SpectateWhenDown", 1, iniPath) != 0) spectate::Install(base);
     else Log("SpectateWhenDown=0: a downed player keeps their own camera");
     if (GetPrivateProfileIntW(L"Diagnostics", L"Laser", 1, iniPath) != 0) InstallLaserTrace(base);

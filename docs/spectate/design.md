@@ -202,3 +202,11 @@ runs.
   bound actions would be the route for these (`research.md`, "Teammate cycling
   input").
 - Whether to watch while the local player has bled out, if the game has such a state.
+
+## On-screen controls and version
+
+From 3.6.1, the spectator camera shows `W: switch player / E: switch camera`
+at the bottom in both modes, by user request on 2026-10-27. The hint belongs to
+the spectator caption and disappears with that camera on revival or return.
+The online room screen shows the running EDF6Coop version in the bottom right,
+including when `SpectateWhenDown=0`. It does not publish a new lobby attribute.

@@ -30,12 +30,17 @@ Out-of-range LinkTimeoutMs and GraceSeconds values produce a CONFIG warning and 
 
 Player motion diagnostics are on by default. A correction of at least 0.25 m, a warp, or a sample age of at least 200 ms captures up to eight preceding and sixteen current/following driven frames. Each object can trigger once per 30 seconds, with a total limit of 96 PLAYER motion lines per 30 seconds. The lines record received positions and velocities, proxy and object positions, observed movement, requested corrections and the estimated local velocity. t is the original hook time in milliseconds; preceding frames are logged later. These traces do not prove that physics applied a requested correction. Set [Diagnostics] Player=0 to disable them. When reporting jitter, note the time and collect the host and affected joiners' logs after closing the game.
 
+The online room screen shows the running mod version in the bottom right, even with SpectateWhenDown=0.
+
+Player aim diagnostics record selected native aim records at send and receive, then remote facing after network update and while spectating. Match user, seq and senderMs within the same room across logs. The sent yaw includes the logged offset; received yaw already includes it. These are read-only observations, not a fix for the reported facing reversal after a hit. Keep [Diagnostics] Player=1 on all machines for a capture. If the reversal happens, note the time and watched player, then collect everyone's logs after closing the game.
+
 [Watching a teammate while down]
 Online, when you go down, your view switches to the standing teammate with the lowest slot, and moves to the
 next one when they go down or leave. Press W to watch the next standing teammate instead (keyboard only;
 ignored while the chat box is open, so a typed w does not move the camera). The camera orbits them and
 points where you look: turn it with your normal look controls (mouse or right stick). Press E to switch to
 the locked camera and back; the choice lasts until you quit, and E follows the same rules as W.
+While spectating, both modes show W: switch player / E: switch camera at the bottom of the screen.
 The locked view smooths received aim on foot. In a vehicle it follows the seated teammate's heading
 with level pitch and the same camera offsets. It does not copy their exact screen or independent gun
 aim, and cannot recover aim updates lost on the network.

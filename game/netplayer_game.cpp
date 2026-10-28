@@ -4,11 +4,14 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <vector>
 
 #include "code.h"
+#include "guard.h"
 #include "identity.h"
 #include "log.h"
 #include "netfeature.h"
@@ -138,6 +141,93 @@ struct MotionTrace {
     double nextBurstMs = 0.0;
 };
 PlayerTracks<MotionTrace> motionTraces;
+// The sequence belongs to the existing position block in the same record. No diagnostic bytes go on the wire.
+struct AimObservation {
+    float pitch = 0, yaw = 0, offset = 0, body = 0, hp = 0;
+    Vec3 forward;
+    bool sync = false, vehicle = false;
+    std::uintptr_t user = 0;
+};
+struct AimTrace {
+    AimObservation received;
+    std::uint32_t seq = 0, senderMs = 0;
+    double receivedMs = 0, loggedMs = -1000, frameMs = -1000;
+    float hp = -1;
+    bool have = false, pending = false;
+};
+PlayerTracks<AimTrace> aimTraces;
+std::atomic<bool> aimFailed{false};
+
+bool ObserveAim(void* soldier, AimObservation& out) {
+    if (aimFailed || !settings.diagnostics) return false;
+    if (!Guarded([&] {
+        out.pitch = Get<float>(soldier, 0x1230);
+        out.yaw = Get<float>(soldier, 0x1234);
+        out.offset = Get<float>(soldier, 0x1E44);
+        out.body = Get<float>(soldier, 0x1244);
+        out.hp = Get<float>(soldier, 0x2F8);
+        out.forward = {Get<float>(soldier, 0x80), Get<float>(soldier, 0x84), Get<float>(soldier, 0x88)};
+        out.sync = Get<std::uint8_t>(soldier, kSyncEnabled) != 0;
+        const auto control = Get<void*>(soldier, 0x1550);
+        out.vehicle = control && Get<int>(control, 8) > 0;
+        const auto user = Get<void*>(soldier, 0x1ED0);
+        out.user = user ? Get<std::uintptr_t>(user, 0x18) : 0;
+    })) {
+        aimFailed = true;
+        Log("PLAYER aim diagnostics stopped after an unreadable player; sync is unchanged");
+        return false;
+    }
+    return true;
+}
+
+void LogAim(const char* event, void* soldier, const AimObservation& a, const AimTrace& trace, double now) {
+    char user[33]{};
+    ProductUserIdText(reinterpret_cast<const void*>(a.user), user, sizeof(user));
+    Log("PLAYER aim event=%s user=%s object=%p seq=%u senderMs=%u ageMs=%.1f "
+        "pitch=%.5f yaw=%.5f offset=%.5f body=%.5f forward=(%.4f,%.4f,%.4f) hp=%.1f sync=%d vehicle=%d "
+        "received=(%.5f,%.5f)",
+        event, user[0] ? user : "unknown", soldier, trace.seq, trace.senderMs, now - trace.receivedMs,
+        a.pitch, a.yaw, a.offset, a.body, a.forward.x, a.forward.y, a.forward.z, a.hp,
+        a.sync ? 1 : 0, a.vehicle ? 1 : 0, trace.received.pitch, trace.received.yaw);
+}
+
+// Called under lock. Select the same sequence window at both ends, plus health transitions locally.
+// Sender snapshots also cover records without native aim, so a stalled aim writer stays distinguishable from loss.
+void TraceAimRecord(const char* event, void* soldier, const AimObservation& a, const PlayerSample& sample, double now) {
+    AimTrace& t = *aimTraces.Find(soldier, now, true);
+    const bool selected = sample.seq % 30 < 3 || (a.hp != t.hp && now - t.loggedMs >= 250);
+    t.received = a;
+    t.seq = sample.seq;
+    t.senderMs = sample.senderMs;
+    t.receivedMs = now;
+    t.hp = a.hp;
+    t.have = true;
+    t.pending = selected;
+    if (selected) {
+        LogAim(event, soldier, a, t, now);
+        t.loggedMs = now;
+    }
+}
+
+void TraceAimUpdate(void* soldier, double now) {
+    if (!settings.diagnostics || aimFailed) return;
+    AcquireSRWLockExclusive(&lock);
+    AimTrace* t = aimTraces.Find(soldier, now, false);
+    if (t && t->have) {
+        AimObservation a;
+        if (ObserveAim(soldier, a)) {
+            const double delta = std::remainder(static_cast<double>(a.yaw) - t->received.yaw, 6.283185307179586);
+            if (t->pending || (now - t->loggedMs >= 1000 && (a.hp != t->hp || std::fabs(delta) > 0.5))) {
+                LogAim("update", soldier, a, *t, now);
+                t->loggedMs = now;
+                t->hp = a.hp;
+            }
+        }
+        t->pending = false;
+    }
+    ReleaseSRWLockExclusive(&lock);
+}
+
 double motionWindowMs = 0.0;
 unsigned motionLines = 0;
 
@@ -153,6 +243,7 @@ void ObservePlayerRoom(const LobbyView& view) {
         sent = {};
         remotes = {};
         motionTraces = {};
+        aimTraces = {};
         lobby = view.lobbyId;
         self = view.self;
         owner = view.owner;
@@ -233,6 +324,8 @@ std::uint16_t MaskHook(void* soldier) {
 
 template <int F>
 void WriteHook(void* soldier, void* writer, std::uint16_t mask) {
+    AimObservation aim;
+    const bool observed = (mask & kPlayerBlockBit) && ObserveAim(soldier, aim);
     GameFn<RecordFn>(kOriginal[F][kWrite])(soldier, writer, mask);
     if (!(mask & kPlayerBlockBit)) return;
     const double now = NowMs();
@@ -241,6 +334,7 @@ void WriteHook(void* soldier, void* writer, std::uint16_t mask) {
     SendTrack* track = sent.Find(soldier, now, true);
     const PlayerSample sample = MakeSample(*track, RecordPosition(soldier), now);
     const bool written = EncodePlayerBlock(sample, block, sizeof(block)) && WriteBinElement(writer, block, sizeof(block));
+    if (written && observed) TraceAimRecord((mask & 2) ? "send" : "send-noaim", soldier, aim, sample, now);
     counters.sent += written ? 1 : 0;
     LogCounters(now);
     ReleaseSRWLockExclusive(&lock);
@@ -262,7 +356,11 @@ void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
         ++counters.refused;
     } else if (Remote(soldier)) {
         RemoteTrack* track = remotes.Find(soldier, now, true);
-        counters.received += AcceptSample(*track, sample, now, params) ? 1 : 0;
+        const bool accepted = AcceptSample(*track, sample, now, params);
+        counters.received += accepted ? 1 : 0;
+        AimObservation aim;
+        if ((mask & 2) && ObserveAim(soldier, aim))
+            TraceAimRecord(accepted ? "receive" : "receive-stale", soldier, aim, sample, now);
     }
     ReleaseSRWLockExclusive(&lock);
 }
@@ -284,11 +382,16 @@ void UpdateHook(void* soldier) {
     const bool drive = track && TrackFresh(*track, now, params);
     if (track && !drive) ResetSteps(*track);
     ReleaseSRWLockExclusive(&lock);
-    if (!drive) return original(soldier);
+    if (!drive) {
+        original(soldier);
+        TraceAimUpdate(soldier, now);
+        return;
+    }
     // The game's correction (EDF+77AD70) does nothing for a settled control without new data; our step replaces it.
     Put<std::uint8_t>(soldier, kSyncSettled, 1);
     Put<std::uint8_t>(soldier, kSyncNewData, 0);
     original(soldier);
+    TraceAimUpdate(soldier, now);
 
     AcquireSRWLockExclusive(&lock);
     track = remotes.Find(soldier, now, false);
@@ -343,6 +446,19 @@ void* Handler(int family, Kind kind) {
 int Clamped(UINT value, int low, int high) { return std::clamp(static_cast<int>(value), low, high); }
 
 }  // namespace
+
+void TraceSpectatorAim(void* soldier, bool freeCamera) {
+    if (!settings.diagnostics || aimFailed) return;
+    const double now = NowMs();
+    AcquireSRWLockExclusive(&lock);
+    AimTrace* t = aimTraces.Find(soldier, now, false);
+    if (t && t->have && now - t->frameMs >= 1000) {
+        AimObservation a;
+        if (ObserveAim(soldier, a)) LogAim(freeCamera ? "spectate-free" : "spectate-locked", soldier, a, *t, now);
+        t->frameMs = now;
+    }
+    ReleaseSRWLockExclusive(&lock);
+}
 
 PlayerSyncSettings ReadPlayerSyncSettings(const wchar_t* iniPath) {
     PlayerSyncSettings s;
@@ -423,6 +539,9 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
         "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms",
         Sites().size(), flush ? " + flush interval" : "", settings.sendIntervalFrames, params.maxExtrapolateMs,
         params.tauMs, params.snapDistance, params.feedForward * 100.0f, flush ? flushMs : 90);
+    if (settings.diagnostics)
+        Log("PLAYER aim diagnostics ON: paired native aim records, post-update and spectator facing; match user, "
+            "seq and senderMs within the same room. send yaw includes offset on the wire");
     if (settings.diagnostics)
         Log("PLAYER motion diagnostics ON: correction >= 0.25 m, warp or sample age >= 200 ms captures "
             "8 prior and 16 current/following driven frames; one burst per object per 30 seconds, "

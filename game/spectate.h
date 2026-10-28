@@ -63,4 +63,7 @@ void ShowCamera(unsigned char* game, std::uintptr_t view, std::uintptr_t camera)
 // plugin through a stub page of its own. False (logged, nothing changed) otherwise. `base` is the supported EDF.dll.
 bool Install(unsigned char* base);
 
+// Independent of SpectateWhenDown. Hooks only the online room UI's after-draw slot.
+bool InstallLobbyVersion(unsigned char* base);
+
 }  // namespace multislot::spectate

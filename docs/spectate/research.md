@@ -1141,3 +1141,33 @@ and native camera smoothing remain in use.
   sets the text-entry byte. Decided input: W (plan M4).
 - Whether the orbit camera follows the downed player's look input in a live room,
   and whether the health gauge shows in both camera modes from 3.4.0.
+
+## Control hint and lobby version, 2026-10-27
+
+The user requested a bottom spectator control hint and a bottom-right lobby version.
+The caption's existing native text renderer now also draws the hint at 50% of the
+viewport width and 94% of its height. It uses the same camera visibility and live
+player-name lookup as the caption, in both modes. No extra HUD object is retained.
+
+`HUiRoom` has its primary vtable at `0x180AC40`. Slot 2 points to `0x7FA970`,
+which draws the UI root. At `0x7FAB70` it checks visibility through slot 15, draws
+its layout at `0x7FABA9`, then calls slot 16 with the root in RCX and draw context
+in RDX at `0x7FABCB`. The room's slot 16 at `0x180ACC0` points to `0x7D6C30`,
+a jump to the empty `0x7E57C0`. Only this room slot is replaced.
+
+The version label repeats the root's orthographic projection from
+`0x7FAA49..0x7FAA86`: `0x4E000(out, 960, -540, 1920, 1080, 0, -4000)`.
+The native projection maps positive Y down. The text's right edge is at X=930,
+with its vertical center at Y=510 and Z=-600. The shader transform setter is
+`0x112F590(shader, context, view, projection)`, called by the HUD transform at
+`0x7FC8F0`; its singleton is `0x2139A98`. The font singleton `0x20B29C0` also
+serves ordinary menu text, including room code at `0x8F966A`.
+
+The native text calls are shared by the name, hint and version label. The lobby
+hook verifies its slot, dispatch, thunk, projection, shader setter and text code
+before writing. A guarded drawing fault stops the label for the session. It
+installs independently of the spectator setting. `RoomLabelGameCode` exercises
+the installed hook and real projection with renderer spies, including foreign-slot
+refusal, missing-font handling, version text and right alignment. This establishes
+the calling contract, not the rendered placement or interaction with menu panels.
+Live Windows and Proton checks remain required.
