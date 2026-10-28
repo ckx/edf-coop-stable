@@ -208,7 +208,7 @@ RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetP
         // of a player standing still was shoved +-35 cm at 30 Hz, and a landed copy was pushed at the step cap
         // (the host's motion traces of 2026-10-22). A standing copy whose requests are blocked and a running copy
         // braked to a standstill look the same in one step (nothing moves either way), so the estimate so far
-        // decides: a copy that was moving against the request is being braked, and the request counts as applied;
+        // decides: a copy moving against the request can be braked; when nothing moves, that credit decays;
         // otherwise only what moved along the request was applied. Per axis, as the ground and most walls block.
         // Summed over the window, so a push the ground undoes the next frame cancels instead of reading as motion
         // either way; measured over the actual time, hitches included: a per-step displacement mistakes a longer
@@ -225,8 +225,18 @@ RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetP
             added = added + track.addedWindow[i];
             overMs += track.elapsedWindow[i];
         }
-        const auto axis = [](float m, float a, float prior) {
-            if (a == 0.0f || prior * a < 0.0f) return m - a;
+        const float unobservedDecay = std::exp(-static_cast<float>(elapsedMs) / (std::max)(params.tauMs, 1.0f));
+        const auto axis = [overMs, unobservedDecay](float m, float a, float prior) {
+            if (a == 0.0f) return m;
+            if (prior * a < 0.0f) {
+                // No observed motion cannot prove a brake was applied. Bound that credit
+                // by the prior and let it decay, so an unapplied request cannot sustain its own evidence.
+                if (m == 0.0f) {
+                    const float credit = std::fabs(prior) * static_cast<float>(overMs / 1000.0) * unobservedDecay;
+                    return m - std::clamp(a, -credit, credit);
+                }
+                return m - a;
+            }
             const float sign = a < 0.0f ? -1.0f : 1.0f;
             return m - sign * std::clamp(m * sign, 0.0f, std::fabs(a));
         };

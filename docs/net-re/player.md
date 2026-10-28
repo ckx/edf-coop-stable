@@ -188,3 +188,25 @@ of whatever it does, it does not model it.
 
 Not established by these logs: why only every third record is delivered, and whether the players' reports of
 each other's shots have a cause in the transport (the sessions logged were lossless with regular delivery).
+
+## 2026-10-28 braking credit after motion stops
+
+Issue #12011 covers the remaining braking exception in `StepRemote`. A copy
+moving upward at 1 m/s, then held on a surface 5 cm above its sender, retained
+an upward velocity estimate even after becoming stationary. Counting its
+blocked downward request as an applied brake grew that estimate to 60 m/s.
+The reproduction is in `docs/reviews/2026-10-28-aim-jitter.md`.
+
+When an axis has zero net observed displacement over the measurement window,
+its inferred braking credit is now bounded by the prior velocity and decays
+with elapsed time using the existing convergence time constant. A request
+cannot grow its own evidence while the copy stays stationary. Nonzero observed
+motion retains the prior braking calculation. This is deliberately a correction
+for the reproduced stationary case, not a model of partial collision response.
+
+The regression covers both correction signs, the transition from motion to a
+blocked copy and resumed motion. The original blocked-from-rest, real braking,
+stops, reversals and uneven-frame tests remain. With the same review probe,
+the inferred speed falls below 0.01 m/s by frame 120, and the correction settles
+to the 5 cm position error's 0.0094 m share rather than reaching the 1 m cap.
+The support surface is simulated; live jitter improvement remains unverified.

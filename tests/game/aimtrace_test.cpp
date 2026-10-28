@@ -82,15 +82,48 @@ int main(int argc, char** argv) {
         Check(Get<std::uint64_t>(reader.data(), kSerializeReadPos) == size, "reader consumes exactly the record");
     }
     // Reproduce an intervening local pose change without pretending to simulate the game's ragdoll physics.
-    Put(receiver.data(), 0x1234, 1.5f);
+    Put(receiver.data(), 0x1234, 0.75f);
+    Put(receiver.data(), 0x1230, -0.5f);
+    Put(receiver.data(), 0x1248, 3.0f);
     TraceSpectatorAim(receiver.data(), false);
-    Check(Get<float>(receiver.data(), 0x1234) == 1.5f, "spectator diagnostic never writes the observed aim");
+    Check(Get<float>(receiver.data(), 0x1234) == 0.75f, "spectator diagnostic never writes the observed aim");
     alignas(16) std::array<unsigned char, 0x600> staleReader{};
     reinterpret_cast<void* (*)(void*, const void*, std::size_t)>(game + 0x79A430)(
         staleReader.data(), firstRecord.data(), firstSize);
     read(receiver.data(), staleReader.data(), 2 | kPlayerBlockBit);
-    Check(std::fabs(Get<float>(receiver.data(), 0x1234) - 1.5f) < 0.01f,
-          "stale custom position block does not hide the native reader's applied aim");
+    Check(std::fabs(Get<float>(receiver.data(), 0x1234) - 0.75f) < 0.01f,
+          "stale paired aim preserves the current yaw");
+    Check(Get<float>(receiver.data(), 0x1230) == -0.5f && Get<float>(receiver.data(), 0x1248) == 3.0f,
+          "stale aim preserves pitch and the native accumulator");
+    Check(Get<std::uint64_t>(staleReader.data(), kSerializeReadPos) == firstSize,
+          "a stale aim record is still fully consumed");
+    alignas(16) std::array<unsigned char, 0x600> delayedAim{}, newerPosition{}, latestAim{}, nativeOnly{};
+    Put(sender.data(), 0x1234, 2.0f);
+    write(sender.data(), delayedAim.data(), 2 | kPlayerBlockBit);
+    write(sender.data(), newerPosition.data(), kPlayerBlockBit);
+    const auto deliver = [&](const auto& record, std::uint16_t mask) {
+        alignas(16) std::array<unsigned char, 0x600> buffer{};
+        const auto size = Get<std::uint64_t>(record.data(), kSerializeEnd);
+        reinterpret_cast<void* (*)(void*, const void*, std::size_t)>(game + 0x79A430)(
+            buffer.data(), record.data() + kSerializeData, static_cast<std::size_t>(size));
+        read(receiver.data(), buffer.data(), mask);
+        Check(Get<std::uint64_t>(buffer.data(), kSerializeReadPos) == size, "full reordered record consumed");
+    };
+    deliver(newerPosition, kPlayerBlockBit);
+    deliver(delayedAim, 2 | kPlayerBlockBit);
+    Check(std::fabs(Get<float>(receiver.data(), 0x1234) - 2.5f) < 0.01f,
+          "newer aim survives an older position sequence when the intervening record had no aim");
+    Put(sender.data(), 0x1234, -1.0f);
+    write(sender.data(), latestAim.data(), 2 | kPlayerBlockBit);
+    deliver(latestAim, 2 | kPlayerBlockBit);
+    deliver(delayedAim, 2 | kPlayerBlockBit);
+    Check(std::fabs(Get<float>(receiver.data(), 0x1234) + 0.5f) < 0.01f,
+          "a delayed aim record cannot rewind a newer received angle");
+    Put(sender.data(), 0x1234, 0.0f);
+    nativeWrite(sender.data(), nativeOnly.data(), 2);
+    deliver(nativeOnly, 2);
+    Check(std::fabs(Get<float>(receiver.data(), 0x1234) - 0.5f) < 0.01f,
+          "native-only records keep their original behavior");
     LogFlush();
     std::ifstream file("aimtrace-test.log", std::ios::binary);
     const std::string text{std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
@@ -99,10 +132,10 @@ int main(int argc, char** argv) {
     Check(text.find("event=send user=") != std::string::npos && text.find("event=receive") != std::string::npos,
           "paired send and receive observations reach the log");
     Check(text.find("event=spectate-locked") != std::string::npos &&
-          text.find("yaw=1.50000") != std::string::npos && text.find("received=(0.25000,-1.50000)") != std::string::npos,
+          text.find("yaw=0.75000") != std::string::npos && text.find("received=(0.25000,-1.50000)") != std::string::npos,
           "frame observation distinguishes current facing from the most recently received aim");
-    Check(text.find("event=receive-stale") != std::string::npos,
-          "diagnostics retain native aim even when the accompanying position sample is rejected");
+    Check(text.find("event=receive-aim-stale") != std::string::npos,
+          "diagnostics identify a rejected paired aim update");
     LogClose();
     std::printf("%d failures\n", failures);
     return failures ? 1 : 0;

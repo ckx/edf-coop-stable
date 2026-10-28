@@ -1,5 +1,9 @@
 # Aim and movement jitter review
 
+Board: #12001 (net-sync)
+Project: mods
+Follow-up issues: #12011 and #12012.
+
 Scope: `4f035fea476f5c4e12bf31ab5d6591675a945764`, player sample generation,
 acceptance and correction, native aim hooks, locked spectator filtering, related
 tests and the unordered transport delivery path.

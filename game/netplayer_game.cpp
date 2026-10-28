@@ -53,6 +53,9 @@ const std::vector<Check>& Checks() {
         {"sync control enable", 0x77AD40, {0x38, 0x11, 0x74, 0x20, 0x88, 0x11, 0x84, 0xD2}},
         {"sync control settled", 0x77ADA1, {0x80, 0x79, 0x20, 0x00}},
         {"sync control read", 0x77AB25, {0x80, 0x7B, 0x22, 0x00, 0x75, 0x0F, 0x0F, 0x28, 0x44, 0x24, 0x20, 0x0F, 0x11, 0x43, 0x10}},
+        {"native aim pitch store", 0x5921DA, {0xF3, 0x0F, 0x11, 0x86, 0x30, 0x12, 0x00, 0x00}},
+        {"native aim yaw and accumulator", 0x5921EA, {0xF3, 0x0F, 0x11, 0x86, 0x34, 0x12, 0x00, 0x00,
+                                                   0x44, 0x89, 0xB6, 0x48, 0x12, 0x00, 0x00}},
         {"record position", 0x77AD03, {0x49, 0x8D, 0x90, 0x90, 0x00, 0x00, 0x00}},
         {"is player", 0x550890, {0x48, 0x83, 0xB9, 0x40, 0x03, 0x00, 0x00, 0x00, 0x75, 0x0D}},
         {"proxy matrix", kProxyMatrix, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0x48, 0x8B, 0x11}},
@@ -128,6 +131,12 @@ Vec3 RecordPosition(const void* soldier) {
 SRWLOCK lock = SRWLOCK_INIT;
 PlayerTracks<SendTrack> sent;
 PlayerTracks<RemoteTrack> remotes;
+struct AimOrder {
+    std::uint16_t seq = 0;
+    double receivedMs = 0;
+    bool have = false;
+};
+PlayerTracks<AimOrder> aimOrder;
 struct MotionFrame {
     double now = 0.0;
     RemoteTrack before;
@@ -242,6 +251,7 @@ void ObservePlayerRoom(const LobbyView& view) {
         // Player addresses can be reused in another room or after a member leaves.
         sent = {};
         remotes = {};
+        aimOrder = {};
         motionTraces = {};
         aimTraces = {};
         lobby = view.lobbyId;
@@ -342,6 +352,12 @@ void WriteHook(void* soldier, void* writer, std::uint16_t mask) {
 
 template <int F>
 void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
+    const bool pairedAim = Remote(soldier) && (mask & 2) && (mask & kPlayerBlockBit);
+    // The native reader must consume the whole record, including unrelated state. Only its three aim
+    // writes are undone if this record is older than the last paired aim, independently of position.
+    const float pitch = pairedAim ? Get<float>(soldier, 0x1230) : 0.0f;
+    const float yaw = pairedAim ? Get<float>(soldier, 0x1234) : 0.0f;
+    const float accumulator = pairedAim ? Get<float>(soldier, 0x1248) : 0.0f;
     GameFn<RecordFn>(kOriginal[F][kRead])(soldier, reader, mask);
     if (!(mask & kPlayerBlockBit)) return;
     // The block is the last element of the record: read it whatever is done with it, and a malformed one is
@@ -358,9 +374,23 @@ void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
         RemoteTrack* track = remotes.Find(soldier, now, true);
         const bool accepted = AcceptSample(*track, sample, now, params);
         counters.received += accepted ? 1 : 0;
+        bool staleAim = false;
+        if (pairedAim) {
+            AimOrder& order = *aimOrder.Find(soldier, now, true);
+            staleAim = order.have && now - order.receivedMs <= params.staleMs &&
+                       static_cast<std::int16_t>(sample.seq - order.seq) <= 0;
+            if (staleAim) {
+                Put(soldier, 0x1230, pitch);
+                Put(soldier, 0x1234, yaw);
+                Put(soldier, 0x1248, accumulator);
+            } else {
+                order = {sample.seq, now, true};
+            }
+        }
         AimObservation aim;
         if ((mask & 2) && ObserveAim(soldier, aim))
-            TraceAimRecord(accepted ? "receive" : "receive-stale", soldier, aim, sample, now);
+            TraceAimRecord(staleAim ? "receive-aim-stale" : accepted ? "receive" : "receive-stale",
+                           soldier, aim, sample, now);
     }
     ReleaseSRWLockExclusive(&lock);
 }

@@ -53,6 +53,9 @@ vehicle presence. Identity comes from the soldier's existing network user.
 - `receive` observes the fields after the native reader. `receive-stale` means
   the custom position block was rejected by its sequence/clock checks, even
   though the native reader has already applied the native part of that record.
+  Since 3.6.2, `receive-aim-stale` instead means an older or repeated paired aim
+  was discarded and the pre-read pitch, yaw and accumulator were restored.
+  Aim freshness is independent of position freshness.
 - `update` observes the same remote object after its native NetworkUpdate.
 - `spectate-free` and `spectate-locked` observe the watched object in the
   spectator frame, with the most recently received aim alongside it.
@@ -79,3 +82,19 @@ time, watched player and mode when it reverses, then close the game and collect
 all logs. Persistent disagreement between the paired angles points to replication;
 agreement at receive followed by a changed frame angle points to a local update;
 correct frame aim with a wrong visible pose requires the pose/camera path next.
+
+## Reordered aim protection, 3.6.2
+
+Issue #12012 adds a separate per-player aim sequence and arrival baseline for
+records carrying both native aim and a valid custom block. Older or repeated
+aim within the 400 ms freshness window restores only the native reader's three
+aim writes. The reader still consumes and applies all other state. Native-only
+records are unchanged; room changes clear the ordering table, and stale aim
+tracks accept a new baseline. Installation checks the native store instructions.
+
+The real-game reader test covers reordered aim, an intervening newer
+position-only record, a local pose change, the accumulator and native-only
+records. The native object reader at EDF+592130 reads the mask and directly
+calls slot 53, with no sequence check at that layer. This does not establish
+whether an earlier game dispatcher filters old records, or whether reordering
+caused the reported post-hit reversal. The live capture remains necessary.

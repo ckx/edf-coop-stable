@@ -502,6 +502,40 @@ void TestBlockedRequest() {
         }
         Check(worst < 0.1f, "a copy too fast on its own is held by the brake (" + std::to_string(worst) + " m)");
     }
+    // A moving copy comes to rest on a surface 5 cm beyond the sender. Prior braking credit must
+    // expire when the surface blocks it, and normal movement must resume when the constraint goes away.
+    for (float sign : {-1.0f, 1.0f}) {
+        NetPlayerParams p;
+        RemoteTrack track;
+        Vec3 copy{0, sign * 0.05f, 0};
+        float blockedAdd = 0.0f, blockedOwn = 0.0f;
+        for (int frame = 0; frame <= 420; ++frame) {
+            const double now = frame * 1000.0 / 60.0;
+            const bool moving = frame < 60 || frame >= 300;
+            const float distance = frame < 60 ? frame / 60.0f
+                                   : frame < 300 ? 1.0f : 1.0f + (frame - 300) / 60.0f;
+            if (frame % 6 == 0) {
+                PlayerSample sample;
+                sample.seq = static_cast<std::uint16_t>(frame / 6 + 1);
+                sample.senderMs = static_cast<std::uint32_t>(now);
+                sample.position.y = sign * distance;
+                sample.velocity.y = moving ? sign : 0.0f;
+                AcceptSample(track, sample, now, p);
+            }
+            const auto step = StepRemote(track, copy, now, p);
+            Check(!step.warp, "blocked transition does not warp");
+            if (frame >= 180 && frame < 300) {
+                blockedAdd = (std::max)(blockedAdd, Length(step.add));
+                blockedOwn = (std::max)(blockedOwn, Length(track.ownVelocity));
+            }
+            copy = copy + step.add + Vec3{0, moving ? sign / 60.0f : 0.0f, 0};
+            if (frame < 300) copy.y = sign * (std::max)(sign * copy.y, frame >= 59 ? 1.05f : 0.05f);
+        }
+        Check(blockedAdd < 0.02f && blockedOwn < 0.05f,
+              "a previously moving, now blocked copy loses fictitious braking velocity");
+        Check(std::fabs(sign * copy.y - (3.0f + 1.0f / 60)) < 0.05f,
+              "movement resumes after the blocked interval");
+    }
     // Called again within the same physics frame: nothing more is added and nothing is measured.
     {
         NetPlayerParams p;
