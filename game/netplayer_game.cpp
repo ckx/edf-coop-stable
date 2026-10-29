@@ -56,6 +56,9 @@ const std::vector<Check>& Checks() {
         {"native aim pitch store", 0x5921DA, {0xF3, 0x0F, 0x11, 0x86, 0x30, 0x12, 0x00, 0x00}},
         {"native aim yaw and accumulator", 0x5921EA, {0xF3, 0x0F, 0x11, 0x86, 0x34, 0x12, 0x00, 0x00,
                                                    0x44, 0x89, 0xB6, 0x48, 0x12, 0x00, 0x00}},
+        {"native player aim eligibility", 0x59FB30, {0x48, 0x8B, 0x87, 0x50, 0x15, 0x00, 0x00,
+                                                  0x48, 0x85, 0xC0, 0x74, 0x05, 0x39, 0x58, 0x08, 0x75, 0x7A,
+                                                  0x38, 0x9F, 0xE8, 0x02, 0x00, 0x00, 0x75, 0x72}},
         {"record position", 0x77AD03, {0x49, 0x8D, 0x90, 0x90, 0x00, 0x00, 0x00}},
         {"is player", 0x550890, {0x48, 0x83, 0xB9, 0x40, 0x03, 0x00, 0x00, 0x00, 0x75, 0x0D}},
         {"proxy matrix", kProxyMatrix, {0x40, 0x53, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0xDA, 0x48, 0x8B, 0x11}},
@@ -328,7 +331,14 @@ bool Sending(void* soldier) {
 template <int F>
 std::uint16_t MaskHook(void* soldier) {
     std::uint16_t mask = GameFn<MaskFn>(kOriginal[F][kMask])(soldier);
-    if (Sending(soldier)) mask = static_cast<std::uint16_t>(mask | kPlayerBlockBit);
+    if (Sending(soldier)) {
+        mask = static_cast<std::uint16_t>(mask | kPlayerBlockBit);
+        // Receivers can apply every third position block without ever seeing the native sixth-frame aim.
+        // Pair aim with each block, retaining EDF+59FB30..59FB49's vehicle and downed-player exclusions.
+        const auto vehicle = Get<void*>(soldier, 0x1550);
+        if ((!vehicle || Get<int>(vehicle, 8) == 0) && !Get<std::uint8_t>(soldier, 0x2E8))
+            mask = static_cast<std::uint16_t>(mask | 2);
+    }
     return mask;
 }
 
@@ -566,7 +576,8 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
     WatchMemberTexts({}, &ObservePlayerRoom);
     Log("PLAYER sync: hooks installed (%zu vtable slots%s). Players send position, velocity and time every %d sync "
         "frame(s); remote players with that data are extrapolated (up to %.0f ms) and converge in %.0f ms (warp above "
-        "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms",
+        "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms. "
+        "On-foot native aim accompanies every player block",
         Sites().size(), flush ? " + flush interval" : "", settings.sendIntervalFrames, params.maxExtrapolateMs,
         params.tauMs, params.snapDistance, params.feedForward * 100.0f, flush ? flushMs : 90);
     if (settings.diagnostics)

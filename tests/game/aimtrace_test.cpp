@@ -11,6 +11,7 @@
 
 #include "../../game/netplayer_game.h"
 #include "../../game/netplayer.h"
+#include "../../game/netfeature.h"
 #include "../../game/log.h"
 #include "native_runtime.h"
 
@@ -41,7 +42,7 @@ int main(int argc, char** argv) {
     const auto nativeWrite = reinterpret_cast<Record>(game + 0x59FDB0);
     std::array<void*, 100> table{};
     table[33] = reinterpret_cast<void*>(&IsPlayer);
-    alignas(16) std::array<unsigned char, 0x2100> sender{}, receiver{};
+    alignas(16) std::array<unsigned char, 0x2600> sender{}, receiver{};
     Put(sender.data(), 0, table.data());
     Put(receiver.data(), 0, table.data());
     Put(sender.data(), 0x128, std::uint8_t{2});
@@ -136,6 +137,49 @@ int main(int argc, char** argv) {
           "frame observation distinguishes current facing from the most recently received aim");
     Check(text.find("event=receive-aim-stale") != std::string::npos,
           "diagnostics identify a rejected paired aim update");
+    // The live capture delivers one of every three written position blocks. Keep that selection
+    // explicit: this exercises the native mask/writer/reader, not the still-unproven thinning path.
+    SetNetFeatureForTest(NetFeature::PlayerSync, true);
+    using Mask = std::uint16_t (*)(void*);
+    for (const auto slot : {0x17D27B8, 0x17D12D8}) {
+        const auto maskFor = Get<Mask>(game, slot);
+        for (int phase = 0; phase < 3; ++phase) {
+            for (std::uint32_t frame = 2; frame <= 36; frame += 2) {
+                Put(sender.data(), 0x1820, frame);
+                Put(sender.data(), 0x1234, static_cast<float>(frame) * 0.025f);
+                Put(sender.data(), 0x1230, -static_cast<float>(frame) * 0.01f);
+                // Other native fields have no fixture here; retain the real mask's aim and custom block.
+                const auto mask = static_cast<std::uint16_t>(maskFor(sender.data()) & (2 | kPlayerBlockBit));
+                alignas(16) std::array<unsigned char, 0x600> record{};
+                write(sender.data(), record.data(), mask);
+                if ((frame / 2) % 3 != static_cast<unsigned>(phase)) continue;
+                deliver(record, mask);
+                Check(std::fabs(Get<float>(receiver.data(), 0x1234) -
+                                (Get<float>(sender.data(), 0x1234) + 0.5f)) < 0.01f &&
+                      std::fabs(Get<float>(receiver.data(), 0x1230) - Get<float>(sender.data(), 0x1230)) < 0.01f,
+                      "every delivered on-foot position block refreshes aim in each thinning phase");
+            }
+        }
+        Put(sender.data(), 0x1820, std::uint32_t{2});
+        const auto nativeMask = reinterpret_cast<Mask>(game + (slot == 0x17D12D8 ? 0x582DF0 : 0x59FB10));
+        SetNetFeatureForTest(NetFeature::PlayerSync, false);
+        Check(maskFor(sender.data()) == nativeMask(sender.data()), "closed feature gate preserves the native mask");
+        SetNetFeatureForTest(NetFeature::PlayerSync, true);
+        Put(sender.data(), 0x128, std::uint8_t{1});
+        Check(maskFor(sender.data()) == nativeMask(sender.data()), "remote players keep the native mask");
+        Put(sender.data(), 0x128, std::uint8_t{2});
+        Put(sender.data(), 0x2E8, std::uint8_t{1});
+        Check((maskFor(sender.data()) & 2) == 0, "downed players do not acquire on-foot aim records");
+        Put(sender.data(), 0x2E8, std::uint8_t{0});
+        std::array<int, 4> vehicle{};
+        vehicle[2] = 1;
+        Put(sender.data(), 0x1550, vehicle.data());
+        Check((maskFor(sender.data()) & 2) == 0, "seated players do not acquire on-foot aim records");
+        vehicle[2] = 0;
+        Check((maskFor(sender.data()) & 2) != 0, "expired vehicle reference allows fresh on-foot aim");
+        Put(sender.data(), 0x1550, static_cast<void*>(nullptr));
+    }
+    ClearNetFeatureForTest();
     LogClose();
     std::printf("%d failures\n", failures);
     return failures ? 1 : 0;

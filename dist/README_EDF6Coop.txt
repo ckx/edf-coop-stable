@@ -34,6 +34,8 @@ Player motion diagnostics are on by default. A correction of at least 0.25 m, a 
 
 The online room screen shows the running mod version in the bottom right, even with SpectateWhenDown=0.
 
+From 3.6.3, an on-foot player sends the game's native aim fields with every player-sync position block. This prevents position updates from continuing without aim when only some written records reach the receiver. Vehicle and downed-player aim rules stay with the game. The sending player must update for this change to help others see their aim. Settings, the player-block format and netcode protocol are unchanged; live verification of the reported shot-direction desync is still needed.
+
 Player aim diagnostics record selected native aim records at send and receive, then remote facing after network update and while spectating. Match user, seq and senderMs within the same room across logs. The sent yaw includes the logged offset; received yaw already includes it. These are read-only observations, not a fix for the reported facing reversal after a hit. Keep [Diagnostics] Player=1 on all machines for a capture. If the reversal happens, note the time and watched player, then collect everyone's logs after closing the game.
 
 [Watching a teammate while down]
