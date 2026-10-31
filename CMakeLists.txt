@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 # EDF6Coop.dll: the transport part (src/) and the game part (game/) as one plugin.
-project(EDF6Coop VERSION 3.6.3 LANGUAGES CXX RC)
+project(EDF6Coop VERSION 3.7.0 LANGUAGES CXX RC)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 # Every file sees <windows.h> the same way.
@@ -47,7 +47,7 @@ target_link_libraries(TransportPart PUBLIC TransportCore)
 
 # The game part: patches to EDF.dll, the spectator camera, the netcode version gate, player sync, hit authority, the log.
 set(GAME_CORE log code midhook patches identity crashlog coop peertimeout weaponguard lobbytexts netfeature hitauth
-    hitauthgame netplayer netplayer_game radar spectate lasertrace)
+    hitauthgame netplayer netplayer_game radar spectate lasertrace chatfilter)
 list(TRANSFORM GAME_CORE PREPEND "game/")
 list(TRANSFORM GAME_CORE APPEND ".cpp")
 add_library(GameCore STATIC ${GAME_CORE})

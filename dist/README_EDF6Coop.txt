@@ -16,6 +16,9 @@ armor, invulnerability and friendly-fire rules can prevent HP loss. Versions 3.0
 and play together; everyone in the room needs protocol 4 to use these fixes.
 On your own radar, pickups take the color of their type: health white, armor and weapons green
 ([Display] RadarItemColors=0 keeps them all green).
+The game's chat word filter (listed words become *) is off: nothing you type, send or receive is filtered. A player
+without the plugin still sees filtered text, since their own game filters what it receives. [Chat] WordFilter=1
+keeps the game's filter.
 It plays the game's own rooms of up to four players. The bigger rooms (Player MOD), room screen, weapon pages,
 room weapon files, armor copy and automatic updates of 2.5.0 and earlier are gone; whoever needs them stays
 on 2.5.0. Everyone in a room should run the same version: a host refuses a player whose netcode protocol

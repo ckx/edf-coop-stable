@@ -10,6 +10,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 
+#include "chatfilter.h"
 #include "code.h"
 #include "coop.h"
 #include "crashlog.h"
@@ -162,8 +163,8 @@ bool Apply(unsigned char* base, bool keepRoom) {
     return true;
 }
 
-// The game part: the weapon guard, KeepRoomOnPeerTimeout, radar item colors, the spectator camera, the netcode version
-// gate, hit authority, player sync and the crash log. Returns whether it runs; when it does not, it has changed nothing and started nothing.
+// The game part: the weapon guard, KeepRoomOnPeerTimeout, radar item colors, the chat word filter, the spectator camera,
+// the netcode version gate, hit authority, player sync and the crash log. Returns whether it runs; when it does not, it has changed nothing and started nothing.
 bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     const auto base = reinterpret_cast<unsigned char*>(game);
     if (!SupportedImage(base)) {
@@ -186,6 +187,9 @@ bool LoadGame(HMODULE game, const wchar_t* iniPath) {
     // Only this machine's radar: nothing goes over the network.
     if (GetPrivateProfileIntW(L"Display", L"RadarItemColors", 1, iniPath) != 0) InstallRadarItemColors(base);
     else Log("RadarItemColors=0: every pickup on the radar stays green");
+    // The game's chat word filter (chatfilter.h): off unless the INI keeps it.
+    if (GetPrivateProfileIntW(L"Chat", L"WordFilter", 0, iniPath) == 0) InstallChatFilterOff(base);
+    else Log("WordFilter=1: the game's chat word filter stays on");
     spectate::InstallLobbyVersion(base);
     if (GetPrivateProfileIntW(L"Display", L"SpectateWhenDown", 1, iniPath) != 0) spectate::Install(base);
     else Log("SpectateWhenDown=0: a downed player keeps their own camera");

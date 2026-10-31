@@ -20,6 +20,7 @@
 #include "PluginAPI.h"
 #pragma warning(pop)
 
+#include "../../game/chatfilter.h"
 #include "../../game/hitauthgame.h"
 #include "../../game/midhook.h"
 #include "../../game/patches.h"
@@ -171,7 +172,7 @@ int wmain(int argc, wchar_t** argv) {
     }
     if (mode == L"off" || mode == L"optionsoff" || mode == L"on") {
         const char* ini = mode == L"off"           ? "[DirectNet]\r\nEnabled=0\r\n"
-                          : mode == L"optionsoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n[Display]\r\nRadarItemColors=0\r\nSpectateWhenDown=0\r\n"
+                          : mode == L"optionsoff" ? "[Resilience]\r\nKeepRoomOnPeerTimeout=0\r\n[Display]\r\nRadarItemColors=0\r\nSpectateWhenDown=0\r\n[Chat]\r\nWordFilter=1\r\n"
                                                    : "[Log]\r\nCrashLog=1\r\n";
         std::ofstream(std::filesystem::path(iniPath), std::ios::binary | std::ios::trunc) << ini;
     }
@@ -194,6 +195,8 @@ int wmain(int argc, wchar_t** argv) {
         for (const auto& hook : HitAuthorityHooks()) Check(SiteUntouched(base, hook), "Enabled=0 leaves the hit sites alone");
         Check(CallTargets(base + RadarItemDotsCall().rva, RadarItemDotsCall().rva, RadarItemDotsCall().target),
               "Enabled=0 leaves the radar alone");
+        for (const auto& call : ChatFilterCalls())
+            Check(CallTargets(base + call.rva, call.rva, call.target), "Enabled=0 leaves the chat word filter alone");
         const CallSite update = spectate::UpdateCall();
         Check(CallTargets(base + update.rva, update.rva, update.target), "Enabled=0 leaves System::Update alone");
         const spectate::VtableSlot visible = spectate::HudVisibleSlot();
@@ -221,6 +224,12 @@ int wmain(int argc, wchar_t** argv) {
         const CallSite radar = RadarItemDotsCall();
         Check(keepRoom ? RedirectedInto(base + radar.rva, plugin) : CallTargets(base + radar.rva, radar.rva, radar.target),
               radar.name);
+        // The chat word filter's calls hold the plugin's no-match bytes while WordFilter=0, else the game's calls.
+        for (const auto& call : ChatFilterCalls())
+            Check(keepRoom ? std::memcmp(base + call.rva, kChatFilterNoMatch, sizeof(kChatFilterNoMatch)) == 0
+                           : CallTargets(base + call.rva, call.rva, call.target),
+                  call.name);
+        Check(Contains(log, keepRoom ? "WordFilter=0:" : "WordFilter=1:"), "WordFilter is logged");
         const CallSite update = spectate::UpdateCall();
         Check(keepRoom ? RedirectedInto(base + update.rva, plugin)
                        : CallTargets(base + update.rva, update.rva, update.target),
@@ -237,7 +246,7 @@ int wmain(int argc, wchar_t** argv) {
             const std::string written = ReadIniText(iniPath);
             Check(ReadText(iniPath).rfind("\xFF\xFE", 0) == 0, "the INI is written as UTF-16LE with a BOM");
             Check(Contains(written, "[DirectNet]") && Contains(written, "[Resilience]") && Contains(written, "[Netcode]") &&
-                      Contains(written, "[Display]") &&
+                      Contains(written, "[Display]") && Contains(written, "[Chat]") &&
                       Contains(written, "[Log]") && Contains(written, "CrashDump=0\r\n"),
                   "a missing INI is written with every section, crash dumps off");
         }

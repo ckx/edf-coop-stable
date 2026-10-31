@@ -134,6 +134,14 @@ const IniEntry kIniEntries[] = {
       "オンラインでダウン中、救助されるまで立っている味方を見る。カメラは自分の視点操作で回す。自分の画面だけ。1 オン / 0 元の動作",
       "Online, while you are down, watch a standing teammate until you are revived; turn the camera with your own\n"
       "  look controls. Only your own screen. 1 on / 0 original"}},
+    {"[Chat]", {}},
+    {"WordFilter=0",
+     {"游戏自带的聊天屏蔽词过滤（把表里的词换成 *）。0 关：输入、发送、接收都不过滤 / 1 原版。\n"
+      "  没装本插件的玩家看到的仍是过滤后的文字：他们的游戏在接收时过滤",
+      "ゲーム内蔵のチャット NG ワードフィルター（該当する語を * に置き換える）。0 オフ：入力・送信・受信とも / 1 元の動作。\n"
+      "  このプラグインがない人にはフィルター後の文字が見える：受信側のゲームが置き換える",
+      "The game's chat word filter (listed words become *). 0 off: nothing you type, send or receive is filtered /\n"
+      "  1 original. A player without this plugin still sees filtered text: their game filters what it receives"}},
     {"[Diagnostics]", {}},
     {"Laser=1",
      {"记录 Closed Laser M2 所用激光类型的限量诊断，不改变开火或伤害。0 关闭",

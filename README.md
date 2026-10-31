@@ -133,6 +133,7 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
 | `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; W picks the next one, E switches between the free and the locked camera (see above). Only your own screen. `0` = your own camera (original) |
+| `[Chat] WordFilter` | `0` | The game's chat word filter, which turns listed words into `*`. `0` = off: nothing you type, send or receive is filtered. `1` = the game's filter (original). A player without the plugin still sees filtered text, since their own game filters what it receives |
 | `[Diagnostics] Laser` | `1` | Bounded Closed Laser M2 diagnostics. `0` disables them. Also observes other weapons using `LaserBullet01`; firing and damage are unchanged |
 | `[Diagnostics] Player` | `1` | Player movement and aim traces for jitter and facing diagnosis. `0` disables them |
 | `[Log] CrashLog` | `1` | Write crash details (address, call stack) to the log |
@@ -189,6 +190,7 @@ Every player publishes its netcode protocol and the features it has on (`EDF6NET
 ### Other fixes
 
 - **Weapon guard**: another player's weapon that your weapon table does not have (their mod adds weapons) no longer crashes your game in the room or at mission start. In the room it shows as an empty slot; in a mission it becomes your own weapon of that class and slot.
+- **Chat word filter off**: the game replaces listed words in chat with `*` when you confirm a message, when it sends one and when it receives one. The plugin turns all three off (`[Chat] WordFilter=1` keeps the game's filter). Only your own game changes: a player without the plugin still filters what they receive, and the word check of the room settings' free word is untouched.
 - **Crash log**: on a crash the log gets the address, the module and the call stack; `CrashDump=1` also writes a minidump.
 
 ## Troubleshooting
