@@ -144,6 +144,6 @@ read by 0x77AB00 into a single target, no sequence and no ring.
   copied in the plugin: carry aim (and the body yaw `+0x1244`, M) in the block,
   keep the enemy's ordering and freshness rules, and write the angles into the
   copy every frame from the slot 55 wrapper after the native update.
-- Not examined: how enemy bullets reach other machines (`WeaponBulletSyncTable`,
-  0x17B...) against the owner messages of player bullets (review 2026-10-26,
+- Not examined: how enemy bullets reach other machines (`net::WeaponBulletSyncTable`
+  exists in the RTTI, not traced) against the owner messages of player bullets (review 2026-10-26,
   finding 3). The enemy pose model says nothing about projectiles.
