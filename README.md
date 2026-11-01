@@ -131,6 +131,8 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 | `PlayerSync` | `1` | Player positions carry velocity, so other players move smoother. Used only while everyone has it on |
 | `HitAuthority` | `1` | The shooter decides hits. Used only while everyone has it on |
 | `RejectMismatched` | `1` | As host, refuse players whose netcode protocol differs |
+| `[NetPlayer] DriveAim` | `1` | Other players' facing turns every frame toward their last received aim instead of jumping when a packet arrives. Only your own screen; runs while the room has `PlayerSync` on. `0` = original |
+| `AimTauMs` | `50` | Time constant of that turn, in milliseconds (10 to 1000): smaller follows sooner, larger is smoother |
 | `[Display] RadarItemColors` | `1` | Pickups on the radar take the color of their type: health white, armor and weapons green. Only your own screen. `0` = all green (original) |
 | `SpectateWhenDown` | `1` | Online, while you are down, watch a standing teammate until revived; W picks the next one, E switches between the free and the locked camera (see above). Only your own screen. `0` = your own camera (original) |
 | `[Chat] WordFilter` | `0` | The game's chat word filter, which turns listed words into `*`. `0` = off: nothing you type, send or receive is filtered. `1` = the game's filter (original). A player without the plugin still sees filtered text, since their own game filters what it receives |
@@ -142,6 +144,8 @@ Joiners try each address for 10 s, IPv4 before IPv6. If none answers they stay o
 Values outside the documented `LinkTimeoutMs` and `GraceSeconds` ranges produce a `CONFIG` warning and use their defaults.
 
 From 3.6.3, an on-foot player sends the game's native aim fields with every player-sync position block. This prevents position updates from continuing without aim when only some written records reach the receiver. Vehicle and downed-player aim rules stay with the game. The sending player must update for this change to help others see their aim. Settings, the player-block format and netcode protocol are unchanged; live verification of the reported shot-direction desync is still needed.
+
+From 3.8.0, other players' facing turns every frame toward their last received aim, with a 50 ms time constant, instead of jumping when a packet arrives. A change of more than 90 degrees is shown at once. Seated and downed players are left to the game, and so is a player whose aim has not arrived for 400 ms. Only your own screen changes, the spectator camera included, and senders from 3.0.1 on are driven. `[NetPlayer] DriveAim=0` turns it off; `AimTauMs` (default 50, 10 to 1000) sets the time constant. An INI from before 3.8.0 has no `[NetPlayer]` section and uses these defaults. Whether facing and shot direction follow in live play is not yet verified.
 
 Player aim diagnostics record selected native aim records at send and receive, then remote facing after network update and while spectating. Match user, seq and senderMs within the same room across logs. The sent yaw includes the logged offset; received yaw already includes it. These are read-only observations, not a fix for the reported facing reversal after a hit. Keep [Diagnostics] Player=1 on all machines for a capture. If the reversal happens, note the time and watched player, then collect everyone's logs after closing the game.
 
