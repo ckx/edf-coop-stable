@@ -79,14 +79,14 @@ Receiver, in the game (`game/netplayer_game.cpp`):
   simply keeps the native behaviour, and a sender on an older build (before
   3.6.3) gives sixth-frame aim, which is still driven, just with longer holds.
 
-Open point for Phase 1: `UpdateHook` runs inside `0x5750E0` (slot 55 is
-called at `0x575BBD`); the soldier update `0x572DF0` adds the input vector to
-the angles at `0x573BB0` and other state code writes them from a matrix
-(`0x587DAC`, `0x5705A5`). Whether those run before or after the network update
-in the same frame decides whether the per-frame write lands before the pose is
-built or one frame late, and whether it needs to be repeated from the
-`System::Update` hook the spectator camera already owns. One frame late is
-acceptable; a write that the pose build never sees is not.
+Phase 1 (2026-10-31, `docs/net-re/player.md`, "frame order of the aim writers"):
+`System::Update` runs slot 4 of every soldier (input, body follow, matrices) before
+slot 5 (0x5750E0, slot 55 at `0x575BBD`) and slot 9 (states) in each iteration. A value
+written in `UpdateHook` reaches the next iteration's slot 4, where the body angles
+`+0x1240/+0x1244` are pulled 30 percent toward the aim and the pose is built: one
+step late, no repeat from the `System::Update` hook. The write site is slot 55.
+Between writes slot 4 adds one step of the replicated look stick (`+0xD60`, slot 54) to
+the aim, which the next write replaces.
 
 ## Phases
 

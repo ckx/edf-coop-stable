@@ -210,3 +210,113 @@ stops, reversals and uneven-frame tests remain. With the same review probe,
 the inferred speed falls below 0.01 m/s by frame 120, and the correction settles
 to the 5 cm position error's 0.0094 m share rather than reaching the 1 m cap.
 The support surface is simulated; live jitter improvement remains unverified.
+
+## 2026-10-31 frame order of the aim writers
+
+Issue #12014, board "Remote aim driven every frame" (`docs/aim/plan.md`). Static reading
+with `tools/pe.py`; H unless marked. The question: where in a frame does the plugin's
+`UpdateHook` (slot 55) run against the game's writers of the aim angles `+0x1230/+0x1234`,
+and does a value written there reach that frame's pose.
+
+### The update passes
+
+`Application::Update` 0x705530 calls `Core::Update` 0x12ADB30 at 0x7056AE and
+`System::Update` 0x1198DA0 at 0x705715. `System::Update` runs its passes inside one loop
+(0x1198FD0 to 0x119972E); in every iteration it calls, for each registered object, slot 4
+(`+0x20`) over the list at `System+0x468` (0x1199261), later slot 5 (`+0x28`, with the frame
+time in rdx) over `System+0x448` (0x119940D), then slot 9 (`+0x48`) over `System+0xCC0`
+(0x119950B). The soldier vtables fill these slots as:
+
+| Slot | Function | Role |
+| --- | --- | --- |
+| 4 | 0x572DF0 (`HumanBase`, also `People`; the class tables hold `jmp` thunks 0x550A30, 0x563DA0, 0x580520) | input, state, body angles, matrices |
+| 5 | 0x59ABB0 (`SoldierBase`; `HumanBase` has 0x5750E0, `People` 0x5863B0 which tail-jumps to it; class overrides 0x550C30, 0x563DC0, 0x567780, 0x5811F0 call 0x59ABB0) | network, physics request |
+| 9 | 0x598FD0 (`SoldierBase`, calls the state machine 0x572810 at 0x5992C5 and 0x599306) | states |
+
+So within one iteration, slot 4 of every soldier runs before slot 5 of any, and slot 9 after
+both. The caller of `Room::Update` 0x7370D0 (the sync loop 0x75D2E0 and the native reader)
+is a virtual call through the thunk 0x735D14 and is not traced here.
+
+### Slot 4: input, body follow, pose
+
+In order, for a remote copy:
+
+1. 0x572EB0 calls slot 54 (0x595F50) when 0x7748F0 says the object is networked. For a
+   remote player copy (`+0x128` bit 0, slot 33 true) that is not downed (`+0x2E8`), not
+   `+0x1180`, and holds no live vehicle control (`+0x1550` with `+8` nonzero), the tail at
+   0x595FFA writes the replicated sticks into the copy's own input fields: `+0xD50` = the
+   move stick `+0x1E00` rotated by the body yaw `+0x1244`, `+0xD60` = the look stick
+   `+0x1E10` (0x5960FF to 0x596113). A 30-frame watchdog `+0x1E20` zeroes both sticks when
+   no record refreshed them (0x595F9B to 0x595FC5). The native reader 0x592180 stores the
+   sticks from mask bit 0x10 (0x592207 to 0x59224D), which the writer 0x59FDB0 sends on
+   every record (0x59FE3C).
+2. 0x573BA8 to 0x573BCF: unless `+0x5D0` bit 1 is set, the aim vector `+0x1230` (pitch,
+   yaw) gains the look stick `+0xD60`. The online Ranger states (0x552040, 0x5528C0) set
+   `+0x5D0` to 0x29E, skip this add and apply their own at 0x552493 and 0x552A02. Pitch and
+   yaw are then clamped to the limits `+0x1250/+0x1254` when those are non-negative
+   (0x573BD6 to 0x573C28) and pitch to plus or minus pi/2 (0x573C37 to 0x573C5A); a
+   non-finite vector is reset (0x650E0, 0x573C60).
+3. 0x573CBA to 0x573D6F: the body angles `+0x1240` (pitch) and `+0x1244` (yaw) move toward
+   the aim angles by the fraction `+0x1260` per step (0.3 by default, set at 0x573CA8 when
+   NaN; 0x578680 rescales the aim offset when it changes). This is the only per-frame
+   writer of the body angles besides the recoil add in slot 5.
+4. 0x573D88 onward: the proxy matrix (0x11AF6F0) and 0x6DD700 give the position; `+0x90` is
+   written at 0x573E84. 0x573EBD to 0x573F77 then build `+0x5E0` as Ry(body yaw) and
+   `+0x60` as Ry(body yaw) times Rx(body pitch) (sin and cos 0x12DA8B8/0x12DA8B2, the yaw
+   rotation 0x4CD10). The pose and the forward row `+0x80` come from the body angles.
+
+So the pose uses the body angles, which follow the aim angles with a 30 percent pull per
+step (a tenth left after about 7 steps, 120 ms at 60 Hz). The aim angles themselves are
+what the native reader stores, what the writer sends and what the spectator camera reads.
+
+### Slot 5: network update and physics request
+
+0x59ABB0 calls 0x5750E0 first (0x59AC29). There the vehicle branch (0x5751B9) copies the seat
+matrix over `+0x60` to `+0x9F`; on foot, slot 55 (`NetworkUpdate` 0x596130, wrapped by
+`UpdateHook`) is called at 0x575BBD when 0x7748F0 is true, then the proxy preparation
+0x11B9890 at 0x575BCA takes the velocity request (`+0x840`, the 2026-10-17 note). Back in
+0x59ABB0 the recoil entries (0x150 bytes each at `+0x1980`) are added to both the aim and the
+body vectors (0x59B0AB to 0x59B109), pitch is clamped (0x59B110 to 0x59B156), and 0x578680 is
+called at 0x59B2F6.
+
+### Slot 9: states
+
+Angle writers in the state machine, which runs after slot 5 of the same iteration: vehicle
+exit 0x5701B0 (pitch 0 at 0x5705A5, yaw from the matrix forward at 0x5705B8, body = aim at
+0x5705CE); the state 0x587A10 (aim from a matrix at 0x587D9E/0x587DAC, installed by 0x586420,
+0x587122 and 0x587278); the reset 0x57ADF0 (slot 79 0x5A1660) which zeroes `+0x1230` to
+`+0x125F`. Each is a one-off on a transition, not a per-frame write.
+
+### Conclusion
+
+A value written to `+0x1230/+0x1234` inside slot 55 is not seen by that iteration's pose:
+slot 4 built the matrices earlier in the same iteration. The next iteration's slot 4 reads
+it, adds one step of the replicated look stick, pulls the body angles 30 percent toward it
+and builds the matrices. One step late, which the plan accepts; a repeat from the
+`System::Update` hook would gain nothing, since slot 4 of the same iteration has already
+run by the time slot 5 does, and before slot 4 the value would be the same as after the
+previous slot 5. The native reader's write is seen by the first slot 4 after it.
+
+Established against the plan's evidence limits: a remote copy's aim angles are changed by
+local code between records. Slot 54 feeds the last replicated look stick into `+0xD60` every
+step and 0x573BB0 adds it to the aim, so a copy keeps turning at the sender's last stick
+rate until the next record (up to 30 frames). The 2026-10-22 capture's observation that the
+copy's angles changed only at the sync cadence is not reconciled with this reading; a mouse
+sender may leave the look stick at zero (L).
+
+Decisions for Phase 3 (the write):
+
+- Write site: slot 55, `UpdateHook`, after the original `NetworkUpdate`, for every remote
+  copy with a fresh aim track, whether or not its position track is fresh.
+- No write while the copy holds a live vehicle control (`+0x1550`, `+8` nonzero) or is downed
+  (`+0x2E8`): the sender sends no aim there, and slot 54 stops feeding the sticks on the same
+  conditions. A track that just went seated writes nothing instead of holding stale angles.
+- `ReadHook` restores the last written angles after the native reader has stored a newer
+  target into a driven copy, so a record's arrival changes the target and not the angles.
+  `+0x1248` stays what the reader left. A refused (older) record restores all three pre-read
+  values as 3.6.2 does.
+- The one step of look stick that slot 4 adds between writes is left alone: it is one frame
+  of the sender's turn rate and the next write replaces it. 0x573BB0 is not patched.
+- The spectator camera reads the aim angles, so it sees the full effect. The pose already
+  had the body follow between it and the 100 ms steps, so its gain is smaller; Phase 5
+  judges both.
