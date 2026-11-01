@@ -38,7 +38,7 @@ are (`docs/spectate/plan.md`).
 - The locked spectator camera smooths the watched copy's angles itself with a
   50 ms time constant (`game/spectate.cpp`, 3.6.1), because the copy's angles
   step every 100 ms. Once the copy is driven, that smoothing is doubled.
-- `PlayerAimGameCode` (`tests/game/netplayer_test.cpp`) runs the installed
+- `PlayerAimGameCode` (`tests/game/aimtrace_test.cpp`) runs the installed
   hooks against the real native serializer and reader.
 
 ## Design

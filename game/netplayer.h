@@ -11,7 +11,7 @@
 // extrapolates the last sample to "now", and drives the copy toward that estimate itself: the copy's own motion is
 // measured and replaced by the sender's velocity (feed-forward), and the remaining error converges with a time
 // constant, on all three axes. Everything here is plain arithmetic on values, so it is unit tested
-// (tests/netplayer_test.cpp); netplayer_game.cpp is the part that reads and writes the game's objects.
+// (tests/game/netplayer_test.cpp); netplayer_game.cpp is the part that reads and writes the game's objects.
 #include <cstddef>
 #include <cstdint>
 #include <numbers>
