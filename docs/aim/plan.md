@@ -1,6 +1,8 @@
 # Remote aim driven every frame
 
+Board: #12002 (plan-2)
 Project: mods
+
 
 Remote player copies show a wrong facing now and then, and their shots leave in
 that facing. Enemies never do. `docs/net-re/enemy.md` (2026-10-31) reads why: a
