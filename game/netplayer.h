@@ -14,6 +14,7 @@
 // (tests/netplayer_test.cpp); netplayer_game.cpp is the part that reads and writes the game's objects.
 #include <cstddef>
 #include <cstdint>
+#include <numbers>
 
 namespace multislot {
 
@@ -86,6 +87,25 @@ struct NetPlayerParams {
     float deadband = 0.03f;            // m: errors below this are left alone
     float staleMs = 400.0f;            // without samples for this long, the game's own correction takes over
     float clockCreepMs = 0.5f;         // per sample: how fast the latency baseline follows a slower path
+    float aimTauMs = 50.0f;            // aim time constant, the locked spectator camera's (game/spectate.cpp)
+    float aimSnapRadians = std::numbers::pi_v<float> / 2;  // aim further off is written outright: an about-turn
+                                                           // is shown, not slurred
+};
+
+// The native aim (pitch +0x1230, yaw +0x1234) of one remote player, sequenced by the block it came with
+// (docs/aim/plan.md). Its freshness is its own: a sender before 3.6.3 pairs aim with only every sixth record, so the
+// aim can be stale while the position is fresh. A position restart (AcceptSample) keeps it, so the order rule is
+// the one 3.6.2's AimOrder applied, whatever the position track does.
+struct RemoteAim {
+    bool have = false;
+    std::uint16_t seq = 0;
+    float pitch = 0.0f, yaw = 0.0f;  // the target, as the native reader stored it
+    double receivedMs = 0.0;         // local time the last aim arrived
+    // What StepAim wrote last. Clearing `written` makes the next step write the target outright, for a copy whose
+    // angles were not driven in between.
+    bool written = false;
+    float writtenPitch = 0.0f, writtenYaw = 0.0f;
+    double lastStepMs = 0.0;
 };
 
 // Receiver state of one remote player.
@@ -106,6 +126,7 @@ struct RemoteTrack {
     Vec3 movedWindow[kStepWindow], addedWindow[kStepWindow];
     double elapsedWindow[kStepWindow]{};
     std::size_t windowNext = 0, windowCount = 0;
+    RemoteAim aim;
 };
 constexpr float kMaxOwnSpeed = 150.0f;  // m/s: faster is the game moving the copy itself (a snapshot), not motion
 constexpr double kMinStepMs = 4.0;      // a step called again sooner than this follows no physics step: nothing added
@@ -130,6 +151,20 @@ struct RemoteStep {
 RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetPlayerParams& params);
 // The copy was not driven this frame (the game's correction was off, a ride, a warp): measure afresh.
 void ResetSteps(RemoteTrack& track);
+
+// False for nonfinite angles and for aim not newer than the last accepted one within staleMs (reordered or
+// repeated). A stale aim track starts over with any sample.
+bool AcceptAim(RemoteTrack& track, std::uint16_t seq, float pitch, float yaw, double localMs,
+               const NetPlayerParams& params);
+bool AimFresh(const RemoteTrack& track, double nowMs, const NetPlayerParams& params);
+struct AimStep {
+    bool write = false;  // false: the aim is stale, leave the native angles alone
+    float pitch = 0.0f, yaw = 0.0f;
+    bool snapped = false;  // the target was written outright
+};
+// The angles to write this frame: the target approached from the last written angles with aimTauMs, yaw the short
+// way round. No extrapolation: the block carries no turn rate.
+AimStep StepAim(RemoteTrack& track, double nowMs, const NetPlayerParams& params);
 
 // The packet controller flush interval EDF6Coop sets ([NetPlayer] FlushIntervalMs), or 0 to leave the game's 90 ms.
 // It is written into the controller's constructor, so it is decided once at start, by this machine's own switch:

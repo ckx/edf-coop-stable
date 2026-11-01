@@ -667,6 +667,172 @@ void TestFeature() {
     ClearNetFeatureForTest();
 }
 
+// Remote aim (StepAim): the native angles, ordered by the block's sequence and written every frame.
+void TestAim() {
+    const float pi = 3.14159265f, twoPi = 2.0f * pi, frame = 1000.0f / 60.0f;
+    const auto arc = [twoPi](float a, float b) { return std::remainder(a - b, twoPi); };  // a - b the short way
+    NetPlayerParams p;
+
+    {  // a step of 1 rad at 60 Hz: exp(-7 * 16.7 / 50) = 0.097 left after 7 frames, 0.135 after 6
+        RemoteTrack t;
+        AcceptAim(t, 1, 0.0f, 0.0f, 0.0, p);
+        const AimStep first = StepAim(t, 0.0, p);
+        Check(first.write && first.snapped && first.pitch == 0.0f && first.yaw == 0.0f,
+              "a new aim track writes its target outright");
+        AcceptAim(t, 2, 0.5f, 1.0f, frame, p);
+        float previous = 0.0f, remaining[8]{};
+        bool monotonic = true;
+        for (int i = 1; i <= 7; ++i) {
+            const AimStep step = StepAim(t, frame * i, p);
+            monotonic = monotonic && !step.snapped && step.yaw > previous && step.yaw < 1.0f &&
+                        Near(step.pitch, 0.5f * step.yaw, 1e-5f);
+            previous = step.yaw;
+            remaining[i] = 1.0f - step.yaw;
+        }
+        Check(monotonic, "aim approaches a step from below, pitch and yaw together, without snapping");
+        Check(remaining[6] > 0.1f && remaining[7] <= 0.1f,
+              "a tenth of an aim step is left after 2.3 aimTauMs, not sooner (" + std::to_string(remaining[6]) +
+                  ", " + std::to_string(remaining[7]) + ")");
+    }
+
+    {  // across +-pi, and the unbounded yaw of the captures (18.8 and -11.4 rad): the short way, never the long one
+        struct Turn {
+            float from, to;
+        };
+        for (const Turn turn : {Turn{3.1f, -3.1f}, Turn{-3.1f, 3.1f}, Turn{18.8f, -11.4f}}) {
+            RemoteTrack t;
+            AcceptAim(t, 1, 0.0f, turn.from, 0.0, p);
+            StepAim(t, 0.0, p);
+            AcceptAim(t, 2, 0.0f, turn.to, frame, p);
+            const float total = arc(turn.to, turn.from);
+            float written = turn.from;
+            bool shortWay = true;
+            for (int i = 1; i <= 30; ++i) {
+                if (i % 6 == 0) AcceptAim(t, static_cast<std::uint16_t>(2 + i), 0.0f, turn.to, frame * i, p);
+                const AimStep step = StepAim(t, frame * i, p);
+                const float moved = arc(step.yaw, written);
+                shortWay = shortWay && !step.snapped && moved * total > 0.0f && std::fabs(moved) <= std::fabs(total);
+                written = step.yaw;
+            }
+            Check(shortWay, "yaw " + std::to_string(turn.from) + " to " + std::to_string(turn.to) +
+                                " turns the short way (" + std::to_string(total) + " rad) at every step");
+            Check(std::fabs(arc(written, turn.to)) < 1e-3f && std::fabs(written - turn.to) < 1e-3f,
+                  "yaw " + std::to_string(turn.from) + " to " + std::to_string(turn.to) +
+                      " converges on the target's own value");
+        }
+    }
+
+    {  // the snap radius, pi/2, measured the short way for yaw and absolutely for pitch
+        struct Change {
+            float pitchFrom, yawFrom, pitch, yaw;
+            bool snap;
+            const char* label;
+        };
+        for (const Change c : {Change{0.0f, 0.0f, 0.0f, 1.6f, true, "yaw 1.6 rad off snaps"},
+                               Change{0.0f, 0.0f, 0.0f, 1.5f, false, "yaw 1.5 rad off is smoothed"},
+                               Change{0.0f, 3.0f, 0.0f, -1.7f, true, "yaw 1.58 rad off across pi snaps"},
+                               Change{0.0f, 3.0f, 0.0f, -1.8f, false, "yaw 1.48 rad off across pi is smoothed"},
+                               Change{-0.8f, 0.0f, 0.8f, 0.0f, true, "pitch 1.6 rad off snaps"},
+                               Change{-0.7f, 0.0f, 0.8f, 0.0f, false, "pitch 1.5 rad off is smoothed"}}) {
+            RemoteTrack t;
+            AcceptAim(t, 1, c.pitchFrom, c.yawFrom, 0.0, p);
+            StepAim(t, 0.0, p);
+            AcceptAim(t, 2, c.pitch, c.yaw, frame, p);
+            const AimStep step = StepAim(t, frame, p);
+            const bool atTarget = step.pitch == c.pitch && step.yaw == c.yaw;
+            Check(step.write && step.snapped == c.snap && atTarget == c.snap, c.label);
+        }
+    }
+
+    {  // order within the freshness window, and a restart after it
+        RemoteTrack t;
+        Check(!AimFresh(t, 0.0, p) && !StepAim(t, 0.0, p).write, "no aim yet: nothing written");
+        Check(AcceptAim(t, 10, 0.1f, 0.2f, 1000.0, p), "first aim");
+        Check(!AcceptAim(t, 10, 0.3f, 0.4f, 1010.0, p), "repeated aim sequence refused");
+        Check(!AcceptAim(t, 9, 0.3f, 0.4f, 1020.0, p), "older aim sequence refused");
+        Check(t.aim.pitch == 0.1f && t.aim.yaw == 0.2f && t.aim.receivedMs == 1000.0,
+              "a refused aim leaves the target and its arrival time");
+        Check(AcceptAim(t, 0x7000, 0.1f, 0.2f, 1030.0, p) && AcceptAim(t, 0xE000, 0.1f, 0.2f, 1035.0, p) &&
+                  AcceptAim(t, 0, 0.1f, 0.2f, 1040.0, p) && !AcceptAim(t, 0xFFFE, 0.1f, 0.2f, 1040.0, p),
+              "aim sequence order across the 16-bit wrap");
+        StepAim(t, 1040.0, p);
+        Check(AimFresh(t, 1040.0 + p.staleMs, p) && !AimFresh(t, 1041.0 + p.staleMs, p), "aim freshness window");
+        Check(!StepAim(t, 1041.0 + p.staleMs, p).write, "a stale aim track writes nothing");
+        Check(AcceptAim(t, 5, 0.1f, 0.25f, 1500.0, p), "an older aim sequence after a stale gap starts over");
+        const AimStep resumed = StepAim(t, 1500.0, p);
+        Check(resumed.snapped && resumed.yaw == 0.25f, "aim resumed after a stale gap is written outright");
+    }
+
+    {  // the aim's freshness is its own: position every frame, aim (a sender before 3.6.3) rarely
+        RemoteTrack t;
+        PlayerSample s;
+        s.seq = 1;
+        AcceptSample(t, s, 0.0, p);
+        AcceptAim(t, 1, 0.0f, 0.0f, 0.0, p);
+        s.seq = 2;
+        AcceptSample(t, s, 300.0, p);
+        Check(TrackFresh(t, 500.0, p) && !AimFresh(t, 500.0, p) && !StepAim(t, 500.0, p).write,
+              "aim goes stale while the position is fresh");
+        // Aim with a block the position refused as reordered, then a position restart: the aim order still holds.
+        RemoteTrack u;
+        s.seq = 20;
+        AcceptSample(u, s, 0.0, p);
+        s.seq = 19;
+        Check(!AcceptSample(u, s, 300.0, p) && AcceptAim(u, 19, 0.0f, 0.5f, 300.0, p),
+              "aim accepted apart from position");
+        StepAim(u, 300.0, p);
+        s.seq = 18;
+        Check(AcceptSample(u, s, 450.0, p) && !AcceptAim(u, 18, 0.0f, 0.4f, 450.0, p) && u.aim.yaw == 0.5f,
+              "a position restart keeps the aim order");
+        Check(!StepAim(u, 460.0, p).snapped, "a position restart keeps the written aim");
+    }
+
+    {  // uneven frames, a 369 ms hitch among them: no overshoot, and the hitch advances only the 50 ms clamp
+        RemoteTrack t;
+        AcceptAim(t, 1, 0.0f, 0.0f, 0.0, p);
+        StepAim(t, 0.0, p);
+        double now = 0.0;
+        float written = 0.0f, hitchKept = 0.0f;
+        bool steady = true;
+        for (int i = 1; i <= 40; ++i) {
+            const double gap = i == 12 ? 369.0 : (i % 3 == 0 ? 45.0 : 16.0);
+            now += gap;
+            AcceptAim(t, static_cast<std::uint16_t>(1 + i), 0.0f, 1.2f, now, p);
+            const AimStep step = StepAim(t, now, p);
+            steady = steady && !step.snapped && step.yaw >= written && step.yaw <= 1.2f;
+            if (i == 12) hitchKept = (1.2f - step.yaw) / (1.2f - written);
+            written = step.yaw;
+        }
+        Check(steady, "uneven frames approach the aim without overshoot or snap");
+        Check(Near(hitchKept, std::exp(-50.0f / p.aimTauMs), 1e-4f),
+              "a 369 ms hitch advances the aim by the 50 ms clamp (" + std::to_string(hitchKept) + " left)");
+        Check(1.2f - written < 1e-4f, "uneven frames converge on the aim");
+    }
+
+    {  // called again within kMinStepMs: the previous angles, measured from the step that wrote them
+        RemoteTrack t;
+        AcceptAim(t, 1, 0.0f, 0.0f, 0.0, p);
+        StepAim(t, 0.0, p);
+        AcceptAim(t, 2, 0.4f, 1.0f, 16.0, p);
+        const AimStep step = StepAim(t, 16.0, p);
+        const AimStep again = StepAim(t, 19.0, p);
+        Check(again.write && !again.snapped && again.pitch == step.pitch && again.yaw == step.yaw,
+              "a step within 4 ms writes the previous angles again");
+        const AimStep next = StepAim(t, 22.0, p);
+        Check(next.yaw > step.yaw, "a step 6 ms after the last real one advances (the repeat did not move the clock)");
+    }
+
+    {
+        RemoteTrack t;
+        Check(!AcceptAim(t, 1, std::nanf(""), 0.0f, 0.0, p) && !AcceptAim(t, 1, 0.0f, INFINITY, 0.0, p) &&
+                  !AimFresh(t, 0.0, p),
+              "nonfinite aim refused on a new track");
+        AcceptAim(t, 1, 0.1f, 0.2f, 0.0, p);
+        Check(!AcceptAim(t, 2, 0.0f, -INFINITY, 10.0, p) && t.aim.seq == 1 && t.aim.yaw == 0.2f,
+              "nonfinite aim refused without moving the order or the target");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -682,6 +848,7 @@ int main() {
     TestReviewFixes();
     TestRoomTrackCapacity();
     TestFeature();
+    TestAim();
     std::printf("%d checks, %d failed\n", checks, failures);
     return failures ? 1 : 0;
 }

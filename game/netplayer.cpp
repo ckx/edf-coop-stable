@@ -142,7 +142,9 @@ bool AcceptSample(RemoteTrack& track, const PlayerSample& sample, double localMs
     const bool fresh = TrackFresh(track, localMs, params);
     if (fresh && static_cast<std::int16_t>(sample.seq - track.last.seq) <= 0) return false;
     if (!fresh) {
+        const RemoteAim aim = track.aim;
         track = RemoteTrack{};
+        track.aim = aim;
         track.senderTime = sample.senderMs;
         track.offset = localMs - track.senderTime;
     } else {
@@ -256,6 +258,58 @@ RemoteStep StepRemote(RemoteTrack& track, Vec3 current, double nowMs, const NetP
     track.lastPosition = current;
     track.lastAdded = step.add;
     track.lastStepMs = nowMs;
+    return step;
+}
+
+bool AimFresh(const RemoteTrack& track, double nowMs, const NetPlayerParams& params) {
+    return track.aim.have && nowMs - track.aim.receivedMs <= params.staleMs;
+}
+
+bool AcceptAim(RemoteTrack& track, std::uint16_t seq, float pitch, float yaw, double localMs,
+               const NetPlayerParams& params) {
+    if (!std::isfinite(pitch) || !std::isfinite(yaw)) return false;
+    RemoteAim& aim = track.aim;
+    if (!AimFresh(track, localMs, params))
+        aim = {};
+    else if (static_cast<std::int16_t>(seq - aim.seq) <= 0)
+        return false;
+    aim.have = true;
+    aim.seq = seq;
+    aim.pitch = pitch;
+    aim.yaw = yaw;
+    aim.receivedMs = localMs;
+    return true;
+}
+
+AimStep StepAim(RemoteTrack& track, double nowMs, const NetPlayerParams& params) {
+    AimStep step;
+    RemoteAim& aim = track.aim;
+    if (!AimFresh(track, nowMs, params)) return step;
+    step.write = true;
+    const double elapsedMs = nowMs - aim.lastStepMs;
+    // The game yaw is unbounded (18.8 and -11.4 rad in the captures). The written yaw stays near the target's own
+    // representation, as the native reader would have left it, and approaches it by the shortest arc.
+    const float pitchError = aim.pitch - aim.writtenPitch;
+    const float yawError = std::remainder(aim.yaw - aim.writtenYaw, 2.0f * std::numbers::pi_v<float>);
+    if (aim.written && elapsedMs < kMinStepMs) {  // called again in the same frame: the same angles, no second step
+        step.pitch = aim.writtenPitch;
+        step.yaw = aim.writtenYaw;
+        return step;
+    }
+    if (!aim.written || std::fabs(pitchError) > params.aimSnapRadians || std::fabs(yawError) > params.aimSnapRadians) {
+        step.snapped = true;
+        aim.writtenPitch = aim.pitch;
+        aim.writtenYaw = aim.yaw;
+    } else {
+        const double dtMs = std::clamp(elapsedMs, kMinStepMs, 50.0);
+        const float keep = std::exp(-static_cast<float>(dtMs) / (std::max)(params.aimTauMs, 1.0f));
+        aim.writtenPitch = aim.pitch - pitchError * keep;
+        aim.writtenYaw = aim.yaw - yawError * keep;
+    }
+    aim.written = true;
+    aim.lastStepMs = nowMs;
+    step.pitch = aim.writtenPitch;
+    step.yaw = aim.writtenYaw;
     return step;
 }
 
