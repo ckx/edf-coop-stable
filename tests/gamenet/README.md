@@ -23,7 +23,8 @@ The game's code, unchanged except for EDF6Coop's own patches and hooks:
 - the P2P handshake that connects the members (`p2p::Manager`, `Link`), the packet controller
   (`packet::ControllerImpl`), the per-peer datagrams, their AES-CTR encryption (keyed by the lobby id, as in the
   game), decryption, de-duplication, acknowledgement and resend, and the dispatch of records to subscribers;
-- the game's serializers, which the player sync test writes and reads player records with;
+- the game's serializers, which the player sync test writes and reads player records with, and the game's player record
+  writer and reader (EDF+59FDB0, 592180) inside EDF6Coop's installed hooks;
 - every EOS call goes through EDF.dll's import table, so EDF6Coop's wrappers (the reliable upgrade, the
   disconnect hold, the lobby marker, the netcode version gate, the direct link) see the same calls as in the game.
 
@@ -43,7 +44,7 @@ publishes its netcode protocol (`EDF6NET_PROTO`), which EDF6Coop does on its own
 |---|---|---|
 | `GameNet_room` | 2 | the room is created and joined through the game's imports; every member publishes its netcode protocol |
 | `GameNet_link` | 2 | the game's handshake connects them; a record sent through the game's controller arrives; no plaintext crosses EOS |
-| `GameNet_playersync` | 2 | player records with EDF6Coop's player block, written and read with the game's serializers, arrive exactly |
+| `GameNet_playersync` | 2 | player records with EDF6Coop's player block, written and read with the game's serializers, arrive exactly; then each player turns: its aim records go through the installed write hook, and the other machine's installed read and update hooks move a remote copy's angles to each aim, smoothed, an about-turn at once (the original `NetworkUpdate` stubbed by a `ret`) |
 | `GameNet_versiongate` | 3 | the third machine runs another netcode protocol: the host refuses it, and the other two run the netcode features once it is gone |
 | `GameNet_netstats` | 3 | every machine sends state records (unreliable to the game) and reliable ones while each machine loses its first 40 unreliable packets of 80 bytes or more: the state datagrams go to EOS reliably, nothing is lost, every record arrives |
 | `GameNet_netstatsunreliable` | 3 | the same with `[Sync] ReliableGameTraffic=0`: packets are lost and state records never arrive, which is what `netstats` guards against |

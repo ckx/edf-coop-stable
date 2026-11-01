@@ -1,8 +1,11 @@
 // What each machine of a game-code test does once EDF.dll and EDF6Coop.dll are in (machine.cpp). Every EOS call
 // goes through EDF.dll's import table, as the game makes it, so EDF6Coop's wrappers see it as they do in the game.
 #include <algorithm>
+#include <array>
+#include <chrono>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <functional>
 #include <vector>
@@ -360,6 +363,168 @@ bool SameSample(const multislot::PlayerSample& a, const multislot::PlayerSample&
            !std::memcmp(&a.velocity, &b.velocity, sizeof(a.velocity));
 }
 
+// Remote aim driven every frame (netplayer_game.cpp, docs/aim/plan.md). Each machine's player turns: aim record i
+// carries AimFor(i), written after the record mask by the installed slot 52 hook around the game's writer
+// (EDF+59FDB0), with the mask the installed slot 92 hook gives. The other machine reads each record through the
+// installed slot 53 hook into a remote player copy (vtable slot 33 true, +0x128 bit 0; its sync control stays
+// disabled, so the position drive returns before the Havok proxy) and steps the copy with the installed slot 55
+// hook every frame, on the hooks' own clock. The original NetworkUpdate (EDF+596130) needs the proxy and the game's
+// managers, which no machine builds: its first byte becomes a ret, as in PlayerAimGameCode.
+constexpr std::uint32_t kAimType = 0x2702;  // a record type nothing in the game subscribes to
+constexpr int kAimRecords = 10;
+constexpr std::uintptr_t kMaskSlot = 0x17D27B8, kWriteSlot = 0x17D2678, kReadSlot = 0x17D2680, kUpdateSlot = 0x17D2690;
+constexpr std::uintptr_t kNativeRead = 0x592180, kNetworkUpdate = 0x596130;
+// The copy's angles must come within kAimTolerance of the record's aim, which the game sends as half floats (at most
+// 0.001 rad off below 4 rad). A 0.3 rad step at AimTauMs 50 gets there after about 2.7 tau, 140 ms; the check allows
+// kAimSettleMs, inside the 400 ms after which a track is stale and no longer driven.
+constexpr float kAimTolerance = 0.02f, kHalfFloat = 0.002f;
+constexpr double kAimSettleMs = 300.0;
+
+struct Aim {
+    float pitch, yaw;
+};
+// 0.3 rad of yaw and -0.03 of pitch per record, inside the hooks' snap radius (pi/2); the last turns back 2.7 rad,
+// which the hooks write outright.
+Aim AimFor(int i) { return i == kAimRecords - 1 ? Aim{0.3f, 0.2f} : Aim{0.2f - 0.03f * i, 0.5f + 0.3f * i}; }
+
+bool IsPlayerStub(void*) { return true; }
+struct alignas(16) Soldier {
+    std::uint8_t bytes[0x2600]{};
+};
+
+// Sends this machine's aim records and drives the copy of the other's; returns whether every check passed.
+// `arrived`: the other machine's aim records as the controller delivered them. Each is read once the copy has
+// settled on the one before, so what is checked is the hooks' stepping, not the delivery's timing.
+bool RemoteAim(const Machine& machine, const Transport& transport, const Room& room,
+               std::deque<std::vector<std::uint8_t>>& arrived) {
+    using namespace multislot;
+    using Clock = std::chrono::steady_clock;
+    using Record = void (*)(void*, void*, std::uint16_t);
+    const Game& game = transport.game();
+    const auto slot = [&](std::uintptr_t rva) { return *machine.At<void* const*>(rva); };
+    if (slot(kReadSlot) == machine.At<void*>(kNativeRead)) {
+        Result("aim", "the player sync hooks are not installed in this process");
+        return false;
+    }
+    const auto mask = reinterpret_cast<std::uint16_t (*)(void*)>(slot(kMaskSlot));
+    const auto write = reinterpret_cast<Record>(slot(kWriteSlot));
+    const auto read = reinterpret_cast<Record>(slot(kReadSlot));
+    const auto update = reinterpret_cast<void (*)(void*)>(slot(kUpdateSlot));
+    auto* const original = machine.At<std::uint8_t*>(kNetworkUpdate);
+    DWORD protect = 0;
+    if (!VirtualProtect(original, 1, PAGE_EXECUTE_READWRITE, &protect)) return false;
+    *original = 0xC3;
+    VirtualProtect(original, 1, protect, &protect);
+    FlushInstructionCache(GetCurrentProcess(), original, 1);
+
+    static std::array<void*, 100> vtable{};
+    vtable[33] = Address(&IsPlayerStub);
+    Soldier player, copy;
+    for (Soldier* s : {&player, &copy}) {
+        Put(s->bytes, 0, vtable.data());
+        Put(s->bytes, 0x2F8, 100.0f);  // health: a change from none selects the first record for the aim diagnostic
+    }
+    Put(player.bytes, 0x128, std::uint8_t{2});
+    Put(copy.bytes, 0x128, std::uint8_t{1});
+    // The hooks add the block and drive the copy only with the room's PlayerSync feature on.
+    const auto paired = static_cast<std::uint16_t>(2 | kPlayerBlockBit);
+    if (!TickUntil(machine, 10000, [&] {
+            transport.Tick();
+            return (mask(player.bytes) & paired) == paired;
+        })) {
+        Result("aim", "the slot 92 hook never paired aim with the block (PlayerSync off in the room?)");
+        return false;
+    }
+    const auto pitchNow = [&] { return Get<float>(copy.bytes, 0x1230); };
+    const auto yawNow = [&] { return Get<float>(copy.bytes, 0x1234); };
+    const auto yawOff = [](float yaw, float target) { return std::fabs(std::remainder(yaw - target, 6.2831853f)); };
+    int sent = 0, applied = 0, frame = 0, good = 0, bad = 0, current = -1, stepped = 0;
+    bool settled = true, ok = true;
+    float before = 0.0f, firstFrame = 0.0f;
+    double slowestMs = 0.0;
+    Clock::time_point readAt;
+    const auto finish = [&](bool passed, double ms) {
+        settled = true;
+        passed = passed && ok;
+        (passed ? good : bad)++;
+        slowestMs = (std::max)(slowestMs, ms);
+        Result("aim-record", "#%d target (%.3f, %.3f): copy at (%.4f, %.4f) after %d frames, %.0f ms; first frame left "
+               "%.0f%% of the yaw step %s", current, AimFor(current).pitch, AimFor(current).yaw, pitchNow(), yawNow(),
+               stepped, ms, before > 0.0f ? 100.0f * firstFrame / before : 0.0f, passed ? "ok" : "BAD");
+    };
+    const bool done = TickUntil(machine, 20000, [&] {
+        transport.Tick();
+        // Every second frame, as the hooks send (SendIntervalFrames=2).
+        if (sent < kAimRecords && frame++ % 2 == 0) {
+            const Aim aim = AimFor(sent);
+            Put(player.bytes, 0x1230, aim.pitch);
+            Put(player.bytes, 0x1234, aim.yaw);
+            const std::uint16_t bits = static_cast<std::uint16_t>(mask(player.bytes) & paired);
+            GameSerialize writer{};
+            game.Fn<void* (*)(void*)>(kSerializeWriter)(writer.bytes);
+            game.Fn<bool (*)(void*, std::int16_t)>(kWriteInt16)(writer.bytes, static_cast<std::int16_t>(bits));
+            write(player.bytes, writer.bytes, bits);
+            std::uint64_t length = 0;
+            std::memcpy(&length, writer.bytes + kSerializeEnd, sizeof(length));
+            std::vector<std::uint8_t> record(1 + length);
+            record[0] = static_cast<std::uint8_t>(sent);
+            std::memcpy(record.data() + 1, writer.bytes + kSerializeData, length);
+            for (const auto& member : room.members)
+                if (member != machine.user && (bits != paired ||
+                                               !transport.SendReliable(member, kAimType, record.data(), record.size())))
+                    Result("send", "aim record %d to %s refused (mask %X)", sent, member.c_str(), bits);
+            ++sent;
+        }
+        if (current >= 0) {
+            update(copy.bytes);
+            ++stepped;
+            const Aim target = AimFor(current);
+            const float pitchError = std::fabs(pitchNow() - target.pitch), yawError = yawOff(yawNow(), target.yaw);
+            const double ms = std::chrono::duration<double, std::milli>(Clock::now() - readAt).count();
+            // A new or restarted track, and an about-turn, are written outright on the first frame; otherwise one
+            // frame of 16 to 50 ms (the hooks' step cap) leaves exp(-dt / 50 ms), 37 to 73 percent, of the step.
+            if (stepped == 1) {
+                firstFrame = yawError;
+                const bool snap = current == 0 || current == kAimRecords - 1;
+                if (snap ? pitchError > kHalfFloat || yawError > kHalfFloat
+                         : !(yawError > 0.3f * before && yawError < 0.9f * before)) {
+                    ok = false;
+                    Result("aim", "record %d: the first frame %s", current, snap ? "did not write the aim outright"
+                                                                                 : "did not step part of the way");
+                }
+            }
+            if (!settled && pitchError < kAimTolerance && yawError < kAimTolerance) finish(true, ms);
+            if (!settled && ms > kAimSettleMs) finish(false, ms);
+        }
+        if (settled && !arrived.empty()) {
+            const std::vector<std::uint8_t> record = std::move(arrived.front());
+            arrived.pop_front();
+            current = record[0];
+            ok = current == applied++ && record.size() > 1;
+            GameSerialize reader{};
+            game.Fn<void* (*)(void*, const void*, std::size_t)>(kSerializeReader)(reader.bytes, record.data() + 1,
+                                                                                  record.size() - 1);
+            const std::uint16_t bits = game.Fn<std::uint16_t (*)(void*)>(kReadInt16)(reader.bytes);
+            const float pitch = pitchNow(), yaw = yawNow();
+            read(copy.bytes, reader.bytes, bits);
+            readAt = Clock::now();
+            ok = ok && bits == paired && Get<std::uint64_t>(reader.bytes, kSerializeReadPos) == record.size() - 1;
+            // Once driven, a record changes the copy's target and not its angles. That the hook kept them shows it
+            // decoded the block and took the aim as newer.
+            if (current > 0 && (pitchNow() != pitch || yawNow() != yaw)) {
+                ok = false;
+                Result("aim", "record %d moved a driven copy's angles on arrival", current);
+            }
+            before = yawOff(yawNow(), AimFor(current).yaw);
+            stepped = 0;
+            settled = false;
+        }
+        return applied == kAimRecords && settled;
+    });
+    Result("aim-records", "%d ok %d bad, slowest %.0f ms", good, bad, slowestMs);
+    return done && bad == 0;
+}
+
 int PlayerSync(Machine& machine, bool host) {
     using namespace multislot;
     Room room;
@@ -403,8 +568,10 @@ int PlayerSync(Machine& machine, bool host) {
         Result("player-record", "from %d #%d %s; the game's half-float position is off by %.3f m", from, i,
                ok ? "ok" : "MISMATCH", halfError);
     };
+    std::deque<std::vector<std::uint8_t>> aims;
     const auto listen = [&] {
         transport.Subscribe(kPlayerType, onRecord);
+        transport.Subscribe(kAimType, [&](int, const std::uint8_t* data, std::size_t size) { aims.emplace_back(data, data + size); });
         return true;
     };
     if (!Connect(machine, room, transport, listen)) return 1;
@@ -435,12 +602,13 @@ int PlayerSync(Machine& machine, bool host) {
         transport.Tick();
         return good + bad >= kPlayerRecords;
     });
+    Result("player-records", "%d ok %d bad", good, bad);
+    const bool aimed = RemoteAim(machine, transport, room, aims);
     TickUntil(machine, 1500, [&] {
         transport.Tick();
         return false;
     });
-    Result("player-records", "%d ok %d bad", good, bad);
-    return all && bad == 0 ? 0 : 1;
+    return all && bad == 0 && aimed ? 0 : 1;
 }
 
 }  // namespace

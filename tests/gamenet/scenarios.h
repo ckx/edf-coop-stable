@@ -119,6 +119,15 @@ inline void CheckPlayerSync(const std::vector<Spawned>& machines, const gamenet:
               machine.user + " installed the player sync hooks against EDF.dll");
         Check(Result(machine, "player-records") == "8 ok 0 bad",
               machine.user + " read every player record back exactly (" + Result(machine, "player-records") + ")");
+        const std::string aim = Result(machine, "aim-records");
+        Check(aim.rfind("10 ok 0 bad", 0) == 0, machine.user + "'s copy of the other player followed its aim (" + aim + ")");
+        // The PLAYER sync summary comes every 30 s; the aim diagnostic's update record says what a frame wrote.
+        bool driven = false;
+        for (std::size_t at = machine.text.find("PLAYER aim event=update "); at != std::string::npos && !driven;
+             at = machine.text.find("PLAYER aim event=update ", at + 1))
+            driven = machine.text.substr(at, machine.text.find('\n', at) - at).find(" driven=1") != std::string::npos;
+        Check(driven, machine.user + "'s log shows an aim frame driven by the update hook");
+        Check(machine.text.find("event=receive-aim-stale") == std::string::npos, machine.user + " took every aim record as newer");
     }
 }
 
