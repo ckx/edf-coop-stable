@@ -13,6 +13,7 @@
 #include "../../game/netplayer.h"
 #include "../../game/netfeature.h"
 #include "../../game/log.h"
+#include "../../game/code.h"
 #include "native_runtime.h"
 
 using namespace multislot;
@@ -179,6 +180,92 @@ int main(int argc, char** argv) {
         Check((maskFor(sender.data()) & 2) != 0, "expired vehicle reference allows fresh on-foot aim");
         Put(sender.data(), 0x1550, static_cast<void*>(nullptr));
     }
+
+    // The per-frame aim write: the installed slot-55 hook on the receiver, with the hooks' clock stepped by the test.
+    // The original NetworkUpdate (EDF+596130) needs the Havok proxy and the game's managers, which this fixture does
+    // not build, and the hook calls it by address: its first byte becomes a ret, the hook itself is unchanged. The
+    // receiver's sync control stays disabled, so the position drive returns before the proxy.
+    const unsigned char ret = 0xC3;
+    Check(WriteCode(game + 0x596130, &ret, 1), "stub the original NetworkUpdate");
+    using Update = void (*)(void*);
+    const auto update = Get<Update>(game, 0x17D2690);
+    const auto frame = [&] {
+        AdvancePlayerSyncClockForTest(1000.0 / 60);
+        update(receiver.data());
+    };
+    const auto sendAim = [&](float pitch, float yaw) {  // received yaw = yaw + the sender's 0.5 offset
+        Put(sender.data(), 0x1230, pitch);
+        Put(sender.data(), 0x1234, yaw);
+        alignas(16) std::array<unsigned char, 0x600> record{};
+        write(sender.data(), record.data(), 2 | kPlayerBlockBit);
+        deliver(record, 2 | kPlayerBlockBit);
+    };
+    const auto pitchNow = [&] { return Get<float>(receiver.data(), 0x1230); };
+    const auto yawNow = [&] { return Get<float>(receiver.data(), 0x1234); };
+    sendAim(0.1f, 0.0f);
+    frame();
+    Check(std::fabs(yawNow() - 0.5f) < 0.01f && std::fabs(pitchNow() - 0.1f) < 0.01f,
+          "the first driven frame writes the received aim outright");
+    const float pitch0 = pitchNow(), yaw0 = yawNow();
+    Put(receiver.data(), 0x1248, 3.0f);
+    sendAim(-0.3f, 1.0f);  // 0.4 and 1.0 rad away, inside the snap radius
+    Check(pitchNow() == pitch0 && yawNow() == yaw0, "a record for a driven copy changes its target, not its angles");
+    Check(Get<float>(receiver.data(), 0x1248) == 0, "a driven record leaves the native reader's cleared accumulator");
+    frame();
+    Check(yawNow() > yaw0 + 0.1f && yawNow() < 1.5f - 0.5f && pitchNow() < pitch0 && pitchNow() > -0.3f + 0.2f,
+          "one frame moves the angles part of the way to the target, neither standing nor snapping");
+    for (int i = 1; i < 7; ++i) frame();  // 117 ms, about 2.3 AimTauMs
+    Check(std::fabs(yawNow() - 1.5f) < 0.105f && std::fabs(pitchNow() + 0.3f) < 0.045f,
+          "a driven copy converges within a tenth of the step after about 2.3 AimTauMs");
+    const float held = yawNow();
+    Put(receiver.data(), 0x1234, held + 0.3f);
+    frame();
+    Check(yawNow() >= held && yawNow() <= 1.505f, "a local change of a driven copy's yaw is replaced on the next frame");
+
+    std::array<int, 4> seat{};
+    seat[2] = 1;
+    Put(receiver.data(), 0x1550, seat.data());
+    sendAim(0.0f, 0.2f);  // target (0, 0.7)
+    const float seatedYaw = yawNow();
+    frame();
+    frame();
+    Check(yawNow() == seatedYaw, "a copy with a live vehicle control is not written");
+    seat[2] = 0;
+    frame();
+    Check(std::fabs(yawNow() - 0.7f) < 0.01f && std::fabs(pitchNow()) < 0.01f,
+          "a copy whose vehicle control expired writes the target outright, not smoothed from the seated angle");
+    Put(receiver.data(), 0x1550, static_cast<void*>(nullptr));
+    Put(receiver.data(), 0x2E8, std::uint8_t{1});
+    Put(receiver.data(), 0x1234, 2.5f);
+    frame();
+    Check(yawNow() == 2.5f, "a downed copy is not written");
+    Put(receiver.data(), 0x2E8, std::uint8_t{0});
+
+    AdvancePlayerSyncClockForTest(450.0);  // past the 400 ms freshness window
+    Put(receiver.data(), 0x1230, 0.2f);
+    Put(receiver.data(), 0x1234, 2.0f);
+    frame();
+    Check(pitchNow() == 0.2f && yawNow() == 2.0f, "a stale aim track leaves the copy's angles to the game");
+    Put(receiver.data(), 0x2F8, 90.0f);  // a health change selects the record for the diagnostic
+    sendAim(0.05f, -1.0f);               // target (0.05, -0.5)
+    Check(std::fabs(yawNow() + 0.5f) < 0.01f, "the first record after a stale track stands as the native reader wrote it");
+    const float restartedPitch = pitchNow(), restartedYaw = yawNow();
+    frame();
+    Check(pitchNow() == restartedPitch && yawNow() == restartedYaw, "a restarted aim track writes its target outright");
+
+    SetDriveAimForTest(false);
+    sendAim(0.0f, 0.5f);
+    Check(std::fabs(yawNow() - 1.0f) < 0.01f, "with DriveAim=0 a record writes the copy's angles natively");
+    Put(receiver.data(), 0x1234, 1.25f);
+    frame();
+    Check(yawNow() == 1.25f, "with DriveAim=0 the update hook leaves the angles alone");
+    SetDriveAimForTest(true);
+    LogFlush();
+    std::ifstream driveFile("aimtrace-test.log", std::ios::binary);
+    const std::string driveLog{std::istreambuf_iterator<char>(driveFile), std::istreambuf_iterator<char>()};
+    char expected[64];
+    std::snprintf(expected, sizeof(expected), "written=(%.5f,%.5f) driven=1", restartedPitch, restartedYaw);
+    Check(driveLog.find(expected) != std::string::npos, "the update record shows the angles written that frame");
     ClearNetFeatureForTest();
     LogClose();
     std::printf("%d failures\n", failures);

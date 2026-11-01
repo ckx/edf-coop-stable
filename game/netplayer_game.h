@@ -6,7 +6,8 @@
 //   slot 52 (write)        appends the block after the record's own fields;
 //   slot 53 (read)         reads it when the bit is there and keeps the sample for that remote copy;
 //   slot 55 (NetworkUpdate) for a remote copy with fresh samples: turns the game's own correction off for the
-//                          frame and drives the copy itself (extrapolation, feed-forward, convergence).
+//                          frame and drives the copy itself (extrapolation, feed-forward, convergence); with fresh
+//                          paired aim on foot, writes the copy's aim angles toward the last received aim.
 // Plus one constant: the packet controller's 90 ms flush timer (EDF+12CB66C), FlushIntervalMs.
 //
 // A member that does not send the block keeps the game's own path on every machine: nothing changes for its copy.
@@ -22,6 +23,8 @@ struct PlayerSyncSettings {
     float maxExtrapolateMs = 350.0f;
     float snapDistance = 8.0f;
     float feedForward = 1.0f;
+    bool driveAim = true;  // [NetPlayer] DriveAim
+    float aimTauMs = 50.0f;
     bool diagnostics = true;
 };
 
@@ -38,5 +41,9 @@ struct PlayerSyncSlot {
     std::uint32_t target;  // what it points at in the game
 };
 constexpr std::uint32_t kFlushIntervalSite = 0x12CB66C;  // mov dword [r14+0x58], 90.0f (packet Controller ctor)
+
+// Tests only: the hooks' clock runs `ms` ahead from now on; DriveAim as given, whatever was installed.
+void AdvancePlayerSyncClockForTest(double ms);
+void SetDriveAimForTest(bool on);
 
 }  // namespace multislot

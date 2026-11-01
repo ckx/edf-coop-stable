@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <vector>
 
@@ -117,8 +118,10 @@ void Put(void* object, std::size_t offset, T value) {
     std::memcpy(static_cast<std::uint8_t*>(object) + offset, &value, sizeof(value));
 }
 
+double clockOffsetMs = 0.0;  // tests only (AdvancePlayerSyncClockForTest)
 double NowMs() {
-    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count() +
+           clockOffsetMs;
 }
 
 bool Remote(const void* soldier) { return (Get<std::uint8_t>(soldier, kNetFlags) & 1) != 0; }
@@ -134,12 +137,6 @@ Vec3 RecordPosition(const void* soldier) {
 SRWLOCK lock = SRWLOCK_INIT;
 PlayerTracks<SendTrack> sent;
 PlayerTracks<RemoteTrack> remotes;
-struct AimOrder {
-    std::uint16_t seq = 0;
-    double receivedMs = 0;
-    bool have = false;
-};
-PlayerTracks<AimOrder> aimOrder;
 struct MotionFrame {
     double now = 0.0;
     RemoteTrack before;
@@ -192,15 +189,16 @@ bool ObserveAim(void* soldier, AimObservation& out) {
     return true;
 }
 
-void LogAim(const char* event, void* soldier, const AimObservation& a, const AimTrace& trace, double now) {
+void LogAim(const char* event, void* soldier, const AimObservation& a, const AimTrace& trace, double now,
+            const char* extra = "") {
     char user[33]{};
     ProductUserIdText(reinterpret_cast<const void*>(a.user), user, sizeof(user));
     Log("PLAYER aim event=%s user=%s object=%p seq=%u senderMs=%u ageMs=%.1f "
         "pitch=%.5f yaw=%.5f offset=%.5f body=%.5f forward=(%.4f,%.4f,%.4f) hp=%.1f sync=%d vehicle=%d "
-        "received=(%.5f,%.5f)",
+        "received=(%.5f,%.5f)%s",
         event, user[0] ? user : "unknown", soldier, trace.seq, trace.senderMs, now - trace.receivedMs,
         a.pitch, a.yaw, a.offset, a.body, a.forward.x, a.forward.y, a.forward.z, a.hp,
-        a.sync ? 1 : 0, a.vehicle ? 1 : 0, trace.received.pitch, trace.received.yaw);
+        a.sync ? 1 : 0, a.vehicle ? 1 : 0, trace.received.pitch, trace.received.yaw, extra);
 }
 
 // Called under lock. Select the same sequence window at both ends, plus health transitions locally.
@@ -221,7 +219,8 @@ void TraceAimRecord(const char* event, void* soldier, const AimObservation& a, c
     }
 }
 
-void TraceAimUpdate(void* soldier, double now) {
+// `aim`: what UpdateHook wrote this frame, or with write false the angles it wrote last.
+void TraceAimUpdate(void* soldier, double now, const AimStep& aim) {
     if (!settings.diagnostics || aimFailed) return;
     AcquireSRWLockExclusive(&lock);
     AimTrace* t = aimTraces.Find(soldier, now, false);
@@ -230,7 +229,10 @@ void TraceAimUpdate(void* soldier, double now) {
         if (ObserveAim(soldier, a)) {
             const double delta = std::remainder(static_cast<double>(a.yaw) - t->received.yaw, 6.283185307179586);
             if (t->pending || (now - t->loggedMs >= 1000 && (a.hp != t->hp || std::fabs(delta) > 0.5))) {
-                LogAim("update", soldier, a, *t, now);
+                char written[64];
+                std::snprintf(written, sizeof(written), " written=(%.5f,%.5f) driven=%d", aim.pitch, aim.yaw,
+                              aim.write ? 1 : 0);
+                LogAim("update", soldier, a, *t, now, written);
                 t->loggedMs = now;
                 t->hp = a.hp;
             }
@@ -254,7 +256,6 @@ void ObservePlayerRoom(const LobbyView& view) {
         // Player addresses can be reused in another room or after a member leaves.
         sent = {};
         remotes = {};
-        aimOrder = {};
         motionTraces = {};
         aimTraces = {};
         lobby = view.lobbyId;
@@ -310,16 +311,24 @@ void TraceMotion(void* soldier, const MotionFrame& frame) {
 }
 
 struct Counters {
-    std::uint64_t sent = 0, received = 0, refused = 0, driven = 0, warps = 0;
+    std::uint64_t sent = 0, received = 0, refused = 0, driven = 0, warps = 0, aimDriven = 0, aimSnaps = 0;
     double loggedMs = 0.0;
 } counters;
 
 void LogCounters(double now) {
     if (now - counters.loggedMs < 30000.0) return;
     if (counters.loggedMs > 0.0 && (counters.sent || counters.received))
-        Log("PLAYER sync: %llu blocks sent, %llu received (%llu refused), %llu copy frames driven, %llu warps",
-            counters.sent, counters.received, counters.refused, counters.driven, counters.warps);
+        Log("PLAYER sync: %llu blocks sent, %llu received (%llu refused), %llu copy frames driven, %llu warps, "
+            "%llu aim frames driven (%llu snaps)",
+            counters.sent, counters.received, counters.refused, counters.driven, counters.warps, counters.aimDriven,
+            counters.aimSnaps);
     counters.loggedMs = now;
+}
+
+// The game's own rule for on-foot aim (EDF+59FB30..59FB49): no live vehicle control at +0x1550, not downed (+0x2E8).
+bool AimEligible(const void* soldier) {
+    const auto vehicle = Get<void*>(soldier, 0x1550);
+    return (!vehicle || Get<int>(vehicle, 8) == 0) && !Get<std::uint8_t>(soldier, 0x2E8);
 }
 
 bool Sending(void* soldier) {
@@ -334,10 +343,8 @@ std::uint16_t MaskHook(void* soldier) {
     if (Sending(soldier)) {
         mask = static_cast<std::uint16_t>(mask | kPlayerBlockBit);
         // Receivers can apply every third position block without ever seeing the native sixth-frame aim.
-        // Pair aim with each block, retaining EDF+59FB30..59FB49's vehicle and downed-player exclusions.
-        const auto vehicle = Get<void*>(soldier, 0x1550);
-        if ((!vehicle || Get<int>(vehicle, 8) == 0) && !Get<std::uint8_t>(soldier, 0x2E8))
-            mask = static_cast<std::uint16_t>(mask | 2);
+        // Pair aim with each block, retaining the native vehicle and downed-player exclusions.
+        if (AimEligible(soldier)) mask = static_cast<std::uint16_t>(mask | 2);
     }
     return mask;
 }
@@ -363,8 +370,8 @@ void WriteHook(void* soldier, void* writer, std::uint16_t mask) {
 template <int F>
 void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
     const bool pairedAim = Remote(soldier) && (mask & 2) && (mask & kPlayerBlockBit);
-    // The native reader must consume the whole record, including unrelated state. Only its three aim
-    // writes are undone if this record is older than the last paired aim, independently of position.
+    // The native reader must consume the whole record, including unrelated state; only its three aim writes
+    // (EDF+5921DA, +5921EA) are undone afterwards.
     const float pitch = pairedAim ? Get<float>(soldier, 0x1230) : 0.0f;
     const float yaw = pairedAim ? Get<float>(soldier, 0x1234) : 0.0f;
     const float accumulator = pairedAim ? Get<float>(soldier, 0x1248) : 0.0f;
@@ -384,21 +391,23 @@ void ReadHook(void* soldier, void* reader, std::uint16_t mask) {
         RemoteTrack* track = remotes.Find(soldier, now, true);
         const bool accepted = AcceptSample(*track, sample, now, params);
         counters.received += accepted ? 1 : 0;
+        // Observed before any undo, so the trace shows what the record carried.
+        AimObservation aim;
+        const bool observed = pairedAim && ObserveAim(soldier, aim);
         bool staleAim = false;
         if (pairedAim) {
-            AimOrder& order = *aimOrder.Find(soldier, now, true);
-            staleAim = order.have && now - order.receivedMs <= params.staleMs &&
-                       static_cast<std::int16_t>(sample.seq - order.seq) <= 0;
-            if (staleAim) {
+            // The target is what the native reader stored. An older or repeated aim undoes all three writes; for a
+            // copy UpdateHook drives, the record changes the target and not the angles, which the next update
+            // moves, and the reader's cleared accumulator stands.
+            staleAim = !AcceptAim(*track, sample.seq, Get<float>(soldier, 0x1230), Get<float>(soldier, 0x1234), now,
+                                  params);
+            if (staleAim || (settings.driveAim && track->aim.written)) {
                 Put(soldier, 0x1230, pitch);
                 Put(soldier, 0x1234, yaw);
-                Put(soldier, 0x1248, accumulator);
-            } else {
-                order = {sample.seq, now, true};
             }
+            if (staleAim) Put(soldier, 0x1248, accumulator);
         }
-        AimObservation aim;
-        if ((mask & 2) && ObserveAim(soldier, aim))
+        if (observed)
             TraceAimRecord(staleAim ? "receive-aim-stale" : accepted ? "receive" : "receive-stale",
                            soldier, aim, sample, now);
     }
@@ -422,16 +431,37 @@ void UpdateHook(void* soldier) {
     const bool drive = track && TrackFresh(*track, now, params);
     if (track && !drive) ResetSteps(*track);
     ReleaseSRWLockExclusive(&lock);
-    if (!drive) {
-        original(soldier);
-        TraceAimUpdate(soldier, now);
-        return;
+    if (drive) {
+        // The game's correction (EDF+77AD70) does nothing for a settled control without new data; our step
+        // replaces it.
+        Put<std::uint8_t>(soldier, kSyncSettled, 1);
+        Put<std::uint8_t>(soldier, kSyncNewData, 0);
     }
-    // The game's correction (EDF+77AD70) does nothing for a settled control without new data; our step replaces it.
-    Put<std::uint8_t>(soldier, kSyncSettled, 1);
-    Put<std::uint8_t>(soldier, kSyncNewData, 0);
     original(soldier);
-    TraceAimUpdate(soldier, now);
+
+    // The aim, whatever the position track does. Slot 4 of the next System::Update iteration reads it, adds one
+    // step of the replicated look stick and pulls the body angles toward it (docs/net-re/player.md, 2026-10-31).
+    AcquireSRWLockExclusive(&lock);
+    track = remotes.Find(soldier, now, false);
+    AimStep aim;
+    if (track && settings.driveAim) {
+        // Seated or downed, the sender pairs no aim and slot 54 stops feeding the copy's sticks.
+        if (AimEligible(soldier)) aim = StepAim(*track, now, params);
+        if (aim.write) {
+            Put(soldier, 0x1230, aim.pitch);
+            Put(soldier, 0x1234, aim.yaw);
+        } else {
+            // A drive that resumes after a seat, a knockdown or a stale gap starts from the target, not from here.
+            track->aim.written = false;
+            aim.pitch = track->aim.writtenPitch;
+            aim.yaw = track->aim.writtenYaw;
+        }
+        counters.aimDriven += aim.write ? 1 : 0;
+        counters.aimSnaps += aim.snapped ? 1 : 0;
+    }
+    ReleaseSRWLockExclusive(&lock);
+    TraceAimUpdate(soldier, now, aim);
+    if (!drive) return;
 
     AcquireSRWLockExclusive(&lock);
     track = remotes.Find(soldier, now, false);
@@ -487,6 +517,9 @@ int Clamped(UINT value, int low, int high) { return std::clamp(static_cast<int>(
 
 }  // namespace
 
+void AdvancePlayerSyncClockForTest(double ms) { clockOffsetMs += ms; }
+void SetDriveAimForTest(bool on) { settings.driveAim = on; }
+
 void TraceSpectatorAim(void* soldier, bool freeCamera) {
     if (!settings.diagnostics || aimFailed) return;
     const double now = NowMs();
@@ -512,6 +545,8 @@ PlayerSyncSettings ReadPlayerSyncSettings(const wchar_t* iniPath) {
     s.snapDistance = static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"SnapDistance", 8, iniPath), 1, 100));
     s.feedForward =
         static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"FeedForwardPercent", 100, iniPath), 0, 100)) / 100.0f;
+    s.driveAim = GetPrivateProfileIntW(L"NetPlayer", L"DriveAim", 1, iniPath) != 0;
+    s.aimTauMs = static_cast<float>(Clamped(GetPrivateProfileIntW(L"NetPlayer", L"AimTauMs", 50, iniPath), 10, 1000));
     return s;
 }
 
@@ -547,6 +582,7 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
     params.maxExtrapolateMs = wanted.maxExtrapolateMs;
     params.snapDistance = wanted.snapDistance;
     params.feedForward = wanted.feedForward;
+    params.aimTauMs = wanted.aimTauMs;
 
     struct Write {
         std::uint32_t rva;
@@ -577,9 +613,11 @@ bool InstallPlayerSync(unsigned char* base, const PlayerSyncSettings& wanted) {
     Log("PLAYER sync: hooks installed (%zu vtable slots%s). Players send position, velocity and time every %d sync "
         "frame(s); remote players with that data are extrapolated (up to %.0f ms) and converge in %.0f ms (warp above "
         "%.0f m, feed-forward %.0f%%); players without it keep the game's own sync. Packet flush every %d ms. "
-        "On-foot native aim accompanies every player block",
+        "On-foot native aim accompanies every player block; remote aim is %s (AimTauMs %.0f)",
         Sites().size(), flush ? " + flush interval" : "", settings.sendIntervalFrames, params.maxExtrapolateMs,
-        params.tauMs, params.snapDistance, params.feedForward * 100.0f, flush ? flushMs : 90);
+        params.tauMs, params.snapDistance, params.feedForward * 100.0f, flush ? flushMs : 90,
+        settings.driveAim ? "driven every frame toward the received aim" : "left to the game, DriveAim=0",
+        params.aimTauMs);
     if (settings.diagnostics)
         Log("PLAYER aim diagnostics ON: paired native aim records, post-update and spectator facing; match user, "
             "seq and senderMs within the same room. send yaw includes offset on the wire");
